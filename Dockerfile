@@ -1,9 +1,9 @@
-ï»¿# Build stage
-FROM rust:1.83-slim as builder
+# Build stage
+FROM rust:1.84-slim as builder
 
 WORKDIR /app
 
-# 1C1G ä¼˜åŒ–: é™åˆ¶å¹¶å‘æ„å»º
+# 1C1G ÓÅ»¯: ÏŞÖÆ²¢·¢¹¹½¨
 ENV CARGO_BUILD_JOBS=1
 
 # Install dependencies
