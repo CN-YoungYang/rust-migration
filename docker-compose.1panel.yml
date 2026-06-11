@@ -1,0 +1,45 @@
+﻿# 1Panel 专用 docker-compose.yml
+# 在 1Panel 中直接粘贴使用
+
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: ai-hub-rust
+    ports:
+      - "3000:3000"
+    environment:
+      # 必填: 运行 openssl rand -base64 32 生成
+      - TOKEN_ENCRYPTION_KEY=请替换为你的密钥
+      
+      # 可选: 自定义管理员账号
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin123
+      
+      # 系统配置
+      - DATABASE_URL=sqlite:/app/data/ai-hub.db
+      - RUST_LOG=warn
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    
+    # 1C1G 优化
+    mem_limit: 200m
+    mem_reservation: 100m
+    cpus: '0.9'
+    
+    # 日志限制
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
