@@ -23,7 +23,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: ./rust-migration
+          context: .
+          file: ./Dockerfile
           push: true
           tags: rxyoungyang/ai-hub-rust:latest
           cache-from: type=gha
