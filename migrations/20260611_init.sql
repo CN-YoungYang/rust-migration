@@ -2,7 +2,7 @@
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
     passwordHash TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT ''USER'',
+    role TEXT NOT NULL DEFAULT 'USER',
     enabled INTEGER NOT NULL DEFAULT 1,
     note TEXT,
     createdAt TEXT NOT NULL,

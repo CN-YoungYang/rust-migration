@@ -1,4 +1,4 @@
-use axum::{
+锘縰se axum::{
     routing::{get, post},
     Router,
     middleware,
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "sqlite:./data/ai-hub.db".to_string());
 
-    // 优化: 配置连接池(1C1G优化)
+    // 锟脚伙拷: 锟斤拷锟斤拷锟斤拷锟接筹拷(1C1G锟脚伙拷)
     let connect_options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     let db = SqlitePool::connect_with(connect_options)
         .await?;
     
-    // 优化: 设置连接池大小(1C1G)
+    // 锟脚伙拷: 锟斤拷锟斤拷锟斤拷锟接池达拷小(1C1G)
     sqlx::query("PRAGMA max_page_count = 1073741823").execute(&db).await?;
     
     // Run migrations

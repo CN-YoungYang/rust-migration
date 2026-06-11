@@ -1,4 +1,4 @@
-use reqwest::Client;
+ï»¿use reqwest::Client;
 use crate::error::{Result};
 
 pub async fn checkin(base_url: &str, cookie: &str) -> Result<(String, String, Option<String>)> {
@@ -20,9 +20,9 @@ pub async fn checkin(base_url: &str, cookie: &str) -> Result<(String, String, Op
     
     let text_lower = text.to_lowercase();
     
-    let status = if text_lower.contains("already") || text_lower.contains("ÒÑÇ©µ½") {
+    let status = if text_lower.contains("already") || text_lower.contains("ï¿½ï¿½Ç©ï¿½ï¿½") {
         "already_checked"
-    } else if text_lower.contains("success") || text_lower.contains("³É¹¦") {
+    } else if text_lower.contains("success") || text_lower.contains("ï¿½É¹ï¿½") {
         "success"
     } else {
         "failed"
