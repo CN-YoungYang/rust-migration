@@ -1,4 +1,4 @@
-﻿use sqlx::SqlitePool;
+use sqlx::SqlitePool;
 use crate::models::*;
 use crate::error::Result;
 use chrono::Utc;
@@ -217,7 +217,7 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
         .execute(db)
         .await?;
         
-        get_settings(db).await
+        Box::pin(get_settings(db)).await
     }
 }
 
@@ -230,21 +230,21 @@ pub async fn update_settings(
     maxAttemptsPerDay: Option<i32>,
 ) -> Result<CheckinSetting> {
     let now = Utc::now();
-    let current = get_settings(db).await?;
+    let current = Box::pin(get_settings(db)).await?;
     
     sqlx::query(
         "UPDATE CheckinSetting SET enabled = ?, windowStart = ?, windowEnd = ?, retryEnabled = ?, maxAttemptsPerDay = ?, updatedAt = ? WHERE id = 'global'"
     )
     .bind(enabled.unwrap_or(current.enabled))
-    .bind(windowStart.unwrap_or(&current.windowStart))
-    .bind(windowEnd.unwrap_or(&current.windowEnd))
-    .bind(retryEnabled.unwrap_or(current.retryEnabled))
-    .bind(maxAttemptsPerDay.unwrap_or(current.maxAttemptsPerDay))
+    .bind(windowStart.unwrap_or(&current.window_start))
+    .bind(windowEnd.unwrap_or(&current.window_end))
+    .bind(retryEnabled.unwrap_or(current.retry_enabled))
+    .bind(maxAttemptsPerDay.unwrap_or(current.max_attempts_per_day))
     .bind(now)
     .execute(db)
     .await?;
     
-    get_settings(db).await
+    Box::pin(get_settings(db)).await
 }
 
 pub async fn update_account(
