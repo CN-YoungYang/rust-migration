@@ -4,7 +4,6 @@ FROM rust:1.86-slim as builder
 WORKDIR /app
 
 # 1C1G 优化: 限制并发构建
-ENV CARGO_BUILD_JOBS=1
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
@@ -16,7 +15,7 @@ RUN apt-get update && apt-get install -y \
 COPY . .
 
 # Build directly (skip dependency cache)
-RUN cargo build --release --jobs 1
+RUN cargo build --release
 
 # Runtime stage
 FROM debian:bookworm-slim
