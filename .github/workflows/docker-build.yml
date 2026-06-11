@@ -25,6 +25,6 @@ jobs:
         with:
           context: ./rust-migration
           push: true
-          tags: 你的用户名/ai-hub-rust:latest
+          tags: rxyoungyang/ai-hub-rust:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
