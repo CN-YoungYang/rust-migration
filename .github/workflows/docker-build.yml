@@ -27,5 +27,4 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: rxyoungyang/ai-hub-rust:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          no-cache: true
