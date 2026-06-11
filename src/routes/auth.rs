@@ -1,4 +1,4 @@
-﻿use axum::{
+use axum::{
     extract::State,
     Json,
     http::Request,
@@ -10,7 +10,7 @@ use crate::{
     error::Result,
     crypto::verify_password,
     db,
-    auth_middleware::{create_session, remove_session, get_user_from_session},
+    auth_middleware::{create_session, remove_session},
 };
 use serde_json::{json, Value};
 

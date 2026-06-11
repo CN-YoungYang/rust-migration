@@ -3,7 +3,7 @@ use crate::models::*;
 use crate::error::Result;
 use chrono::Utc;
 
-pub async fn get_pool(databaseUrl: &str) -> Result<SqlitePool> {
+pub async fn get_pool(database_url: &str) -> Result<SqlitePool> {
     let pool = SqlitePool::connect(databaseUrl).await?;
     Ok(pool)
 }
@@ -38,7 +38,7 @@ pub async fn list_users(db: &SqlitePool) -> Result<Vec<AppUser>> {
     Ok(users)
 }
 
-pub async fn create_user(db: &SqlitePool, username: &str, passwordHash: &str, role: &str) -> Result<AppUser> {
+pub async fn create_user(db: &SqlitePool, username: &str, password_hash: &str, role: &str) -> Result<AppUser> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now();
     
@@ -81,15 +81,15 @@ pub async fn find_account_by_id(db: &SqlitePool, id: &str) -> Result<Option<Chec
 pub async fn create_account(
     db: &SqlitePool,
     name: &str,
-    siteType: &str,
-    baseUrl: &str,
-    userId: Option<&str>,
-    authType: &str,
-    accessTokenEnc: Option<&str>,
-    cookieEnc: Option<&str>,
-    customCheckinUrl: Option<&str>,
+    site_type: &str,
+    base_url: &str,
+    user_id: Option<&str>,
+    auth_type: &str,
+    access_token_enc: Option<&str>,
+    cookie_enc: Option<&str>,
+    custom_checkin_url: Option<&str>,
     enabled: bool,
-    retryEnabled: bool,
+    retry_enabled: bool,
 ) -> Result<CheckinAccount> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now();
@@ -157,12 +157,12 @@ pub async fn list_runs(db: &SqlitePool, limit: i32) -> Result<Vec<CheckinRun>> {
 
 pub async fn create_run(
     db: &SqlitePool,
-    accountId: &str,
+    account_id: &str,
     status: &str,
     message: Option<&str>,
-    durationMs: Option<i32>,
-    triggeredBy: &str,
-    rawResponse: Option<&str>,
+    duration_ms: Option<i32>,
+    triggered_by: &str,
+    raw_response: Option<&str>,
 ) -> Result<CheckinRun> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now();
@@ -224,10 +224,10 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
 pub async fn update_settings(
     db: &SqlitePool,
     enabled: Option<bool>,
-    windowStart: Option<&str>,
-    windowEnd: Option<&str>,
-    retryEnabled: Option<bool>,
-    maxAttemptsPerDay: Option<i32>,
+    window_start: Option<&str>,
+    window_end: Option<&str>,
+    retry_enabled: Option<bool>,
+    max_attempts_per_day: Option<i32>,
 ) -> Result<CheckinSetting> {
     let now = Utc::now();
     let current = Box::pin(get_settings(db)).await?;

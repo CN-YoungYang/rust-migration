@@ -1,9 +1,9 @@
-﻿use axum::{
+use axum::{
     extract::State,
     Json,
 };
 use std::sync::Arc;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize};
 use crate::{
     AppState,
     models::CheckinRun,

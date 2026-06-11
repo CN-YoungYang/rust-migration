@@ -1,9 +1,9 @@
-﻿use axum::{
+use axum::{
     extract::{State, Path},
     Json,
 };
 use std::sync::Arc;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize};
 use serde_json::{json, Value};
 use crate::{
     AppState,

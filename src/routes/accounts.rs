@@ -1,4 +1,4 @@
-﻿use axum::{
+use axum::{
     extract::{State, Path},
     Json,
 };
@@ -8,7 +8,7 @@ use crate::{
     AppState,
     models::{CheckinAccount, CreateAccountRequest, UpdateAccountRequest},
     error::Result,
-    crypto::{encrypt, mask_token},
+    crypto::{encrypt},
     db,
 };
 

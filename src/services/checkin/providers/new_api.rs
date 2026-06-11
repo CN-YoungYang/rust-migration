@@ -1,8 +1,8 @@
-ï»¿use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use crate::error::{Result, AppError};
+use reqwest::Client;
+use serde::{Deserialize};
+use crate::error::{Result};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 struct NewApiResponse {
     success: bool,
     message: Option<String>,
@@ -46,9 +46,9 @@ pub async fn checkin(base_url: &str, token: &str, user_id: Option<&str>) -> Resu
     let message = parsed.message.unwrap_or_else(|| "No message".to_string());
     let message_lower = message.to_lowercase();
     
-    let status = if message_lower.contains("already") || message_lower.contains("å·²ç­¾åˆ°") {
+    let status = if message_lower.contains("already") || message_lower.contains("ÒÑÇ©µ½") {
         "already_checked"
-    } else if parsed.success || message_lower.contains("success") || message_lower.contains("æˆåŠŸ") {
+    } else if parsed.success || message_lower.contains("success") || message_lower.contains("³É¹¦") {
         "success"
     } else {
         "failed"
