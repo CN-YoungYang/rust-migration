@@ -1,32 +1,56 @@
 ﻿use reqwest::Client;
-use crate::error::{Result};
+use serde::{Deserialize, Serialize};
+use crate::error::{Result, AppError};
 
-pub async fn checkin(base_url: &str, cookie: &str) -> Result<(String, String, Option<String>)> {
-    let url = format!("{}/user/checkin", base_url.trim_end_matches('/'));
+#[derive(Debug, Serialize, Deserialize)]
+pub struct X666Response {
+    pub success: Option<bool>,
+    pub message: Option<serde_json::Value>,
+    pub error: Option<serde_json::Value>,
+    pub quota: Option<f64>,
+}
+
+const DEFAULT_CHECKIN_URL: &str = "https://up.x666.me/api/checkin/spin";
+const REFERER_URL: &str = "https://up.x666.me/";
+
+pub async fn checkin(base_url: &str, cookie: &str, custom_url: Option<&str>) -> Result<(String, String, Option<String>)> {
+    let url = custom_url.unwrap_or(DEFAULT_CHECKIN_URL);
     let client = Client::new();
     
-    let response = client.post(&url)
+    let response = client.post(url)
         .header("Cookie", cookie)
-        .header("Content-Type", "application/json")
+        .header("Accept", "*/*")
+        .header("Accept-Language", "zh,zh-CN;q=0.9,en;q=0.8")
+        .header("Origin", REFERER_URL.trim_end_matches('/'))
+        .header("Referer", REFERER_URL)
         .send()
         .await?;
     
     let status_code = response.status();
     let text = response.text().await?;
     
-    if !status_code.is_success() {
-        return Ok(("failed".to_string(), format!("HTTP {}", status_code), Some(text)));
+    let payload: Option<X666Response> = serde_json::from_str(&text).ok();
+    let response_msg = payload.as_ref()
+        .and_then(|p| p.message.as_ref().or(p.error.as_ref()))
+        .and_then(|v| v.as_str())
+        .unwrap_or(&text)
+        .to_string();
+    
+    let msg_lower = response_msg.to_lowercase();
+    let is_already = ["今日已签", "已签到", "已经签到", "already"].iter()
+        .any(|s| msg_lower.contains(&s.to_lowercase()));
+    
+    if is_already {
+        return Ok(("already_checked".to_string(), response_msg, Some(text)));
     }
     
-    let text_lower = text.to_lowercase();
+    if !status_code.is_success() {
+        return Ok(("failed".to_string(), format!("签到请求失败：HTTP {}", status_code), Some(text)));
+    }
     
-    let status = if text_lower.contains("already") || text_lower.contains("��ǩ��") {
-        "already_checked"
-    } else if text_lower.contains("success") || text_lower.contains("�ɹ�") {
-        "success"
-    } else {
-        "failed"
-    };
+    if payload.as_ref().and_then(|p| p.success).unwrap_or(false) {
+        return Ok(("success".to_string(), response_msg, Some(text)));
+    }
     
-    Ok((status.to_string(), text.clone(), Some(text)))
+    Ok(("failed".to_string(), format!("签到失败：{}", response_msg), Some(text)))
 }

@@ -1,4 +1,4 @@
-﻿use axum::{
+use axum::{
     routing::{get, post},
     Router,
     middleware,
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "sqlite:./data/ai-hub.db".to_string());
 
-    // �Ż�: �������ӳ�(1C1G�Ż�)
+    // ???: ?????????(1C1G???)
     let connect_options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     let db = SqlitePool::connect_with(connect_options)
         .await?;
     
-    // �Ż�: �������ӳش�С(1C1G)
+    // ???: ??????????��(1C1G)
     sqlx::query("PRAGMA max_page_count = 1073741823").execute(&db).await?;
     
     // Run migrations
@@ -117,7 +117,7 @@ async fn initialize_admin(db: &SqlitePool) -> anyhow::Result<()> {
     
     if existing.is_none() {
         let password_hash = crypto::hash_password(&admin_password)?;
-        db::create_user(db, &admin_username, &password_hash, "ADMIN").await?;
+        db::create_user(db, &admin_username, &password_hash, "SUPER_ADMIN").await?;
         tracing::info!("Created admin: {}", admin_username);
     }
     

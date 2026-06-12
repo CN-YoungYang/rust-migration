@@ -1,4 +1,4 @@
-﻿use sqlx::SqlitePool;
+use sqlx::SqlitePool;
 use std::time::Instant;
 use crate::{
     models::{CheckinAccount, CheckinRun},
@@ -72,7 +72,7 @@ async fn execute_x666_checkin(account: &CheckinAccount) -> Result<(String, Strin
         return Err(AppError::Validation("Cookie required".into()));
     };
     
-    x666::checkin(&account.base_url, &cookie).await
+    x666::checkin(&account.base_url, &cookie, account.custom_checkin_url.as_deref()).await
 }
 
 async fn create_failed_run(

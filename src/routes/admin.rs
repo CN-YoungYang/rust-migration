@@ -1,4 +1,4 @@
-﻿use axum::{
+use axum::{
     extract::{State, Path},
     Json,
 };
@@ -58,6 +58,11 @@ pub async fn update_user(
     Path(id): Path<String>,
     Json(payload): Json<UpdateUserRequest>,
 ) -> Result<Json<AppUser>> {
+    let existing = db::find_user_by_id(&state.db, &id).await?
+        .ok_or(crate::error::AppError::NotFound)?;
+    if existing.role == "SUPER_ADMIN" && payload.role.as_deref() != Some("SUPER_ADMIN") {
+        return Err(crate::error::AppError::Forbidden);
+    }
     let password_hash = if let Some(pwd) = &payload.password {
         Some(hash_password(pwd)?)
     } else {
@@ -84,6 +89,11 @@ pub async fn delete_user(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>> {
+    let user = db::find_user_by_id(&state.db, &id).await?
+        .ok_or(crate::error::AppError::NotFound)?;
+    if user.role == "SUPER_ADMIN" {
+        return Err(crate::error::AppError::Forbidden);
+    }
     db::delete_user(&state.db, &id).await?;
     Ok(Json(json!({ "success": true })))
 }
