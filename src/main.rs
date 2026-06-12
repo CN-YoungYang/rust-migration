@@ -1,9 +1,9 @@
 ﻿use axum::{
-    routing::{get, post, delete},
+    routing::{get, post},
     Router,
     middleware,
 };
-use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
+use sqlx::{SqlitePool, sqlite::SqliteConnectOptions, SqlitePoolOptions};
 use std::sync::Arc;
 use std::str::FromStr;
 use tower_http::{
@@ -50,15 +50,15 @@ async fn main() -> anyhow::Result<()> {
         .pragma("cache_size", "-2000")  // 2MB cache
         .pragma("temp_store", "memory");
 
-    let db = SqlitePool::connect_with(connect_options)
+    let db = SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect_with(connect_options)
         .await?;
     sqlx::query("PRAGMA max_page_count = 1073741823").execute(&db).await?;
     
     // Run migrations
     let migration_sql = include_str!("../migrations/20260611_init.sql");
-    for statement in migration_sql.split(';').filter(|s| !s.trim().is_empty()) {
-        sqlx::query(statement).execute(&db).await?;
-    }
+    sqlx::query(migration_sql).execute(&db).await?;
 
     initialize_admin(&db).await?;
 
@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/accounts/:id/refresh-balance", post(routes::accounts::refresh_balance))
         .route("/api/settings", get(routes::settings::get).put(routes::settings::update))
         .route("/api/checkin-runs", get(routes::checkin_runs::list).post(routes::checkin_runs::execute))
-        .route("/api/checkin-runs/cleanup", delete(routes::checkin_runs::cleanup_runs))
+        .route("/api/checkin-runs/cleanup", post(routes::checkin_runs::cleanup_runs))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
     // Admin routes
@@ -100,7 +100,9 @@ async fn main() -> anyhow::Result<()> {
         .fallback_service(ServeDir::new("public"))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
+    let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("Server listening on {}", listener.local_addr()?);
     tracing::info!("Memory optimized for 1C1G server");
     axum::serve(listener, app).await?;

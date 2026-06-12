@@ -1,7 +1,7 @@
 use sqlx::SqlitePool;
 use crate::models::*;
 use crate::error::Result;
-use chrono::Utc;
+use chrono::{Utc, TimeZone, Local};
 
 // AppUser operations
 pub async fn find_user_by_username(db: &SqlitePool, username: &str) -> Result<Option<AppUser>> {
@@ -85,7 +85,8 @@ pub async fn create_account(
     cookie_enc: Option<&str>,
     custom_checkin_url: Option<&str>,
     enabled: bool,
-    retry_enabled: bool, owner_id: &str,
+    retry_enabled: bool,
+    owner_id: &str,
 ) -> Result<CheckinAccount> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now();
@@ -304,6 +305,21 @@ pub async fn update_user(
 }
 
 pub async fn delete_user(db: &SqlitePool, id: &str) -> Result<()> {
+    // Cascade: delete runs for accounts owned by this user
+    sqlx::query(
+        "DELETE FROM CheckinRun WHERE accountId IN (SELECT id FROM CheckinAccount WHERE ownerId = ?)"
+    )
+    .bind(id)
+    .execute(db)
+    .await?;
+
+    // Cascade: delete accounts owned by this user
+    sqlx::query("DELETE FROM CheckinAccount WHERE ownerId = ?")
+        .bind(id)
+        .execute(db)
+        .await?;
+
+    // Delete the user
     sqlx::query("DELETE FROM AppUser WHERE id = ?")
         .bind(id)
         .execute(db)
@@ -312,36 +328,30 @@ pub async fn delete_user(db: &SqlitePool, id: &str) -> Result<()> {
 }
 
 pub async fn update_account_balance(db: &SqlitePool, id: &str, balance: f64) -> Result<()> {
+    let now = Utc::now();
     sqlx::query(
-        "UPDATE CheckinAccount SET lastBalance = ?, lastBalanceAt = CURRENT_TIMESTAMP WHERE id = ?"
+        "UPDATE CheckinAccount SET lastBalance = ?, lastBalanceAt = ?, updatedAt = ? WHERE id = ?"
     )
     .bind(balance)
+    .bind(now)
+    .bind(now)
     .bind(id)
     .execute(db)
     .await?;
     Ok(())
 }
 pub async fn cleanup_checkin_runs(db: &SqlitePool, keep_latest: usize) -> Result<u64> {
-    let keep_ids: Vec<String> = sqlx::query_scalar(
-        "SELECT id FROM CheckinRun ORDER BY createdAt DESC LIMIT ?"
+    if keep_latest == 0 {
+        let result = sqlx::query("DELETE FROM CheckinRun").execute(db).await?;
+        return Ok(result.rows_affected());
+    }
+
+    let result = sqlx::query(
+        "DELETE FROM CheckinRun WHERE id NOT IN (SELECT id FROM CheckinRun ORDER BY createdAt DESC LIMIT ?)"
     )
     .bind(keep_latest as i64)
-    .fetch_all(db)
+    .execute(db)
     .await?;
-    
-    if keep_ids.is_empty() {
-        return Ok(0);
-    }
-    
-    let placeholders = vec!["?"; keep_ids.len()].join(",");
-    let query = format!("DELETE FROM CheckinRun WHERE id NOT IN ({})", placeholders);
-    
-    let mut q = sqlx::query(&query);
-    for id in keep_ids {
-        q = q.bind(id);
-    }
-    
-    let result = q.execute(db).await?;
     Ok(result.rows_affected())
 }
 pub async fn list_accounts_by_user(db: &SqlitePool, user_id: &str) -> Result<Vec<CheckinAccount>> {
@@ -352,6 +362,19 @@ pub async fn list_accounts_by_user(db: &SqlitePool, user_id: &str) -> Result<Vec
     .fetch_all(db)
     .await?;
     Ok(accounts)
+}
+
+pub async fn count_runs_by_account_today(db: &SqlitePool, account_id: &str) -> Result<i32> {
+    let local_midnight = Local::now().date_naive().and_hms_opt(0, 0, 0).expect("midnight is always valid");
+    let today_start_utc = Local.from_local_datetime(&local_midnight).single().expect("invalid midnight").to_utc();
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM CheckinRun WHERE accountId = ? AND createdAt >= ?"
+    )
+    .bind(account_id)
+    .bind(today_start_utc)
+    .fetch_one(db)
+    .await?;
+    Ok(count as i32)
 }
 pub async fn list_runs_by_user(db: &SqlitePool, user_id: &str, limit: usize) -> Result<Vec<CheckinRun>> {
     let runs = sqlx::query_as::<_, CheckinRun>(
@@ -365,27 +388,24 @@ pub async fn list_runs_by_user(db: &SqlitePool, user_id: &str, limit: usize) -> 
 }
 
 pub async fn cleanup_checkin_runs_by_user(db: &SqlitePool, user_id: &str, keep_latest: usize) -> Result<u64> {
-    let keep_ids: Vec<String> = sqlx::query_scalar(
-        "SELECT r.id FROM CheckinRun r JOIN CheckinAccount a ON r.accountId = a.id WHERE a.ownerId = ? ORDER BY r.createdAt DESC LIMIT ?"
-    )
+    let owned = "SELECT id FROM CheckinAccount WHERE ownerId = ?";
+    if keep_latest == 0 {
+        let result = sqlx::query(&format!(
+            "DELETE FROM CheckinRun WHERE accountId IN ({})", owned
+        ))
+        .bind(user_id)
+        .execute(db)
+        .await?;
+        return Ok(result.rows_affected());
+    }
+
+    let result = sqlx::query(&format!(
+        "DELETE FROM CheckinRun WHERE accountId IN ({owned}) AND id NOT IN (SELECT id FROM CheckinRun WHERE accountId IN ({owned}) ORDER BY createdAt DESC LIMIT ?)"
+    ))
+    .bind(user_id)
     .bind(user_id)
     .bind(keep_latest as i64)
-    .fetch_all(db)
+    .execute(db)
     .await?;
-    
-    if keep_ids.is_empty() {
-        return Ok(0);
-    }
-    
-    let placeholders = vec!["?"; keep_ids.len()].join(",");
-    let query = format!("DELETE FROM CheckinRun WHERE id IN (SELECT r.id FROM CheckinRun r JOIN CheckinAccount a ON r.accountId = a.id WHERE a.ownerId = ?) AND id NOT IN ({})", placeholders);
-    
-    let mut q = sqlx::query(&query);
-    q = q.bind(user_id);
-    for id in keep_ids {
-        q = q.bind(id);
-    }
-    
-    let result = q.execute(db).await?;
     Ok(result.rows_affected())
 }

@@ -34,6 +34,7 @@ pub struct CheckinAccount {
     #[sqlx(rename = "userId")]
     pub user_id: Option<String>,
     #[serde(rename = "ownerId")]
+    #[sqlx(rename = "ownerId")]
     pub owner_id: Option<String>,
     #[serde(rename = "authType")]
     #[sqlx(rename = "authType")]

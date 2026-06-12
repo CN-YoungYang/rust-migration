@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="admin-user-panel">
     <h2>用户管理</h2>
 
@@ -9,8 +9,8 @@
         <input v-model="newUser.username" required />
       </div>
       <div class="form-group">
-        <label>密码</label>
-        <input v-model="newUser.password" type="password" required />
+        <label>密码 (至少8位)</label>
+        <input v-model="newUser.password" type="password" required minlength="8" />
       </div>
       <div class="form-group">
         <label>角色</label>
@@ -38,8 +38,8 @@
         </div>
         <div class="user-actions">
           <button @click="editUser(user)" class="btn-edit" :disabled="!canManage(user)">编辑</button>
-          <button 
-            @click="deleteUser(user.id)" 
+          <button
+            @click="deleteUser(user.id)"
             class="btn-delete"
             :disabled="!canManage(user)"
           >
@@ -58,8 +58,8 @@
             <input v-model="editingUser.username" disabled />
           </div>
           <div class="form-group">
-            <label>新密码（留空则不修改）</label>
-            <input v-model="editingUser.password" type="password" />
+            <label>新密码（留空则不修改，至少8位）</label>
+            <input v-model="editingUser.password" type="password" minlength="8" />
           </div>
           <div class="form-group">
             <label>角色</label>
@@ -86,6 +86,15 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { apiUrl, authHeaders, request } from '../utils/api'
+import { confirmAction, showToast } from '../utils/toast'
+
+interface CurrentUser {
+  id: string
+  username: string
+  role: string
+  enabled: boolean
+}
 
 interface User {
   id: string
@@ -95,10 +104,9 @@ interface User {
   password?: string
 }
 
-import { API_BASE } from '../config'
-import { confirmAction, showToast } from '../utils/toast'
+const props = defineProps<{ currentUser: CurrentUser | null }>()
+
 const users = ref<User[]>([])
-const currentUser = ref<User | null>(null)
 const newUser = ref({
   username: '',
   password: '',
@@ -107,37 +115,18 @@ const newUser = ref({
 })
 const editingUser = ref<User | null>(null)
 
-const getToken = () => localStorage.getItem('token')
-
-const request = async (url: string, options: RequestInit = {}) => {
-  const res = await fetch(url, options)
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || `HTTP ${res.status}`)
-  }
-  return res
-}
-
-const isSuperAdmin = () => currentUser.value?.role === 'SUPER_ADMIN'
+const isSuperAdmin = () => props.currentUser?.role === 'SUPER_ADMIN'
 
 const canManage = (user: User) => {
-  if (currentUser.value?.role === 'SUPER_ADMIN') return user.role !== 'SUPER_ADMIN'
-  if (currentUser.value?.role === 'ADMIN') return user.role === 'USER'
+  if (props.currentUser?.role === 'SUPER_ADMIN') return user.role !== 'SUPER_ADMIN'
+  if (props.currentUser?.role === 'ADMIN') return user.role === 'USER'
   return false
-}
-
-const fetchCurrentUser = async () => {
-  const res = await request(`${API_BASE}/auth/me`, {
-    headers: { 'Authorization': `Bearer ${getToken()}` }
-  })
-  const data = await res.json()
-  currentUser.value = data.user
 }
 
 const fetchUsers = async () => {
   try {
-    const res = await request(`${API_BASE}/admin/users`, {
-      headers: { 'Authorization': `Bearer ${getToken()}` }
+    const res = await request(apiUrl('/admin/users'), {
+      headers: authHeaders()
     })
     users.value = await res.json()
   } catch (error) {
@@ -147,12 +136,9 @@ const fetchUsers = async () => {
 
 const createUser = async () => {
   try {
-    await request(`${API_BASE}/admin/users`, {
+    await request(apiUrl('/admin/users'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getToken()}`
-      },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(newUser.value)
     })
     newUser.value = { username: '', password: '', role: 'USER', enabled: true }
@@ -170,19 +156,16 @@ const editUser = (user: User) => {
 
 const updateUser = async () => {
   if (!editingUser.value) return
-  const payload: any = {
+  const payload: Record<string, unknown> = {
     role: editingUser.value.role,
     enabled: editingUser.value.enabled
   }
   if (editingUser.value.password) payload.password = editingUser.value.password
-  
+
   try {
-    await request(`${API_BASE}/admin/users/${editingUser.value.id}`, {
+    await request(apiUrl(`/admin/users/${editingUser.value.id}`), {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getToken()}`
-      },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
     editingUser.value = null
@@ -198,9 +181,9 @@ const deleteUser = async (id: string) => {
   if (!user || !canManage(user)) return
   if (!(await confirmAction('确定要删除此用户吗？'))) return
   try {
-    await request(`${API_BASE}/admin/users/${id}`, {
+    await request(apiUrl(`/admin/users/${id}`), {
       method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${getToken()}` }
+      headers: authHeaders()
     })
     showToast('用户已删除', 'success')
     await fetchUsers()
@@ -209,14 +192,7 @@ const deleteUser = async (id: string) => {
   }
 }
 
-onMounted(async () => {
-  try {
-    await fetchCurrentUser()
-    await fetchUsers()
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '加载用户管理失败', 'error')
-  }
-})
+onMounted(fetchUsers)
 </script>
 
 <style scoped>
@@ -395,9 +371,3 @@ h3 {
   cursor: pointer;
 }
 </style>
-
-
-
-
-
-

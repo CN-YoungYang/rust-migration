@@ -86,17 +86,3 @@ export function confirmAction(message: string): Promise<boolean> {
     okButton.focus()
   })
 }
-
-export async function fetchWithError<T>(url: string, options?: RequestInit): Promise<T> {
-  try {
-    const res = await fetch(url, options)
-    if (!res.ok) {
-      const errorText = await res.text()
-      throw new Error(errorText || `HTTP ${res.status}`)
-    }
-    return await res.json()
-  } catch (e) {
-    showToast(e instanceof Error ? e.message : '网络错误', 'error')
-    throw e
-  }
-}

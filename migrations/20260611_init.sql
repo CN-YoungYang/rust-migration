@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS CheckinRun (
 
 CREATE INDEX IF NOT EXISTS idx_checkin_run_account_created ON CheckinRun(accountId, createdAt);
 CREATE INDEX IF NOT EXISTS idx_checkin_run_account_status_created ON CheckinRun(accountId, status, createdAt);
+CREATE INDEX IF NOT EXISTS idx_checkin_run_created ON CheckinRun(createdAt);
+CREATE INDEX IF NOT EXISTS idx_checkin_account_owner ON CheckinAccount(ownerId);
 
 CREATE TABLE IF NOT EXISTS CheckinSetting (
     id TEXT PRIMARY KEY,
@@ -57,4 +59,4 @@ CREATE TABLE IF NOT EXISTS CheckinSetting (
 );
 
 INSERT OR IGNORE INTO CheckinSetting (id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, updatedAt)
-VALUES ('global', 0, '02:00', '05:00', 1, 3, datetime('now'));
+VALUES ('global', 0, '02:00', '05:00', 1, 3, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));

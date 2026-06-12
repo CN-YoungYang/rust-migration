@@ -1,11 +1,11 @@
-﻿use axum::{
+use axum::{
     extract::{Request, State},
     middleware::Next,
     response::Response,
     http::StatusCode,
 };
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 use crate::{AppState, db};
 use lazy_static::lazy_static;
@@ -20,19 +20,30 @@ lazy_static! {
     static ref SESSIONS: Mutex<HashMap<String, SessionEntry>> = Mutex::new(HashMap::new());
 }
 
+const MAX_SESSIONS: usize = 1000;
+
+static SESSION_TTL: OnceLock<Duration> = OnceLock::new();
+
 fn session_ttl() -> Duration {
-    let hours = std::env::var("SESSION_TTL_HOURS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|hours| *hours > 0)
-        .unwrap_or(24);
-    Duration::from_secs(hours * 60 * 60)
+    *SESSION_TTL.get_or_init(|| {
+        let hours = std::env::var("SESSION_TTL_HOURS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|hours| *hours > 0)
+            .unwrap_or(24);
+        Duration::from_secs(hours * 60 * 60)
+    })
 }
 
 pub fn create_session(user_id: &str) -> String {
     let token = uuid::Uuid::new_v4().to_string();
     let expires_at = SystemTime::now() + session_ttl();
     let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    if sessions.len() % 10 == 0 {
+        cleanup_expired_sessions(&mut sessions);
+    }
+
     sessions.insert(token.clone(), SessionEntry {
         user_id: user_id.to_string(),
         expires_at,
@@ -55,6 +66,21 @@ pub fn remove_session(token: &str) {
     sessions.remove(token);
 }
 
+fn cleanup_expired_sessions(sessions: &mut HashMap<String, SessionEntry>) {
+    let now = SystemTime::now();
+    sessions.retain(|_, entry| now < entry.expires_at);
+
+    // Hard cap: evict oldest entries if still over limit
+    if sessions.len() > MAX_SESSIONS {
+        let mut entries: Vec<_> = sessions.iter().collect();
+        entries.sort_by_key(|(_, e)| e.expires_at);
+        let to_remove = sessions.len() - MAX_SESSIONS;
+        for (token, _) in entries.into_iter().take(to_remove) {
+            sessions.remove(token);
+        }
+    }
+}
+
 pub async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     mut request: Request,
@@ -64,7 +90,7 @@ pub async fn auth_middleware(
         .headers()
         .get("Authorization")
         .and_then(|v| v.to_str().ok());
-    
+
     if let Some(auth_value) = auth_header {
         if let Some(token) = auth_value.strip_prefix("Bearer ") {
             if let Some(user_id) = get_user_from_session(token) {
@@ -77,7 +103,7 @@ pub async fn auth_middleware(
             }
         }
     }
-    
+
     Err(StatusCode::UNAUTHORIZED)
 }
 
@@ -86,7 +112,7 @@ pub async fn admin_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     let user = request.extensions().get::<crate::models::AppUser>().cloned();
-    
+
     match user {
         Some(u) if u.role == "ADMIN" || u.role == "SUPER_ADMIN" => Ok(next.run(request).await),
         _ => Err(StatusCode::FORBIDDEN),

@@ -82,6 +82,17 @@ pub async fn create_user(
 ) -> Result<Json<AppUser>> {
     check_role_assignment(&current_user, payload.role.as_deref())?;
 
+    if payload.username.trim().is_empty() {
+        return Err(crate::error::AppError::Validation("Username cannot be empty".into()));
+    }
+    if payload.password.len() < 8 {
+        return Err(crate::error::AppError::Validation("Password must be at least 8 characters".into()));
+    }
+
+    if db::find_user_by_username(&state.db, &payload.username).await?.is_some() {
+        return Err(crate::error::AppError::Validation("Username already exists".into()));
+    }
+
     let password_hash = hash_password(&payload.password)?;
     let user = db::create_user(
         &state.db,
@@ -111,6 +122,9 @@ pub async fn update_user(
     }
     
     let password_hash = if let Some(pwd) = &payload.password {
+        if pwd.len() < 8 {
+            return Err(crate::error::AppError::Validation("Password must be at least 8 characters".into()));
+        }
         Some(hash_password(pwd)?)
     } else {
         None

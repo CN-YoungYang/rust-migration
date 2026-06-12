@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="settings-panel">
     <h2>全局设置</h2>
 
@@ -33,7 +33,7 @@
 
       <div class="form-group">
         <label>每天最大尝试次数</label>
-        <input v-model.number="settings.maxAttemptsPerDay" type="number" min="1" max="20" />
+        <input v-model.number="settings.maxAttemptsPerDay" type="number" min="1" max="100" />
       </div>
 
       <button type="submit" class="btn-primary">保存设置</button>
@@ -52,7 +52,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { API_BASE } from '../config'
+import { apiUrl, authHeaders, request } from '../utils/api'
 import { showToast } from '../utils/toast'
 
 interface Settings {
@@ -66,28 +66,17 @@ interface Settings {
 }
 
 const settings = ref<Settings>({
-  enabled: true,
-  windowStart: '08:00',
-  windowEnd: '10:00',
+  enabled: false,
+  windowStart: '02:00',
+  windowEnd: '05:00',
   retryEnabled: true,
   maxAttemptsPerDay: 3
 })
 
-const getToken = () => localStorage.getItem('token') || ''
-
-const request = async (url: string, options: RequestInit = {}) => {
-  const response = await fetch(url, options)
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(text || `HTTP ${response.status}`)
-  }
-  return response
-}
-
 const fetchSettings = async () => {
   try {
-    const response = await request(`${API_BASE}/settings`, {
-      headers: { 'Authorization': `Bearer ${getToken()}` }
+    const response = await request(apiUrl('/settings'), {
+      headers: authHeaders()
     })
     settings.value = await response.json()
   } catch (error) {
@@ -97,12 +86,9 @@ const fetchSettings = async () => {
 
 const saveSettings = async () => {
   try {
-    const response = await request(`${API_BASE}/settings`, {
+    const response = await request(apiUrl('/settings'), {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getToken()}`
-      },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(settings.value)
     })
     settings.value = await response.json()

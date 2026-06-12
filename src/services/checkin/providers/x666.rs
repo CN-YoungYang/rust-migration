@@ -1,6 +1,6 @@
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use crate::error::Result;
+use super::super::http_client;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct X666Response {
@@ -15,8 +15,8 @@ const REFERER_URL: &str = "https://up.x666.me/";
 
 pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>) -> Result<(String, String, Option<String>)> {
     let url = custom_url.unwrap_or(DEFAULT_CHECKIN_URL);
-    let client = Client::new();
-    
+    let client = http_client();
+
     let response = client.post(url)
         .header("Cookie", cookie)
         .header("Accept", "*/*")
@@ -25,58 +25,58 @@ pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>) ->
         .header("Referer", REFERER_URL)
         .send()
         .await?;
-    
+
     let status_code = response.status();
     let text = response.text().await?;
-    
+
     let payload: Option<X666Response> = serde_json::from_str(&text).ok();
     let response_msg = payload.as_ref()
         .and_then(|p| p.message.as_ref().or(p.error.as_ref()))
         .and_then(|v| v.as_str())
         .unwrap_or(&text)
         .to_string();
-    
+
     let msg_lower = response_msg.to_lowercase();
     let is_already = ["今日已签", "已签到", "已经签到", "already"].iter()
         .any(|s| msg_lower.contains(&s.to_lowercase()));
-    
+
     if is_already {
         return Ok(("already_checked".to_string(), response_msg, Some(text)));
     }
-    
+
     if !status_code.is_success() {
         return Ok(("failed".to_string(), format!("签到请求失败：HTTP {}", status_code), Some(text)));
     }
-    
+
     if payload.as_ref().and_then(|p| p.success).unwrap_or(false) {
         return Ok(("success".to_string(), response_msg, Some(text)));
     }
-    
+
     Ok(("failed".to_string(), format!("签到失败：{}", response_msg), Some(text)))
 }
 
 pub async fn fetch_balance(cookie: Option<&str>) -> std::result::Result<f64, Box<dyn std::error::Error>> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let url = "https://www.x666.one/api/user/info";
-    
+
     let mut req = client.get(url);
-    
+
     if let Some(c) = cookie {
         req = req.header("Cookie", c);
     }
-    
+
     let response = req.send().await?;
     let status = response.status();
     let text = response.text().await?;
-    
+
     if !status.is_success() {
         return Err(format!("HTTP {}: {}", status, text).into());
     }
-    
+
     let json: serde_json::Value = serde_json::from_str(&text)?;
     let quota = json["data"]["credit"].as_f64()
         .or_else(|| json["data"]["balance"].as_f64())
-        .unwrap_or(0.0);
-    
+        .ok_or_else(|| format!("No balance field in response: {}", text))?;
+
     Ok(quota)
 }

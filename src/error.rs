@@ -34,21 +34,34 @@ pub enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, message) = match self {
-            AppError::Database(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Database error"),
-            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized"),
-            AppError::NotFound => (StatusCode::NOT_FOUND, "Not found"),
-            AppError::Forbidden => (StatusCode::FORBIDDEN, "Forbidden"),
-            AppError::Validation(_) => (StatusCode::BAD_REQUEST, "Validation error"),
-            AppError::Crypto(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Crypto error"),
-            AppError::Http(_) => (StatusCode::BAD_GATEWAY, "HTTP request failed"),
-            AppError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal error"),
+        let (status, message, details) = match self {
+            AppError::Database(ref e) => {
+                tracing::error!("Database error: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Database error", None)
+            }
+            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized", None),
+            AppError::NotFound => (StatusCode::NOT_FOUND, "Not found", None),
+            AppError::Forbidden => (StatusCode::FORBIDDEN, "Forbidden", None),
+            AppError::Validation(ref msg) => (StatusCode::BAD_REQUEST, "Validation error", Some(msg.clone())),
+            AppError::Crypto(ref e) => {
+                tracing::error!("Crypto error: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Crypto error", None)
+            }
+            AppError::Http(ref e) => {
+                tracing::error!("HTTP request error: {}", e);
+                (StatusCode::BAD_GATEWAY, "HTTP request failed", None)
+            }
+            AppError::Internal(ref e) => {
+                tracing::error!("Internal error: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal error", None)
+            }
         };
 
-        let body = Json(json!({
-            "error": message,
-            "details": self.to_string(),
-        }));
+        let body = if let Some(d) = details {
+            Json(json!({ "error": message, "details": d }))
+        } else {
+            Json(json!({ "error": message }))
+        };
 
         (status, body).into_response()
     }

@@ -30,7 +30,7 @@
         <AccountPanel v-if="currentView === 'accounts'" />
         <CheckinRunsPanel v-else-if="currentView === 'runs'" />
         <SettingsPanel v-else-if="currentView === 'settings'" />
-        <AdminUserPanel v-else-if="currentView === 'users'" />
+        <AdminUserPanel v-else-if="currentView === 'users'" :current-user="currentUser" />
       </div>
     </div>
   </div>
@@ -42,9 +42,16 @@ import AccountPanel from './components/AccountPanel.vue'
 import CheckinRunsPanel from './components/CheckinRunsPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import AdminUserPanel from './components/AdminUserPanel.vue'
-import { API_BASE } from './config'
+import { apiUrl, getToken } from './utils/api'
+interface AppUser {
+  id: string
+  username: string
+  role: string
+  enabled: boolean
+}
+
 const isLoggedIn = ref(false)
-const currentUser = ref<any>(null)
+const currentUser = ref<AppUser | null>(null)
 const currentView = ref('accounts')
 const loginForm = ref({ username: '', password: '' })
 const error = ref('')
@@ -56,7 +63,7 @@ const isAdmin = computed(() => {
 const login = async () => {
   error.value = ''
   try {
-    const res = await fetch(`${API_BASE}/auth/login`, {
+    const res = await fetch(apiUrl('/auth/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(loginForm.value)
@@ -75,10 +82,10 @@ const login = async () => {
 }
 
 const fetchCurrentUser = async () => {
-  const token = localStorage.getItem('token')
+  const token = getToken()
   if (!token) return
 
-  const res = await fetch(`${API_BASE}/auth/me`, {
+  const res = await fetch(apiUrl('/auth/me'), {
     headers: { 'Authorization': `Bearer ${token}` }
   })
   if (res.ok) {
@@ -93,10 +100,10 @@ const fetchCurrentUser = async () => {
 }
 
 const logout = async () => {
-  const token = localStorage.getItem('token')
+  const token = getToken()
   if (token) {
     try {
-      await fetch(`${API_BASE}/auth/logout`, {
+      await fetch(apiUrl('/auth/logout'), {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -114,139 +121,24 @@ onMounted(fetchCurrentUser)
 </script>
 
 <style>
-@keyframes slideIn {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
-
-@keyframes slideOut {
-  from { transform: translateX(0); opacity: 1; }
-  to { transform: translateX(100%); opacity: 0; }
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #0a0a0a;
-  color: #fff;
-}
-
-#app {
-  min-height: 100vh;
-}
-
-.navbar {
-  background: #1a1a1a;
-  padding: 1rem 2rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid #333;
-}
-
-.navbar h1 {
-  font-size: 1.5rem;
-}
-
-.nav-links {
-  display: flex;
-  gap: 1rem;
-}
-
-.nav-links button {
-  background: transparent;
-  color: #ccc;
-  border: none;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s;
-}
-
-.nav-links button.active {
-  background: #0070f3;
-  color: white;
-}
-
-.nav-links button:hover:not(.active) {
-  background: #2a2a2a;
-}
-
-.btn-logout {
-  background: #ef4444 !important;
-  color: white !important;
-}
-
-.btn-logout:hover {
-  background: #dc2626 !important;
-}
-
-.container {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 2rem;
-}
-
-.login-page {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 80vh;
-}
-
-.login-form {
-  background: #1a1a1a;
-  padding: 2rem;
-  border-radius: 8px;
-  width: 100%;
-  max-width: 400px;
-}
-
-.login-form h2 {
-  margin-bottom: 1.5rem;
-  text-align: center;
-}
-
-.form-group {
-  margin-bottom: 1rem;
-}
-
-.form-group input {
-  width: 100%;
-  padding: 0.75rem;
-  background: #2a2a2a;
-  border: 1px solid #444;
-  border-radius: 4px;
-  color: #fff;
-  font-size: 1rem;
-}
-
-.btn-primary {
-  width: 100%;
-  background: #0070f3;
-  color: white;
-  border: none;
-  padding: 0.75rem;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 1rem;
-  font-weight: 500;
-}
-
-.btn-primary:hover {
-  background: #0051cc;
-}
-
-.error {
-  color: #ef4444;
-  margin-top: 1rem;
-  text-align: center;
-}
+#app { min-height: 100vh; }
+.navbar { background: #1a1a1a; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+.navbar h1 { font-size: 1.5rem; }
+.nav-links { display: flex; gap: 1rem; }
+.nav-links button { background: transparent; color: #ccc; border: none; padding: 0.5rem 1rem; cursor: pointer; border-radius: 4px; transition: all 0.2s; }
+.nav-links button.active { background: #0070f3; color: white; }
+.nav-links button:hover:not(.active) { background: #2a2a2a; }
+.btn-logout { background: #ef4444 !important; color: white !important; }
+.btn-logout:hover { background: #dc2626 !important; }
+.container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+.login-page { display: flex; align-items: center; justify-content: center; min-height: 80vh; }
+.login-form { background: #1a1a1a; padding: 2rem; border-radius: 8px; width: 100%; max-width: 400px; }
+.login-form h2 { margin-bottom: 1.5rem; text-align: center; }
+.form-group { margin-bottom: 1rem; }
+.form-group input { width: 100%; padding: 0.75rem; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 1rem; }
+.btn-primary { width: 100%; background: #0070f3; color: white; border: none; padding: 0.75rem; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: 500; }
+.btn-primary:hover { background: #0051cc; }
+.error { color: #ef4444; margin-top: 1rem; text-align: center; }
 </style>
 
 

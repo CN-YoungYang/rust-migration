@@ -1,11 +1,31 @@
-﻿use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use ring::rand::{SecureRandom, SystemRandom};
 use crate::error::{AppError, Result};
 use base64::{Engine as _, engine::general_purpose};
+use std::sync::OnceLock;
+
+static ENCRYPTION_KEY: OnceLock<Vec<u8>> = OnceLock::new();
+
+fn get_encryption_key() -> Result<&'static Vec<u8>> {
+    ENCRYPTION_KEY.get_or_try_init(|| {
+        let key_str = std::env::var("TOKEN_ENCRYPTION_KEY")
+            .map_err(|_| AppError::Crypto("TOKEN_ENCRYPTION_KEY not set".into()))?;
+
+        let key = general_purpose::STANDARD.decode(&key_str)
+            .map_err(|_| AppError::Crypto("Invalid encryption key".into()))?;
+        if key.len() != 32 {
+            return Err(AppError::Crypto("TOKEN_ENCRYPTION_KEY must decode to 32 bytes".into()));
+        }
+        Ok(key)
+    }).map_err(|e| match e {
+            AppError::Crypto(msg) => AppError::Crypto(msg.clone()),
+            other => AppError::Crypto(other.to_string()),
+        })
+}
 
 pub fn encrypt(plaintext: &str) -> Result<String> {
     let key = get_encryption_key()?;
-    let unbound_key = UnboundKey::new(&AES_256_GCM, &key)
+    let unbound_key = UnboundKey::new(&AES_256_GCM, key)
         .map_err(|_| AppError::Crypto("Failed to create key".into()))?;
     let sealing_key = LessSafeKey::new(unbound_key);
 
@@ -26,7 +46,7 @@ pub fn encrypt(plaintext: &str) -> Result<String> {
 
 pub fn decrypt(ciphertext: &str) -> Result<String> {
     let key = get_encryption_key()?;
-    let unbound_key = UnboundKey::new(&AES_256_GCM, &key)
+    let unbound_key = UnboundKey::new(&AES_256_GCM, key)
         .map_err(|_| AppError::Crypto("Failed to create key".into()))?;
     let opening_key = LessSafeKey::new(unbound_key);
 
@@ -50,7 +70,7 @@ pub fn decrypt(ciphertext: &str) -> Result<String> {
 }
 
 pub fn hash_password(password: &str) -> Result<String> {
-    bcrypt::hash(password, bcrypt::DEFAULT_COST)
+    bcrypt::hash(password, 10)
         .map_err(|_| AppError::Crypto("Password hashing failed".into()))
 }
 
@@ -59,20 +79,6 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool> {
         .map_err(|_| AppError::Crypto("Password verification failed".into()))
 }
 
-fn get_encryption_key() -> Result<Vec<u8>> {
-    let key_str = std::env::var("TOKEN_ENCRYPTION_KEY")
-        .map_err(|_| AppError::Crypto("TOKEN_ENCRYPTION_KEY not set".into()))?;
-
-    let key = general_purpose::STANDARD.decode(&key_str)
-        .map_err(|_| AppError::Crypto("Invalid encryption key".into()))?;
-    if key.len() != 32 {
-        return Err(AppError::Crypto("TOKEN_ENCRYPTION_KEY must decode to 32 bytes".into()));
-    }
-    Ok(key)
+pub fn decrypt_secret(encrypted: &str) -> Result<String> {
+    decrypt(encrypted)
 }
-
-pub fn decrypt_secret(encrypted: &str) -> std::result::Result<String, Box<dyn std::error::Error>> {
-    decrypt(encrypted).map_err(|e| e.into())
-}
-
-

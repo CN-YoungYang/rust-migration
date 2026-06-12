@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # deploy-1c1g.sh - 甲骨文 1C1G 一键部署脚本
 
 set -e
@@ -14,7 +14,7 @@ if [ ! -f /swapfile ]; then
     sudo chmod 600 /swapfile
     sudo mkswap /swapfile
     sudo swapon /swapfile
-    echo ''/swapfile none swap sw 0 0'' | sudo tee -a /etc/fstab
+    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
     echo "Swap 创建完成!"
 else
     echo "Swap 已存在"
@@ -25,7 +25,7 @@ echo ""
 echo "[2/6] 调整 swappiness..."
 sudo sysctl vm.swappiness=10
 if ! grep -q "vm.swappiness=10" /etc/sysctl.conf; then
-    echo ''vm.swappiness=10'' | sudo tee -a /etc/sysctl.conf
+    echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf
 fi
 
 # 3. 检查 Docker
@@ -53,20 +53,20 @@ fi
 echo ""
 echo "[5/6] 构建 Docker 镜像 (预计 15-30 分钟)..."
 echo "⚠️  1C1G 服务器构建较慢,请耐心等待..."
-docker-compose build --no-cache
+docker compose build --no-cache 2>/dev/null || docker-compose build --no-cache
 
 # 6. 启动服务
 echo ""
 echo "[6/6] 启动服务..."
-docker-compose up -d
+docker compose up -d 2>/dev/null || docker-compose up -d
 
 echo ""
 echo "=== 部署完成! ==="
 echo ""
-echo "服务地址: http://$(hostname -I | awk ''{print $1}''):3000"
+echo "服务地址: http://$(hostname -I | awk '{print $1}'):3000"
 echo "默认管理员: admin / admin123"
 echo ""
-echo "查看日志: docker-compose logs -f"
+echo "查看日志: docker compose logs -f"
 echo "监控资源: docker stats"
 echo ""
 echo "⚠️  请立即修改管理员密码!"

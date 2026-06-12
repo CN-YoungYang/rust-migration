@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="checkin-runs-panel">
     <div class="header">
       <h2>签到记录</h2>
@@ -10,7 +10,7 @@
           </option>
         </select>
         <button @click="executeCheckin" class="btn-execute" :disabled="!selectedAccountId">执行签到</button>
-        <input v-model.number="keepLatest" type="number" min="0" class="keep-input" title="保留最新记录数" />
+        <input v-model.number="keepLatest" type="number" min="1" max="10000" class="keep-input" title="保留最新记录数" />
         <button @click="cleanupRuns" class="btn-cleanup">清理记录</button>
       </div>
     </div>
@@ -35,8 +35,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
-import { API_BASE } from '../config'
+import { ref, onMounted } from 'vue'
+import { apiUrl, authHeaders, request } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
 
 interface Account {
@@ -61,20 +61,8 @@ const runs = ref<CheckinRun[]>([])
 const selectedAccountId = ref('')
 const keepLatest = ref(100)
 
-const getToken = () => localStorage.getItem('token') || ''
-const authHeaders = computed(() => ({ Authorization: `Bearer ${getToken()}` }))
-
-const request = async (url: string, options: RequestInit = {}) => {
-  const response = await fetch(url, options)
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(text || `HTTP ${response.status}`)
-  }
-  return response
-}
-
 const fetchAccounts = async () => {
-  const response = await request(`${API_BASE}/accounts`, { headers: authHeaders.value })
+  const response = await request(apiUrl('/accounts'), { headers: authHeaders() })
   accounts.value = await response.json()
   if (!selectedAccountId.value && accounts.value.length > 0) {
     selectedAccountId.value = accounts.value[0].id
@@ -82,17 +70,17 @@ const fetchAccounts = async () => {
 }
 
 const fetchRuns = async () => {
-  const response = await request(`${API_BASE}/checkin-runs`, { headers: authHeaders.value })
+  const response = await request(apiUrl('/checkin-runs'), { headers: authHeaders() })
   runs.value = await response.json()
 }
 
 const executeCheckin = async () => {
   if (!selectedAccountId.value) return
   try {
-    await request(`${API_BASE}/checkin-runs`, {
+    await request(apiUrl('/checkin-runs'), {
       method: 'POST',
-      headers: { ...authHeaders.value, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account_id: selectedAccountId.value })
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId: selectedAccountId.value })
     })
     showToast('签到已执行', 'success')
     await fetchRuns()
@@ -104,9 +92,9 @@ const executeCheckin = async () => {
 const cleanupRuns = async () => {
   if (!(await confirmAction(`确定清理记录并保留最新 ${keepLatest.value} 条吗？`))) return
   try {
-    await request(`${API_BASE}/checkin-runs/cleanup`, {
-      method: 'DELETE',
-      headers: { ...authHeaders.value, 'Content-Type': 'application/json' },
+    await request(apiUrl('/checkin-runs/cleanup'), {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ keepLatest: keepLatest.value })
     })
     showToast('记录已清理', 'success')

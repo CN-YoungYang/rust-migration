@@ -15,6 +15,7 @@ use crate::{
 
 #[derive(Debug, Deserialize)]
 pub struct ExecuteCheckinRequest {
+    #[serde(rename = "accountId")]
     pub account_id: String,
 }
 
@@ -38,6 +39,15 @@ pub async fn execute(
     if user.role != "ADMIN" && user.role != "SUPER_ADMIN" && account.owner_id.as_ref() != Some(&user.id) {
         return Err(crate::error::AppError::Forbidden);
     }
+
+    let today_count = db::count_runs_by_account_today(&state.db, &payload.account_id).await?;
+    let settings = db::get_settings(&state.db).await?;
+    if today_count >= settings.max_attempts_per_day {
+        return Err(crate::error::AppError::Validation(
+            format!("已达到今日最大尝试次数 ({})", settings.max_attempts_per_day)
+        ));
+    }
+
     let run = execute_checkin(&state.db, &payload.account_id, "manual").await?;
     Ok(Json(run))
 }

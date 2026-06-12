@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <section class="account-panel">
     <div class="panel-header">
       <h2>签到账户管理</h2>
@@ -63,7 +63,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { API_BASE } from '../config'
+import { apiUrl, authHeaders, request } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
 
 type Account = {
@@ -99,19 +99,6 @@ const form = reactive({
   retryEnabled: true,
 })
 
-function authHeaders() {
-  return { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }
-}
-
-async function request(url: string, options: RequestInit = {}) {
-  const response = await fetch(url, options)
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(text || `HTTP ${response.status}`)
-  }
-  return response
-}
-
 function resetForm() {
   Object.assign(form, {
     name: '',
@@ -130,7 +117,7 @@ function resetForm() {
 async function loadAccounts() {
   loading.value = true
   try {
-    const response = await request(`${API_BASE}/accounts`, { headers: authHeaders() })
+    const response = await request(apiUrl('/accounts'), { headers: authHeaders() })
     accounts.value = await response.json()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '加载账户失败', 'error')
@@ -182,7 +169,7 @@ async function submitForm() {
   }
 
   try {
-    await request(editingId.value ? `${API_BASE}/accounts/${editingId.value}` : `${API_BASE}/accounts`, {
+    await request(editingId.value ? apiUrl(`/accounts/${editingId.value}`) : apiUrl('/accounts'), {
       method: editingId.value ? 'PUT' : 'POST',
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -198,7 +185,7 @@ async function submitForm() {
 async function deleteAccount(id: string) {
   if (!(await confirmAction('确定要删除此账户吗？'))) return
   try {
-    await request(`${API_BASE}/accounts/${id}`, { method: 'DELETE', headers: authHeaders() })
+    await request(apiUrl(`/accounts/${id}`), { method: 'DELETE', headers: authHeaders() })
     showToast('删除成功', 'success')
     await loadAccounts()
   } catch (error) {
@@ -208,7 +195,7 @@ async function deleteAccount(id: string) {
 
 async function refreshBalance(id: string) {
   try {
-    await request(`${API_BASE}/accounts/${id}/refresh-balance`, { method: 'POST', headers: authHeaders() })
+    await request(apiUrl(`/accounts/${id}/refresh-balance`), { method: 'POST', headers: authHeaders() })
     showToast('余额已刷新', 'success')
     await loadAccounts()
   } catch (error) {
