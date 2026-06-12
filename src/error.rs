@@ -1,4 +1,4 @@
-﻿use axum::{
+use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -15,6 +15,9 @@ pub enum AppError {
     
     #[error("Not found")]
     NotFound,
+    
+    #[error("Forbidden")]
+    Forbidden,
     
     #[error("Validation error: {0}")]
     Validation(String),
@@ -35,6 +38,7 @@ impl IntoResponse for AppError {
             AppError::Database(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Database error"),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized"),
             AppError::NotFound => (StatusCode::NOT_FOUND, "Not found"),
+            AppError::Forbidden => (StatusCode::FORBIDDEN, "Forbidden"),
             AppError::Validation(_) => (StatusCode::BAD_REQUEST, "Validation error"),
             AppError::Crypto(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Crypto error"),
             AppError::Http(_) => (StatusCode::BAD_GATEWAY, "HTTP request failed"),
@@ -51,3 +55,4 @@ impl IntoResponse for AppError {
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
+

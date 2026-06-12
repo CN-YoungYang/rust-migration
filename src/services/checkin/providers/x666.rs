@@ -1,6 +1,6 @@
-﻿use reqwest::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use crate::error::{Result, AppError};
+use crate::error::Result;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct X666Response {
@@ -13,7 +13,7 @@ pub struct X666Response {
 const DEFAULT_CHECKIN_URL: &str = "https://up.x666.me/api/checkin/spin";
 const REFERER_URL: &str = "https://up.x666.me/";
 
-pub async fn checkin(base_url: &str, cookie: &str, custom_url: Option<&str>) -> Result<(String, String, Option<String>)> {
+pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>) -> Result<(String, String, Option<String>)> {
     let url = custom_url.unwrap_or(DEFAULT_CHECKIN_URL);
     let client = Client::new();
     
