@@ -1,39 +1,60 @@
-use axum::{
+﻿use axum::{
     extract::{Request, State},
     middleware::Next,
     response::Response,
     http::StatusCode,
 };
-use std::sync::Arc;
-use crate::{AppState, db};
-
-// Simple session store (in production, use Redis or similar)
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
+use crate::{AppState, db};
 use lazy_static::lazy_static;
 
+#[derive(Clone)]
+struct SessionEntry {
+    user_id: String,
+    expires_at: SystemTime,
+}
+
 lazy_static! {
-    static ref SESSIONS: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
+    static ref SESSIONS: Mutex<HashMap<String, SessionEntry>> = Mutex::new(HashMap::new());
+}
+
+fn session_ttl() -> Duration {
+    let hours = std::env::var("SESSION_TTL_HOURS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|hours| *hours > 0)
+        .unwrap_or(24);
+    Duration::from_secs(hours * 60 * 60)
 }
 
 pub fn create_session(user_id: &str) -> String {
     let token = uuid::Uuid::new_v4().to_string();
-    let mut sessions = SESSIONS.lock().unwrap();
-    sessions.insert(token.clone(), user_id.to_string());
+    let expires_at = SystemTime::now() + session_ttl();
+    let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    sessions.insert(token.clone(), SessionEntry {
+        user_id: user_id.to_string(),
+        expires_at,
+    });
     token
 }
 
 pub fn get_user_from_session(token: &str) -> Option<String> {
-    let sessions = SESSIONS.lock().unwrap();
-    sessions.get(token).cloned()
+    let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let entry = sessions.get(token)?.clone();
+    if SystemTime::now() >= entry.expires_at {
+        sessions.remove(token);
+        return None;
+    }
+    Some(entry.user_id)
 }
 
 pub fn remove_session(token: &str) {
-    let mut sessions = SESSIONS.lock().unwrap();
+    let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     sessions.remove(token);
 }
 
-// Auth middleware
 pub async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     mut request: Request,
@@ -60,7 +81,6 @@ pub async fn auth_middleware(
     Err(StatusCode::UNAUTHORIZED)
 }
 
-// Admin-only middleware
 pub async fn admin_middleware(
     request: Request,
     next: Next,

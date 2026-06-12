@@ -1,9 +1,9 @@
-# Build stage
+ï»¿# Build stage
 FROM rust:1.86-slim as builder
 
 WORKDIR /app
 
-# 1C1G ÓÅ»¯: ÏŞÖÆ²¢·¢¹¹½¨
+# 1C1G ä¼˜åŒ–: é™åˆ¶å¹¶å‘æ„å»º
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
@@ -41,6 +41,7 @@ RUN mkdir -p /app/data
 ENV RUST_LOG=warn
 ENV DATABASE_URL=sqlite:/app/data/ai-hub.db
 
-EXPOSE 3000
+EXPOSE 8080
 
 CMD ["/app/ai-hub-rust"]
+

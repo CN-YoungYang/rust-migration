@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+﻿use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use chrono::{DateTime, Utc};
 
@@ -126,8 +126,6 @@ pub struct CreateAccountRequest {
     pub base_url: String,
     #[serde(rename = "userId")]
     pub user_id: Option<String>,
-    #[serde(rename = "ownerId")]
-    pub owner_id: Option<String>,
     #[serde(rename = "authType")]
     pub auth_type: String,
     #[serde(rename = "accessToken")]
@@ -147,8 +145,6 @@ pub struct UpdateAccountRequest {
     pub base_url: Option<String>,
     #[serde(rename = "userId")]
     pub user_id: Option<String>,
-    #[serde(rename = "ownerId")]
-    pub owner_id: Option<String>,
     #[serde(rename = "accessToken")]
     pub access_token: Option<String>,
     pub cookie: Option<String>,
@@ -182,4 +178,13 @@ pub struct UpdateSettingsRequest {
     pub retry_enabled: Option<bool>,
     #[serde(rename = "maxAttemptsPerDay")]
     pub max_attempts_per_day: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateUserRequest {
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub role: Option<String>,
+    pub enabled: Option<bool>,
+    pub note: Option<String>,
 }

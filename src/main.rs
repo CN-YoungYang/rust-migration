@@ -1,4 +1,4 @@
-use axum::{
+﻿use axum::{
     routing::{get, post, delete},
     Router,
     middleware,
@@ -11,6 +11,7 @@ use tower_http::{
     trace::TraceLayer,
     cors::{CorsLayer, Any},
 };
+use axum::http::{HeaderValue, Method};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod models;
@@ -95,11 +96,11 @@ async fn main() -> anyhow::Result<()> {
         .merge(protected_routes)
         .merge(admin_routes)
         .layer(TraceLayer::new_for_http())
-        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
+        .layer(cors_layer())
         .fallback_service(ServeDir::new("public"))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     tracing::info!("Server listening on {}", listener.local_addr()?);
     tracing::info!("Memory optimized for 1C1G server");
     axum::serve(listener, app).await?;
@@ -107,17 +108,43 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn cors_layer() -> CorsLayer {
+    let origins = std::env::var("CORS_ALLOWED_ORIGINS").unwrap_or_else(|_| "http://localhost:5173".to_string());
+    let mut layer = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_headers(Any);
+
+    for origin in origins.split(',').map(str::trim).filter(|origin| !origin.is_empty()) {
+        if origin == "*" {
+            return CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+                .allow_headers(Any);
+        }
+        if let Ok(header_value) = HeaderValue::from_str(origin) {
+            layer = layer.allow_origin(header_value);
+        } else {
+            tracing::warn!("Ignoring invalid CORS origin: {}", origin);
+        }
+    }
+
+    layer
+}
 async fn initialize_admin(db: &SqlitePool) -> anyhow::Result<()> {
     let admin_username = std::env::var("ADMIN_USERNAME").unwrap_or_else(|_| "admin".to_string());
-    let admin_password = std::env::var("ADMIN_PASSWORD").unwrap_or_else(|_| "admin123".to_string());
     
     tracing::info!("Initializing admin user: {}", admin_username);
     
     let existing = db::find_user_by_username(db, &admin_username).await?;
     
     if existing.is_none() {
+        let admin_password = std::env::var("ADMIN_PASSWORD")
+            .map_err(|_| anyhow::anyhow!("ADMIN_PASSWORD must be set before creating the initial admin user"))?;
+        if admin_password.len() < 8 {
+            anyhow::bail!("ADMIN_PASSWORD must be at least 8 characters long");
+        }
         let password_hash = crypto::hash_password(&admin_password)?;
-        db::create_user(db, &admin_username, &password_hash, "SUPER_ADMIN").await?;
+        db::create_user(db, &admin_username, &password_hash, "SUPER_ADMIN", true, None).await?;
         tracing::info!("Created SUPER_ADMIN user: {}", admin_username);
     } else {
         tracing::info!("Admin user already exists: {}", admin_username);
@@ -125,3 +152,5 @@ async fn initialize_admin(db: &SqlitePool) -> anyhow::Result<()> {
     
     Ok(())
 }
+
+

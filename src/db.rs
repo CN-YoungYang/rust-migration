@@ -3,11 +3,6 @@ use crate::models::*;
 use crate::error::Result;
 use chrono::Utc;
 
-pub async fn get_pool(database_url: &str) -> Result<SqlitePool> {
-    let pool = SqlitePool::connect(database_url).await?;
-    Ok(pool)
-}
-
 // AppUser operations
 pub async fn find_user_by_username(db: &SqlitePool, username: &str) -> Result<Option<AppUser>> {
     let user = sqlx::query_as::<_, AppUser>(
@@ -38,18 +33,19 @@ pub async fn list_users(db: &SqlitePool) -> Result<Vec<AppUser>> {
     Ok(users)
 }
 
-pub async fn create_user(db: &SqlitePool, username: &str, password_hash: &str, role: &str) -> Result<AppUser> {
+pub async fn create_user(db: &SqlitePool, username: &str, password_hash: &str, role: &str, enabled: bool, note: Option<&str>) -> Result<AppUser> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now();
     
     sqlx::query(
-        "INSERT INTO AppUser (id, username, passwordHash, role, enabled, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO AppUser (id, username, passwordHash, role, enabled, note, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(&id)
     .bind(username)
     .bind(password_hash)
     .bind(role)
-    .bind(true)
+    .bind(enabled)
+    .bind(note)
     .bind(now)
     .bind(now)
     .execute(db)

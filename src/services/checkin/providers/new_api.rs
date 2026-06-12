@@ -1,4 +1,4 @@
-use reqwest::Client;
+﻿use reqwest::Client;
 use serde::{Deserialize};
 use crate::error::{Result};
 
@@ -6,7 +6,6 @@ use crate::error::{Result};
 struct NewApiResponse {
     success: bool,
     message: Option<String>,
-    data: Option<serde_json::Value>,
 }
 
 pub async fn checkin(base_url: &str, token: &str, user_id: Option<&str>) -> Result<(String, String, Option<String>)> {
@@ -40,15 +39,14 @@ pub async fn checkin(base_url: &str, token: &str, user_id: Option<&str>) -> Resu
         .unwrap_or(NewApiResponse {
             success: false,
             message: Some("Failed to parse response".into()),
-            data: None,
         });
     
     let message = parsed.message.unwrap_or_else(|| "No message".to_string());
     let message_lower = message.to_lowercase();
     
-    let status = if message_lower.contains("already") || message_lower.contains("��ǩ��") {
+    let status = if message_lower.contains("already") || message_lower.contains("锟斤拷签锟斤拷") {
         "already_checked"
-    } else if parsed.success || message_lower.contains("success") || message_lower.contains("�ɹ�") {
+    } else if parsed.success || message_lower.contains("success") || message_lower.contains("锟缴癸拷") {
         "success"
     } else {
         "failed"
