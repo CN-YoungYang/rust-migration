@@ -1,11 +1,11 @@
-﻿use axum::{
+use axum::{
     extract::{Request, State},
     middleware::Next,
     response::Response,
     http::StatusCode,
 };
 use std::sync::Arc;
-use crate::{AppState, db, error::AppError};
+use crate::{AppState, db};
 
 // Simple session store (in production, use Redis or similar)
 use std::collections::HashMap;

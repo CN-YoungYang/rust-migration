@@ -1,10 +1,10 @@
-﻿use sqlx::SqlitePool;
+use sqlx::SqlitePool;
 use crate::models::*;
 use crate::error::Result;
 use chrono::Utc;
 
 pub async fn get_pool(database_url: &str) -> Result<SqlitePool> {
-    let pool = SqlitePool::connect(databaseUrl).await?;
+    let pool = SqlitePool::connect(database_url).await?;
     Ok(pool)
 }
 
