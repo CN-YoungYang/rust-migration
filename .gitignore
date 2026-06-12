@@ -1,6 +1,38 @@
-﻿/target
-/data
+# Rust
+/target/
+debug/
+
+# Build
+dist/
+build/
+
+# Environment variables
 .env
+.env.*
+!.env.example
+
+# Database
 *.db
+*.db-journal
 *.db-shm
 *.db-wal
+/data/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# Frontend (has its own .gitignore)
+frontend/node_modules/
+frontend/dist/
