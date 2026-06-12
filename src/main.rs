@@ -42,8 +42,6 @@ async fn main() -> anyhow::Result<()> {
 
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "sqlite:./data/ai-hub.db".to_string());
-
-    // ???: ?????????(1C1G???)
     let connect_options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
@@ -53,8 +51,6 @@ async fn main() -> anyhow::Result<()> {
 
     let db = SqlitePool::connect_with(connect_options)
         .await?;
-    
-    // ???: ??????????§³(1C1G)
     sqlx::query("PRAGMA max_page_count = 1073741823").execute(&db).await?;
     
     // Run migrations
