@@ -1,6 +1,6 @@
 use sqlx::SqlitePool;
 use tokio_cron_scheduler::{JobScheduler, Job};
-use chrono::{Local, NaiveTime, Utc};
+use chrono::{Local, NaiveTime};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use crate::{

@@ -7,20 +7,16 @@ use std::sync::OnceLock;
 static ENCRYPTION_KEY: OnceLock<Vec<u8>> = OnceLock::new();
 
 fn get_encryption_key() -> Result<&'static Vec<u8>> {
-    ENCRYPTION_KEY.get_or_try_init(|| {
+    ENCRYPTION_KEY.get_or_init(|| {
         let key_str = std::env::var("TOKEN_ENCRYPTION_KEY")
-            .map_err(|_| AppError::Crypto("TOKEN_ENCRYPTION_KEY not set".into()))?;
-
+            .expect("TOKEN_ENCRYPTION_KEY not set");
         let key = general_purpose::STANDARD.decode(&key_str)
-            .map_err(|_| AppError::Crypto("Invalid encryption key".into()))?;
-        if key.len() != 32 {
-            return Err(AppError::Crypto("TOKEN_ENCRYPTION_KEY must decode to 32 bytes".into()));
-        }
-        Ok(key)
-    }).map_err(|e| match e {
-            AppError::Crypto(msg) => AppError::Crypto(msg.clone()),
-            other => AppError::Crypto(other.to_string()),
-        })
+            .expect("Invalid TOKEN_ENCRYPTION_KEY: not valid base64");
+        assert_eq!(key.len(), 32, "TOKEN_ENCRYPTION_KEY must decode to 32 bytes");
+        key
+    });
+    // get_or_init always succeeds here; errors above panic with clear messages
+    Ok(ENCRYPTION_KEY.get().unwrap())
 }
 
 pub fn encrypt(plaintext: &str) -> Result<String> {

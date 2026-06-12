@@ -75,8 +75,9 @@ fn cleanup_expired_sessions(sessions: &mut HashMap<String, SessionEntry>) {
         let mut entries: Vec<_> = sessions.iter().collect();
         entries.sort_by_key(|(_, e)| e.expires_at);
         let to_remove = sessions.len() - MAX_SESSIONS;
-        for (token, _) in entries.into_iter().take(to_remove) {
-            sessions.remove(token);
+        let tokens_to_remove: Vec<_> = entries.into_iter().take(to_remove).map(|(k, _)| k.clone()).collect();
+        for token in tokens_to_remove {
+            sessions.remove(&token);
         }
     }
 }

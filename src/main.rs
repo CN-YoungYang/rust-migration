@@ -3,7 +3,7 @@
     Router,
     middleware,
 };
-use sqlx::{SqlitePool, sqlite::SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::{SqlitePool, sqlite::{SqliteConnectOptions, SqlitePoolOptions}};
 use std::sync::Arc;
 use std::str::FromStr;
 use tower_http::{
