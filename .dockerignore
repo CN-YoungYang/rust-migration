@@ -1,0 +1,11 @@
+frontend/
+docs/
+.env
+.env.*
+*.md
+.git/
+.gitignore
+target/
+deploy-1c1g.sh
+docker-compose.hub.yml
+data/

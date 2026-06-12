@@ -53,20 +53,20 @@ fi
 echo ""
 echo "[5/6] 构建 Docker 镜像 (预计 15-30 分钟)..."
 echo "⚠️  1C1G 服务器构建较慢,请耐心等待..."
-docker compose build --no-cache 2>/dev/null || docker-compose build --no-cache
+docker compose -f docker-compose.hub.yml build 2>/dev/null || docker-compose -f docker-compose.hub.yml build
 
 # 6. 启动服务
 echo ""
 echo "[6/6] 启动服务..."
-docker compose up -d 2>/dev/null || docker-compose up -d
+docker compose -f docker-compose.hub.yml up -d 2>/dev/null || docker-compose -f docker-compose.hub.yml up -d
 
 echo ""
 echo "=== 部署完成! ==="
 echo ""
 echo "服务地址: http://$(hostname -I | awk '{print $1}'):3000"
-echo "默认管理员: admin / admin123"
+echo "默认管理员: admin / admin123456"
 echo ""
-echo "查看日志: docker compose logs -f"
+echo "查看日志: docker compose -f docker-compose.hub.yml logs -f"
 echo "监控资源: docker stats"
 echo ""
 echo "⚠️  请立即修改管理员密码!"
