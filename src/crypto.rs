@@ -1,4 +1,4 @@
-﻿use ring::aead::{Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, AES_256_GCM};
+use ring::aead::{Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, AES_256_GCM};
 use ring::error::Unspecified;
 use crate::error::{AppError, Result};
 use base64::{Engine as _, engine::general_purpose};
@@ -71,4 +71,8 @@ fn get_encryption_key() -> Result<Vec<u8>> {
     
     general_purpose::STANDARD.decode(&key_str)
         .map_err(|_| AppError::Crypto("Invalid encryption key".into()))
+}
+
+pub fn decrypt_secret(encrypted: &str) -> std::result::Result<String, Box<dyn std::error::Error>> {
+    decrypt(encrypted).map_err(|e| e.into())
 }

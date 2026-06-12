@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS CheckinAccount (
     siteType TEXT NOT NULL DEFAULT 'new-api',
     baseUrl TEXT NOT NULL,
     userId TEXT,
+    ownerId TEXT,
     authType TEXT NOT NULL DEFAULT 'access_token',
     accessTokenEnc TEXT,
     cookieEnc TEXT,

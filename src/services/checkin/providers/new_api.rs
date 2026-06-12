@@ -1,4 +1,4 @@
-﻿use reqwest::Client;
+use reqwest::Client;
 use serde::{Deserialize};
 use crate::error::{Result};
 
@@ -55,4 +55,33 @@ pub async fn checkin(base_url: &str, token: &str, user_id: Option<&str>) -> Resu
     };
     
     Ok((status.to_string(), message, Some(text)))
+}
+
+pub async fn fetch_balance(base_url: &str, _user_id: Option<&str>, access_token: Option<&str>, cookie: Option<&str>) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/user/self", base_url.trim_end_matches('/'));
+    
+    let mut req = client.get(&url);
+    
+    if let Some(token) = access_token {
+        req = req.header("Authorization", format!("Bearer {}", token));
+    }
+    if let Some(c) = cookie {
+        req = req.header("Cookie", c);
+    }
+    
+    let response = req.send().await?;
+    let status = response.status();
+    let text = response.text().await?;
+    
+    if !status.is_success() {
+        return Err(format!("HTTP {}: {}", status, text).into());
+    }
+    
+    let json: serde_json::Value = serde_json::from_str(&text)?;
+    let quota = json["data"]["quota"].as_f64()
+        .or_else(|| json["data"]["remainQuota"].as_f64())
+        .unwrap_or(0.0);
+    
+    Ok(quota)
 }

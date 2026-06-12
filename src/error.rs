@@ -54,5 +54,18 @@ impl IntoResponse for AppError {
     }
 }
 
+
+
+impl From<String> for AppError {
+    fn from(s: String) -> Self {
+        AppError::Internal(s)
+    }
+}
+
+impl From<serde_json::Error> for AppError {
+    fn from(e: serde_json::Error) -> Self {
+        AppError::Internal(e.to_string())
+    }
+}
 pub type Result<T> = std::result::Result<T, AppError>;
 

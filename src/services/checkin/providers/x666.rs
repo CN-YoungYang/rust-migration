@@ -21,7 +21,7 @@ pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>) ->
         .header("Cookie", cookie)
         .header("Accept", "*/*")
         .header("Accept-Language", "zh,zh-CN;q=0.9,en;q=0.8")
-        .header("Origin", REFERER_URL.trim_end_matches('/'))
+        .header("Origin", REFERER_URL.trim_end_matches("/"))
         .header("Referer", REFERER_URL)
         .send()
         .await?;
@@ -53,4 +53,30 @@ pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>) ->
     }
     
     Ok(("failed".to_string(), format!("签到失败：{}", response_msg), Some(text)))
+}
+
+pub async fn fetch_balance(cookie: Option<&str>) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+    let client = reqwest::Client::new();
+    let url = "https://www.x666.one/api/user/info";
+    
+    let mut req = client.get(url);
+    
+    if let Some(c) = cookie {
+        req = req.header("Cookie", c);
+    }
+    
+    let response = req.send().await?;
+    let status = response.status();
+    let text = response.text().await?;
+    
+    if !status.is_success() {
+        return Err(format!("HTTP {}: {}", status, text).into());
+    }
+    
+    let json: serde_json::Value = serde_json::from_str(&text)?;
+    let quota = json["data"]["credit"].as_f64()
+        .or_else(|| json["data"]["balance"].as_f64())
+        .unwrap_or(0.0);
+    
+    Ok(quota)
 }

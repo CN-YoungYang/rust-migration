@@ -68,7 +68,7 @@ pub async fn admin_middleware(
     let user = request.extensions().get::<crate::models::AppUser>().cloned();
     
     match user {
-        Some(u) if u.role == "ADMIN" => Ok(next.run(request).await),
+        Some(u) if u.role == "ADMIN" || u.role == "SUPER_ADMIN" => Ok(next.run(request).await),
         _ => Err(StatusCode::FORBIDDEN),
     }
 }

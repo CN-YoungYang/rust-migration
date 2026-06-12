@@ -1,4 +1,4 @@
-﻿use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use chrono::{DateTime, Utc};
 
@@ -20,7 +20,7 @@ pub struct AppUser {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct CheckinAccount {
     pub id: String,
     pub name: String,
@@ -33,6 +33,8 @@ pub struct CheckinAccount {
     #[serde(rename = "userId")]
     #[sqlx(rename = "userId")]
     pub user_id: Option<String>,
+    #[serde(rename = "ownerId")]
+    pub owner_id: Option<String>,
     #[serde(rename = "authType")]
     #[sqlx(rename = "authType")]
     pub auth_type: String,
@@ -72,7 +74,7 @@ pub struct CheckinAccount {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct CheckinRun {
     pub id: String,
     #[serde(rename = "accountId")]
@@ -124,6 +126,8 @@ pub struct CreateAccountRequest {
     pub base_url: String,
     #[serde(rename = "userId")]
     pub user_id: Option<String>,
+    #[serde(rename = "ownerId")]
+    pub owner_id: Option<String>,
     #[serde(rename = "authType")]
     pub auth_type: String,
     #[serde(rename = "accessToken")]
@@ -143,6 +147,8 @@ pub struct UpdateAccountRequest {
     pub base_url: Option<String>,
     #[serde(rename = "userId")]
     pub user_id: Option<String>,
+    #[serde(rename = "ownerId")]
+    pub owner_id: Option<String>,
     #[serde(rename = "accessToken")]
     pub access_token: Option<String>,
     pub cookie: Option<String>,
