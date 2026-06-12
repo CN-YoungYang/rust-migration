@@ -123,9 +123,6 @@ async fn initialize_admin(db: &SqlitePool) -> anyhow::Result<()> {
     
     Ok(())
 }
-    Router,
-    middleware,
-};
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 use std::sync::Arc;
 use std::str::FromStr;
@@ -229,7 +226,9 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn initialize_admin(db: &SqlitePool) -> anyhow::Result<()> {
+    tracing::info!("Initializing admin user...");`r`n    let admin_username = std::env::var("ADMIN_USERNAME").unwrap_or_else(|_| "admin".to_string());
     tracing::info!("Initializing admin user...");
+    let admin_password = std::env::var("ADMIN_PASSWORD").unwrap_or_else(|_| "admin123".to_string());`r`n    tracing::info!("Admin username from env: {}", admin_username);
     tracing::info!("Admin username from env: {}", admin_username);
     
     let existing = db::find_user_by_username(db, &admin_username).await?;
@@ -241,4 +240,5 @@ async fn initialize_admin(db: &SqlitePool) -> anyhow::Result<()> {
     }
     
     Ok(())
+}
 
