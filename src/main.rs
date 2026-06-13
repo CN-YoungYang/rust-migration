@@ -9,9 +9,9 @@ use std::str::FromStr;
 use tower_http::{
     services::ServeDir,
     trace::TraceLayer,
-    cors::{CorsLayer, Any},
+    cors::CorsLayer,
 };
-use axum::http::{HeaderValue, Method};
+use axum::http::{HeaderValue, Method, HeaderName};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod models;
@@ -114,7 +114,11 @@ fn cors_layer() -> CorsLayer {
     let origins = std::env::var("CORS_ALLOWED_ORIGINS").unwrap_or_else(|_| "http://localhost:5173".to_string());
     let mut layer = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
-        .allow_headers(Any)
+        .allow_headers([
+            HeaderName::from_static("content-type"),
+            HeaderName::from_static("authorization"),
+            HeaderName::from_static("accept"),
+        ])
         .allow_credentials(true);
 
     for origin in origins.split(',').map(str::trim).filter(|origin| !origin.is_empty()) {
