@@ -16,7 +16,7 @@
             <span v-if="!account.enabled" class="badge disabled">已禁用</span>
           </div>
           <p class="muted">{{ account.baseUrl }}</p>
-          <p class="muted">认证：{{ account.authType }} ｜ 余额：{{ account.lastBalance ?? '-' }}</p>
+          <p class="muted">认证：{{ account.authType }} ｜ 余额：{{ formatBalance(account.lastBalance) }}</p>
           <p v-if="account.lastStatus" class="muted">最近状态：{{ account.lastStatus }} {{ account.lastMessage || '' }}</p>
         </div>
         <div class="actions">
@@ -79,6 +79,13 @@ type Account = {
   lastStatus?: string | null
   lastMessage?: string | null
   customCheckinUrl?: string | null
+}
+
+function formatBalance(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '-'
+  const num = typeof value === 'string' ? parseFloat(value) : value
+  if (!isFinite(num)) return '-'
+  return "$" + num.toFixed(2)
 }
 
 const accounts = ref<Account[]>([])

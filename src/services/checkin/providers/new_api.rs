@@ -77,5 +77,5 @@ pub async fn fetch_balance(base_url: &str, user_id: Option<&str>, access_token: 
         .or_else(|| json["data"]["remainQuota"].as_f64())
         .ok_or_else(|| format!("No quota field in balance response: {}", text))?;
 
-    Ok(quota)
+    Ok(quota / 500000.0)
 }
