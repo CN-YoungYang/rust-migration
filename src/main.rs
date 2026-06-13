@@ -113,15 +113,14 @@ async fn main() -> anyhow::Result<()> {
 fn cors_layer() -> CorsLayer {
     let origins = std::env::var("CORS_ALLOWED_ORIGINS").unwrap_or_else(|_| "http://localhost:5173".to_string());
     let mut layer = CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
-        .allow_headers(Any);
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_headers(Any)
+        .allow_credentials(true);
 
     for origin in origins.split(',').map(str::trim).filter(|origin| !origin.is_empty()) {
         if origin == "*" {
-            return CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
-                .allow_headers(Any);
+            tracing::warn!("CORS wildcard (*) cannot be used with credentials. Skipping.");
+            continue;
         }
         if let Ok(header_value) = HeaderValue::from_str(origin) {
             layer = layer.allow_origin(header_value);
