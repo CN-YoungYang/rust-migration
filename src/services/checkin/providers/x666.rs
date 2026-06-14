@@ -56,30 +56,34 @@ pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>) ->
 }
 
 pub async fn fetch_balance(cookie: Option<&str>) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+    let cookie = cookie.ok_or("Cookie is required for X666 balance query")?;
     let client = http_client();
     let url = "https://up.x666.me/api/checkin/status";
 
-    let mut req = client.get(url)
+    let req = client.get(url)
         .header("Accept", "*/*")
         .header("Accept-Language", "zh,zh-CN;q=0.9,en;q=0.8")
+        .header("Cookie", cookie)
         .header("Referer", "https://up.x666.me/");
-
-    if let Some(c) = cookie {
-        req = req.header("Cookie", c);
-    }
 
     let response = req.send().await?;
     let status = response.status();
     let text = response.text().await?;
 
+    let payload: Option<serde_json::Value> = serde_json::from_str(&text).ok();
+
     if !status.is_success() {
-        return Err(format!("HTTP {}: {}", status, text).into());
+        let message = payload.as_ref()
+            .and_then(|v| v.get("message").and_then(|m| m.as_str()))
+            .unwrap_or("");
+        return Err(message.to_string().into());
     }
 
-    let json: serde_json::Value = serde_json::from_str(&text)?;
-    let quota = json["current_quota"].as_f64()
-        .or_else(|| json["current_quota"].as_str().and_then(|s| s.trim().parse::<f64>().ok()))
-        .ok_or_else(|| format!("No current_quota in response: {}", text))?;
+    let quota = payload.as_ref()
+        .and_then(|v| v.get("current_quota"))
+        .and_then(|v| v.as_f64()
+            .or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok())))
+        .ok_or_else(|| "余额请求失败：站点未返回 current_quota".to_string())?;
 
     Ok(quota)
 }
