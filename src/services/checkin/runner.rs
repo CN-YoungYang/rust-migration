@@ -56,13 +56,19 @@ async fn execute_new_api_checkin(account: &CheckinAccount) -> Result<(String, St
 }
 
 async fn execute_anyrouter_checkin(account: &CheckinAccount) -> Result<(String, String, Option<String>)> {
-    let token = if let Some(enc) = &account.access_token_enc {
-        decrypt(enc)?
+    let cookie = if let Some(enc) = &account.cookie_enc {
+        Some(decrypt(enc)?)
     } else {
-        return Err(AppError::Validation("Access token required".into()));
+        None
     };
-    
-    anyrouter::checkin(&account.base_url, &token).await
+
+    anyrouter::checkin(
+        &account.base_url,
+        account.user_id.as_deref(),
+        cookie.as_deref(),
+        account.custom_checkin_url.as_deref(),
+    )
+    .await
 }
 
 async fn execute_x666_checkin(account: &CheckinAccount) -> Result<(String, String, Option<String>)> {
