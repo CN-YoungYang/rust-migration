@@ -1,5 +1,46 @@
 # 更新日志
 
+## v2.2.0 (2026-06-15)
+
+### 签到逻辑完善（参考 React 项目对齐）
+
+- **x666 签到增强**
+  - JSON 解析容错：处理 HTML 404 页面和非 JSON 响应
+  - 优先检测"已签到"状态，避免误判
+  - 优化错误消息提取逻辑（message/error 字段）
+  - 余额查询支持字符串和数字类型的 current_quota
+
+- **anyrouter 签到增强**
+  - 成功消息检测支持英文 "success" 和中文 "签到成功"
+  - JSON 解析失败时使用原始响应文本（不再返回空消息）
+  - 保持 acw_sc__v2 反爬验证码自动求解逻辑
+
+- **anyrouter 余额查询新增** 🎉
+  - 实现 `fetch_balance()` 函数，使用 `/api/user/self` 端点
+  - 自动处理反爬挑战页面（acw_sc__v2 自动重试）
+  - 支持从 `quota` 或 `data` 字段提取余额
+  - refresh_balance API 现在支持三种账号类型（new-api/anyrouter/x666）
+
+### 账号管理增强
+
+- **输入验证逻辑**
+  - anyrouter 账号必须提供 userId 和 cookie
+  - x666 账号必须提供 cookie
+  - new-api 使用 access_token 认证时必须提供 accessToken
+  - 更新账号时防止清除必需的凭证字段
+
+- **authType 自动调整**
+  - 创建 anyrouter 或 x666 账号时自动设置 authType 为 "cookie"
+  - 避免用户手动配置错误
+
+### 错误处理改进
+
+- 修复：`expected value at line 1 column 1` 导致的 500 错误
+- 修复：401/404 等 HTTP 错误返回的错误消息正确提取和显示
+- 增强：所有 provider 统一的错误处理模式
+
+---
+
 ## v2.1.0 (2026-06-13)
 
 ### 安全加固

@@ -288,3 +288,130 @@ pub async fn checkin(
         Some(text),
     ))
 }
+
+fn read_number(value: Option<&serde_json::Value>) -> Option<f64> {
+    let v = value?;
+    if let Some(n) = v.as_f64() {
+        return Some(n);
+    }
+    if let Some(s) = v.as_str() {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            if let Ok(n) = trimmed.parse::<f64>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+fn read_error_message(payload: Option<&serde_json::Value>) -> Option<String> {
+    payload
+        .and_then(|v| v.get("message").or_else(|| v.get("error")))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+/// Fetch balance for AnyRouter sites (uses /api/user/self endpoint)
+pub async fn fetch_balance(
+    base_url: &str,
+    user_id: Option<&str>,
+    access_token: Option<&str>,
+    cookie: Option<&str>,
+) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+    let client = http_client();
+    let url = join_url(base_url, "/api/user/self");
+
+    let mut req = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/json")
+        .header("Pragma", "no-cache")
+        .header("X-Requested-With", "XMLHttpRequest");
+
+    if let Some(uid) = user_id {
+        req = req.header("User-id", uid);
+    }
+    if let Some(token) = access_token {
+        req = req.header("Authorization", format!("Bearer {}", token));
+    }
+    if let Some(c) = cookie {
+        req = req.header("Cookie", c);
+    }
+
+    let response = req.send().await?;
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let text = response.text().await?;
+
+    // Handle challenge page with retry
+    if is_challenge_page(&text, content_type.as_deref()) {
+        if let Some(acw_sc_v2) = solve_acw_sc_v2(&text) {
+            let merged = merge_cookie(cookie, "acw_sc__v2", &acw_sc_v2);
+            
+            let mut retry_req = client
+                .get(&url)
+                .header("Accept", "application/json")
+                .header("Content-Type", "application/json")
+                .header("Pragma", "no-cache")
+                .header("X-Requested-With", "XMLHttpRequest");
+
+            if let Some(uid) = user_id {
+                retry_req = retry_req.header("User-id", uid);
+            }
+            if let Some(token) = access_token {
+                retry_req = retry_req.header("Authorization", format!("Bearer {}", token));
+            }
+            retry_req = retry_req.header("Cookie", merged);
+
+            let retry_response = retry_req.send().await?;
+            let retry_status = retry_response.status();
+            let retry_content_type = retry_response
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
+            let retry_text = retry_response.text().await?;
+
+            // Check again after retry
+            if is_challenge_page(&retry_text, retry_content_type.as_deref()) {
+                return Err("余额请求失败：AnyRouter 返回反爬挑战页，请更新 Cookie".into());
+            }
+
+            // Use retry response
+            return parse_balance_response(&retry_text, retry_status);
+        } else {
+            return Err("余额请求失败：AnyRouter 返回反爬挑战页，请更新 Cookie".into());
+        }
+    }
+
+    parse_balance_response(&text, status)
+}
+
+fn parse_balance_response(text: &str, status: reqwest::StatusCode) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+    let payload: Option<serde_json::Value> = serde_json::from_str(text).ok();
+
+    if !status.is_success() {
+        return Err(read_error_message(payload.as_ref())
+            .unwrap_or_else(|| format!("余额请求失败：HTTP {}", status)).into());
+    }
+
+    // Try to read quota from response
+    let quota = payload.as_ref()
+        .and_then(|v| read_number(v.get("quota")))
+        .or_else(|| {
+            payload.as_ref().and_then(|v| {
+                v.get("data").and_then(|d| read_number(Some(d)))
+            })
+        })
+        .ok_or_else(|| {
+            read_error_message(payload.as_ref())
+                .unwrap_or_else(|| "余额请求失败：站点未返回 quota".to_string())
+        })?;
+
+    Ok(quota)
+}

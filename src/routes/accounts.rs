@@ -73,6 +73,31 @@ pub async fn create(
     State(state): State<Arc<AppState>>, Extension(user): Extension<crate::models::AppUser>,
     Json(payload): Json<CreateAccountRequest>,
 ) -> Result<Json<Value>> {
+    // Validate required fields based on site type
+    if payload.site_type == "anyrouter" && payload.user_id.is_none() {
+        return Err(crate::error::AppError::Validation("userId is required for AnyRouter".into()));
+    }
+    
+    if (payload.site_type == "anyrouter" || payload.site_type == "x666") && payload.cookie.is_none() {
+        return Err(crate::error::AppError::Validation(
+            format!("cookie is required for {}", payload.site_type)
+        ));
+    }
+    
+    // Auto-adjust authType for anyrouter and x666
+    let auth_type = if payload.site_type == "anyrouter" || payload.site_type == "x666" {
+        "cookie".to_string()
+    } else {
+        payload.auth_type.clone()
+    };
+    
+    if payload.site_type != "anyrouter" && payload.site_type != "x666" 
+        && auth_type == "access_token" && payload.access_token.is_none() {
+        return Err(crate::error::AppError::Validation(
+            "accessToken is required when authType is access_token".into()
+        ));
+    }
+    
     let access_token_enc = payload.access_token.as_ref().map(|t| encrypt(t)).transpose()?;
     let cookie_enc = payload.cookie.as_ref().map(|c| encrypt(c)).transpose()?;
 
@@ -82,7 +107,7 @@ pub async fn create(
         &payload.site_type,
         &payload.base_url,
         payload.user_id.as_deref(),
-        &payload.auth_type,
+        &auth_type,
         access_token_enc.as_deref(),
         cookie_enc.as_deref(),
         payload.custom_checkin_url.as_deref(),
@@ -98,10 +123,43 @@ pub async fn update(
     Path(id): Path<String>,
     Json(payload): Json<UpdateAccountRequest>,
 ) -> Result<Json<Value>> {
-    let access_token_enc = payload.access_token.as_ref().map(|t| encrypt(t)).transpose()?;
-    let cookie_enc = payload.cookie.as_ref().map(|c| encrypt(c)).transpose()?;
     let existing = db::find_account_by_id(&state.db, &id).await?.ok_or(crate::error::AppError::NotFound)?;
     check_account_ownership(&existing, &user)?;
+    
+    // Validate based on site type (use existing site_type since it can't be changed)
+    let site_type = &existing.site_type;
+    
+    // Check if user_id is being cleared for anyrouter
+    if site_type == "anyrouter" {
+        let has_user_id = payload.user_id.as_ref().map(|s| !s.is_empty()).unwrap_or(false) 
+            || existing.user_id.is_some();
+        if !has_user_id {
+            return Err(crate::error::AppError::Validation("userId is required for AnyRouter".into()));
+        }
+    }
+    
+    // Check if cookie is being cleared for anyrouter/x666
+    if site_type == "anyrouter" || site_type == "x666" {
+        let has_cookie = payload.cookie.is_some() || existing.cookie_enc.is_some();
+        if !has_cookie {
+            return Err(crate::error::AppError::Validation(
+                format!("cookie is required for {}", site_type)
+            ));
+        }
+    }
+    
+    // Check if access_token is being cleared for new-api with access_token auth
+    if site_type != "anyrouter" && site_type != "x666" && existing.auth_type == "access_token" {
+        let has_token = payload.access_token.is_some() || existing.access_token_enc.is_some();
+        if !has_token {
+            return Err(crate::error::AppError::Validation(
+                "accessToken is required when authType is access_token".into()
+            ));
+        }
+    }
+    
+    let access_token_enc = payload.access_token.as_ref().map(|t| encrypt(t)).transpose()?;
+    let cookie_enc = payload.cookie.as_ref().map(|c| encrypt(c)).transpose()?;
         
     db::update_account(
         &state.db,
@@ -135,7 +193,7 @@ pub async fn refresh_balance(
     State(state): State<Arc<AppState>>, Extension(user): Extension<crate::models::AppUser>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>> {
-    use crate::services::checkin::providers::{new_api, x666};
+    use crate::services::checkin::providers::{new_api, anyrouter, x666};
     use crate::crypto::decrypt_secret;
 
     let account = db::find_account_by_id(&state.db, &id).await?
@@ -149,6 +207,21 @@ pub async fn refresh_balance(
             .transpose()?;
         x666::fetch_balance(cookie.as_deref()).await
             .map_err(|e| crate::error::AppError::Internal(e.to_string()))?
+    } else if account.site_type == "anyrouter" {
+        let access_token = account.access_token_enc.as_ref()
+            .map(|t| decrypt_secret(t))
+            .transpose()?;
+        let cookie = account.cookie_enc.as_ref()
+            .map(|c| decrypt_secret(c))
+            .transpose()?;
+        
+        anyrouter::fetch_balance(
+            &account.base_url,
+            account.user_id.as_deref(),
+            access_token.as_deref(),
+            cookie.as_deref()
+        ).await
+        .map_err(|e| crate::error::AppError::Internal(e.to_string()))?
     } else {
         let access_token = account.access_token_enc.as_ref()
             .map(|t| decrypt_secret(t))
