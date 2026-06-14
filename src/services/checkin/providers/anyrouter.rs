@@ -32,7 +32,8 @@ fn is_already_checked_message(message: &str) -> bool {
 }
 
 fn is_success_message(message: &str) -> bool {
-    message.contains("签到成功")
+    let lower = message.to_lowercase();
+    lower.contains("success") || message.contains("签到成功")
 }
 
 fn is_challenge_page(response_text: &str, content_type: Option<&str>) -> bool {
@@ -191,8 +192,14 @@ pub async fn checkin(
         ));
     }
 
+    // 尝试解析 JSON，如果失败则将原始文本作为 message
     let payload: Option<serde_json::Value> = serde_json::from_str(&text).ok();
-    let response_message = read_message(payload.as_ref());
+    let response_message = if let Some(ref p) = payload {
+        read_message(Some(p))
+    } else {
+        // JSON 解析失败，使用原始响应文本
+        text.clone()
+    };
 
     if !status.is_success() {
         if is_already_checked_message(&response_message) {

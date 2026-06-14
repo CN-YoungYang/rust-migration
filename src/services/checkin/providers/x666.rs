@@ -13,6 +13,42 @@ pub struct X666Response {
 const DEFAULT_CHECKIN_URL: &str = "https://up.x666.me/api/checkin/spin";
 const REFERER_URL: &str = "https://up.x666.me/";
 
+fn normalize_message(value: Option<&serde_json::Value>) -> String {
+    match value {
+        Some(v) => {
+            if let Some(s) = v.as_str() {
+                s.to_string()
+            } else {
+                String::new()
+            }
+        }
+        None => String::new(),
+    }
+}
+
+fn is_already_checked_message(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    ["今日已签", "已签到", "已经签到", "already"]
+        .iter()
+        .any(|text| lower.contains(text))
+}
+
+fn read_number(value: Option<&serde_json::Value>) -> Option<f64> {
+    let v = value?;
+    if let Some(n) = v.as_f64() {
+        return Some(n);
+    }
+    if let Some(s) = v.as_str() {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            if let Ok(n) = trimmed.parse::<f64>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
 pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>) -> Result<(String, String, Option<String>)> {
     let url = custom_url.unwrap_or(DEFAULT_CHECKIN_URL);
     let client = http_client();
@@ -29,29 +65,37 @@ pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>) ->
     let status_code = response.status();
     let text = response.text().await?;
 
+    // 尝试解析 JSON，失败时创建包含原始文本的 payload
     let payload: Option<X666Response> = serde_json::from_str(&text).ok();
-    let response_msg = payload.as_ref()
-        .and_then(|p| p.message.as_ref().or(p.error.as_ref()))
-        .and_then(|v| v.as_str())
-        .unwrap_or(&text)
-        .to_string();
+    
+    // 如果 JSON 解析失败但有文本内容，将文本作为 message 处理
+    let response_msg = if let Some(ref p) = payload {
+        let msg = normalize_message(p.message.as_ref().or(p.error.as_ref()));
+        if msg.is_empty() { 
+            text.clone() 
+        } else { 
+            msg 
+        }
+    } else {
+        text.clone()
+    };
 
-    let msg_lower = response_msg.to_lowercase();
-    let is_already = ["今日已签", "已签到", "已经签到", "already"].iter()
-        .any(|s| msg_lower.contains(&s.to_lowercase()));
-
-    if is_already {
+    // 先检查是否已签到（不管状态码）
+    if is_already_checked_message(&response_msg) {
         return Ok(("already_checked".to_string(), response_msg, Some(text)));
     }
 
+    // 检查 HTTP 状态码
     if !status_code.is_success() {
         return Ok(("failed".to_string(), format!("签到请求失败：HTTP {}", status_code), Some(text)));
     }
 
+    // 检查 success 字段
     if payload.as_ref().and_then(|p| p.success).unwrap_or(false) {
         return Ok(("success".to_string(), response_msg, Some(text)));
     }
 
+    // 默认失败
     Ok(("failed".to_string(), format!("签到失败：{}", response_msg), Some(text)))
 }
 
@@ -64,25 +108,26 @@ pub async fn fetch_balance(cookie: Option<&str>) -> std::result::Result<f64, Box
         .header("Accept", "*/*")
         .header("Accept-Language", "zh,zh-CN;q=0.9,en;q=0.8")
         .header("Cookie", cookie)
-        .header("Referer", "https://up.x666.me/");
+        .header("Referer", REFERER_URL);
 
     let response = req.send().await?;
     let status = response.status();
     let text = response.text().await?;
 
+    // 尝试解析 JSON
     let payload: Option<serde_json::Value> = serde_json::from_str(&text).ok();
 
     if !status.is_success() {
         let message = payload.as_ref()
             .and_then(|v| v.get("message").and_then(|m| m.as_str()))
-            .unwrap_or("");
-        return Err(message.to_string().into());
+            .unwrap_or("余额请求失败");
+        return Err(format!("HTTP {}: {}", status, message).into());
     }
 
+    // 尝试读取 current_quota
     let quota = payload.as_ref()
         .and_then(|v| v.get("current_quota"))
-        .and_then(|v| v.as_f64()
-            .or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok())))
+        .and_then(|v| read_number(Some(v)))
         .ok_or_else(|| "余额请求失败：站点未返回 current_quota".to_string())?;
 
     Ok(quota)
