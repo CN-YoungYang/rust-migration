@@ -1,4 +1,17 @@
-# Build stage
+# Stage 1: Build frontend (Vue 3 -> static assets)
+# 源码即真理: 镜像内的前端永远由 frontend/ 重新编译, 不依赖宿主机 public/
+FROM node:22-slim AS frontend-builder
+WORKDIR /app/frontend
+
+# 先拷依赖清单, 利用 layer 缓存
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --include=dev
+
+# 再拷源码并构建 (vite.config.ts: outDir '../public' -> /app/public)
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Build Rust backend
 FROM rust:1.86-slim AS builder
 
 WORKDIR /app
@@ -42,7 +55,8 @@ RUN useradd -m -u 1000 appuser
 # Copy binary and assets
 COPY --from=builder /app/target/release/ai-hub-rust /app/ai-hub-rust
 COPY --from=builder /app/migrations /app/migrations
-COPY public/ /app/public/
+# 前端来自 Stage 1 的构建产物, 不再依赖宿主机 public/
+COPY --from=frontend-builder /app/public/ /app/public/
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R appuser:appuser /app

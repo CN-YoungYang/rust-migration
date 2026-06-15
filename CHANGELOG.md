@@ -16,6 +16,11 @@
 
 - 删除误产生的 3 字节垃圾文件 `arrouter.rs`
 
+### 构建 / 部署
+
+- **Dockerfile 改为多阶段构建** — 新增 `frontend-builder`（node:22-slim）阶段，`docker build` 时自动 `npm ci && npm run build`，前端产物由 Stage 1 编译后 `COPY` 进运行镜像。**镜像内前端永远是源码最新编译结果，不再依赖宿主机 `public/`**（修复"改了前端但镜像里 index 不更新"的根因）
+- **`.dockerignore` 调整** — 由排除整个 `frontend/` 改为仅排除 `frontend/node_modules/` 等缓存目录，让源码能进入构建上下文
+
 ---
 
 ## v2.2.0 (2026-06-15)
