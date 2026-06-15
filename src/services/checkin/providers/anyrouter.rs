@@ -346,7 +346,14 @@ pub async fn fetch_balance(
         .header("X-Requested-With", "XMLHttpRequest");
 
     if let Some(uid) = user_id {
-        req = req.header("User-id", uid);
+        req = req
+            .header("New-API-User", uid)
+            .header("Veloera-User", uid)
+            .header("X-Api-User", uid)
+            .header("voapi-user", uid)
+            .header("User-id", uid)
+            .header("Rix-Api-User", uid)
+            .header("neo-api-user", uid);
     }
     if let Some(token) = access_token {
         req = req.header("Authorization", format!("Bearer {}", token));
@@ -377,7 +384,14 @@ pub async fn fetch_balance(
                 .header("X-Requested-With", "XMLHttpRequest");
 
             if let Some(uid) = user_id {
-                retry_req = retry_req.header("User-id", uid);
+                retry_req = retry_req
+                    .header("New-API-User", uid)
+                    .header("Veloera-User", uid)
+                    .header("X-Api-User", uid)
+                    .header("voapi-user", uid)
+                    .header("User-id", uid)
+                    .header("Rix-Api-User", uid)
+                    .header("neo-api-user", uid);
             }
             if let Some(token) = access_token {
                 retry_req = retry_req.header("Authorization", format!("Bearer {}", token));

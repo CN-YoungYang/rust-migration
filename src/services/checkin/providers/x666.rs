@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use super::super::http_client;
+use super::format_awarded_quota;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct X666Response {
@@ -49,6 +50,22 @@ fn read_number(value: Option<&serde_json::Value>) -> Option<f64> {
     None
 }
 
+/// 读取本次签到获得的额度（参考 Next.js readAwardedQuota: data.quota）
+/// 依次尝试 data.quota / quota
+fn read_awarded_quota(text: &str) -> Option<f64> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    read_number(value.get("data").and_then(|d| d.get("quota")))
+        .or_else(|| read_number(value.get("quota")))
+}
+
+/// 将本次获得额度拼入消息（参考 Next.js runner.ts）
+fn with_awarded_quota(message: String, text: &str) -> String {
+    match read_awarded_quota(text) {
+        Some(q) => format!("{}；本次获得额度：{}", message, format_awarded_quota(q)),
+        None => message,
+    }
+}
+
 pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>) -> Result<(String, String, Option<String>)> {
     let url = custom_url.unwrap_or(DEFAULT_CHECKIN_URL);
     let client = http_client();
@@ -82,7 +99,7 @@ pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>) ->
 
     // 先检查是否已签到（不管状态码）
     if is_already_checked_message(&response_msg) {
-        return Ok(("already_checked".to_string(), response_msg, Some(text)));
+        return Ok(("already_checked".to_string(), with_awarded_quota(response_msg, &text), Some(text)));
     }
 
     // 检查 HTTP 状态码
@@ -92,7 +109,7 @@ pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>) ->
 
     // 检查 success 字段
     if payload.as_ref().and_then(|p| p.success).unwrap_or(false) {
-        return Ok(("success".to_string(), response_msg, Some(text)));
+        return Ok(("success".to_string(), with_awarded_quota(response_msg, &text), Some(text)));
     }
 
     // 默认失败

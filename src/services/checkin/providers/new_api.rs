@@ -1,6 +1,6 @@
 use crate::error::Result;
 use super::super::http_client;
-use super::{CheckinResponse, classify_checkin_status};
+use super::{CheckinResponse, classify_checkin_status, format_awarded_quota};
 
 fn read_number(value: Option<&serde_json::Value>) -> Option<f64> {
     let v = value?;
@@ -25,13 +25,38 @@ fn read_error_message(payload: Option<&serde_json::Value>) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-pub async fn checkin(base_url: &str, token: &str, user_id: Option<&str>) -> Result<(String, String, Option<String>)> {
+/// 读取本次签到获得的额度（参考 Next.js readAwardedQuota）
+/// 依次尝试 data.quota_awarded / data.quotaAwarded / data.quota
+fn read_awarded_quota(data: Option<&serde_json::Value>) -> Option<f64> {
+    let data = data?.as_object()?;
+    let value = data
+        .get("quota_awarded")
+        .or_else(|| data.get("quotaAwarded"))
+        .or_else(|| data.get("quota"))?;
+    read_number(Some(value))
+}
+
+/// 读取 checked_in / checkedIn 布尔标志（参考 Next.js readCheckedInFlag）
+fn read_checked_in_flag(data: Option<&serde_json::Value>) -> bool {
+    let data = match data.and_then(|v| v.as_object()) {
+        Some(d) => d,
+        None => return false,
+    };
+    data.get("checked_in").and_then(|v| v.as_bool()).unwrap_or(false)
+        || data.get("checkedIn").and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
+pub async fn checkin(
+    base_url: &str,
+    user_id: Option<&str>,
+    access_token: Option<&str>,
+    cookie: Option<&str>,
+) -> Result<(String, String, Option<String>)> {
     let url = format!("{}/api/user/checkin", base_url.trim_end_matches('/'));
     let client = http_client();
 
     let mut req = client.post(&url)
         .header("Accept", "application/json")
-        .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .header("Pragma", "no-cache")
         .body("{}");
@@ -46,25 +71,47 @@ pub async fn checkin(base_url: &str, token: &str, user_id: Option<&str>) -> Resu
             .header("Rix-Api-User", uid)
             .header("neo-api-user", uid);
     }
+    if let Some(token) = access_token {
+        req = req.header("Authorization", format!("Bearer {}", token));
+    }
+    if let Some(c) = cookie {
+        req = req.header("Cookie", c);
+    }
 
     let response = req.send().await?;
     let status_code = response.status();
     let text = response.text().await?;
 
     if !status_code.is_success() {
-        return Ok(("failed".to_string(), format!("HTTP {}", status_code), Some(text)));
+        return Ok(("failed".to_string(), format!("签到请求失败：HTTP {}", status_code), Some(text)));
     }
 
     let parsed: CheckinResponse = serde_json::from_str(&text)
         .unwrap_or(CheckinResponse {
             success: false,
             message: Some("Failed to parse response".into()),
+            data: None,
         });
 
     let message = parsed.message.unwrap_or_else(|| "No message".to_string());
-    let status = classify_checkin_status(parsed.success, &message);
 
-    Ok((status.to_string(), message, Some(text)))
+    // 状态判定：已签关键词 > checked_in 标志 > success（与 Next.js 顺序对齐）
+    let status = {
+        let base = classify_checkin_status(parsed.success, &message);
+        if base == "already_checked" || read_checked_in_flag(parsed.data.as_ref()) {
+            "already_checked"
+        } else {
+            base
+        }
+    };
+
+    // 解析本次获得额度，拼入消息（参考 Next.js runner.ts）
+    let final_message = match read_awarded_quota(parsed.data.as_ref()) {
+        Some(q) => format!("{}；本次获得额度：{}", message, format_awarded_quota(q)),
+        None => message,
+    };
+
+    Ok((status.to_string(), final_message, Some(text)))
 }
 
 pub async fn fetch_balance(base_url: &str, user_id: Option<&str>, access_token: Option<&str>, cookie: Option<&str>) -> std::result::Result<f64, Box<dyn std::error::Error>> {
