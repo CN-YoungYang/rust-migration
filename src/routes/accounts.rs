@@ -201,19 +201,41 @@ pub async fn refresh_balance(
 
     check_account_ownership(&account, &user)?;
 
+    tracing::info!(
+        account_id = %id,
+        site_type = %account.site_type,
+        "Refreshing balance"
+    );
+
     let quota = if account.site_type == "x666" {
         let cookie = account.cookie_enc.as_ref()
-            .map(|c| decrypt_secret(c))
-            .transpose()?;
-        x666::fetch_balance(cookie.as_deref()).await
-            .map_err(|e| crate::error::AppError::Internal(e.to_string()))?
+            .ok_or_else(|| crate::error::AppError::Validation("Cookie not configured".into()))?;
+        let cookie_decrypted = decrypt_secret(cookie)
+            .map_err(|e| {
+                tracing::error!("Failed to decrypt cookie: {}", e);
+                crate::error::AppError::Internal("解密失败".to_string())
+            })?;
+        
+        x666::fetch_balance(Some(&cookie_decrypted)).await
+            .map_err(|e| {
+                tracing::error!("X666 fetch_balance error: {}", e);
+                crate::error::AppError::Internal(e.to_string())
+            })?
     } else if account.site_type == "anyrouter" {
         let access_token = account.access_token_enc.as_ref()
             .map(|t| decrypt_secret(t))
-            .transpose()?;
+            .transpose()
+            .map_err(|e| {
+                tracing::error!("Failed to decrypt access_token: {}", e);
+                crate::error::AppError::Internal("解密失败".to_string())
+            })?;
         let cookie = account.cookie_enc.as_ref()
             .map(|c| decrypt_secret(c))
-            .transpose()?;
+            .transpose()
+            .map_err(|e| {
+                tracing::error!("Failed to decrypt cookie: {}", e);
+                crate::error::AppError::Internal("解密失败".to_string())
+            })?;
         
         anyrouter::fetch_balance(
             &account.base_url,
@@ -221,14 +243,26 @@ pub async fn refresh_balance(
             access_token.as_deref(),
             cookie.as_deref()
         ).await
-        .map_err(|e| crate::error::AppError::Internal(e.to_string()))?
+        .map_err(|e| {
+            tracing::error!("AnyRouter fetch_balance error: {}", e);
+            crate::error::AppError::Internal(e.to_string())
+        })?
     } else {
+        // new-api or other types
         let access_token = account.access_token_enc.as_ref()
             .map(|t| decrypt_secret(t))
-            .transpose()?;
+            .transpose()
+            .map_err(|e| {
+                tracing::error!("Failed to decrypt access_token: {}", e);
+                crate::error::AppError::Internal("解密失败".to_string())
+            })?;
         let cookie = account.cookie_enc.as_ref()
             .map(|c| decrypt_secret(c))
-            .transpose()?;
+            .transpose()
+            .map_err(|e| {
+                tracing::error!("Failed to decrypt cookie: {}", e);
+                crate::error::AppError::Internal("解密失败".to_string())
+            })?;
         
         new_api::fetch_balance(
             &account.base_url,
@@ -236,8 +270,17 @@ pub async fn refresh_balance(
             access_token.as_deref(),
             cookie.as_deref()
         ).await
-        .map_err(|e| crate::error::AppError::Internal(e.to_string()))?
+        .map_err(|e| {
+            tracing::error!("New-API fetch_balance error: {}", e);
+            crate::error::AppError::Internal(e.to_string())
+        })?
     };
+    
+    tracing::info!(
+        account_id = %id,
+        quota = %quota,
+        "Balance refreshed successfully"
+    );
     
     db::update_account_balance(&state.db, &id, quota).await?;
     

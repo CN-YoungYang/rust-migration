@@ -118,17 +118,36 @@ pub async fn fetch_balance(cookie: Option<&str>) -> std::result::Result<f64, Box
     let payload: Option<serde_json::Value> = serde_json::from_str(&text).ok();
 
     if !status.is_success() {
+        tracing::error!("X666 balance fetch failed: HTTP {}, body: {}", status, &text);
         let message = payload.as_ref()
             .and_then(|v| v.get("message").and_then(|m| m.as_str()))
             .unwrap_or("余额请求失败");
         return Err(format!("HTTP {}: {}", status, message).into());
     }
 
-    // 尝试读取 current_quota
+    // 尝试多种路径提取余额
     let quota = payload.as_ref()
-        .and_then(|v| v.get("current_quota"))
-        .and_then(|v| read_number(Some(v)))
-        .ok_or_else(|| "余额请求失败：站点未返回 current_quota".to_string())?;
+        .and_then(|v| {
+            // 尝试 current_quota
+            read_number(v.get("current_quota"))
+                // 尝试 quota
+                .or_else(|| read_number(v.get("quota")))
+                // 尝试 data.current_quota
+                .or_else(|| v.get("data").and_then(|d| read_number(d.get("current_quota"))))
+                // 尝试 data.quota
+                .or_else(|| v.get("data").and_then(|d| read_number(d.get("quota"))))
+                // 尝试其他字段
+                .or_else(|| read_number(v.get("balance")))
+                .or_else(|| read_number(v.get("credit")))
+        });
 
-    Ok(quota)
+    if let Some(q) = quota {
+        Ok(q)
+    } else {
+        // 记录完整响应以便调试
+        tracing::error!("X666 balance field not found in response: {}", &text);
+        Err(format!("余额请求失败：站点未返回余额字段。响应: {}", 
+            if text.len() > 200 { &text[..200] } else { &text }
+        ).into())
+    }
 }

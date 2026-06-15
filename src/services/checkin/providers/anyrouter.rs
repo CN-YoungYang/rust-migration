@@ -396,22 +396,40 @@ fn parse_balance_response(text: &str, status: reqwest::StatusCode) -> std::resul
     let payload: Option<serde_json::Value> = serde_json::from_str(text).ok();
 
     if !status.is_success() {
+        tracing::error!("AnyRouter balance fetch failed: HTTP {}, body: {}", status, text);
         return Err(read_error_message(payload.as_ref())
             .unwrap_or_else(|| format!("余额请求失败：HTTP {}", status)).into());
     }
 
-    // Try to read quota from response
+    // 尝试多种路径提取余额
     let quota = payload.as_ref()
-        .and_then(|v| read_number(v.get("quota")))
-        .or_else(|| {
-            payload.as_ref().and_then(|v| {
-                v.get("data").and_then(|d| read_number(Some(d)))
-            })
-        })
-        .ok_or_else(|| {
-            read_error_message(payload.as_ref())
-                .unwrap_or_else(|| "余额请求失败：站点未返回 quota".to_string())
-        })?;
+        .and_then(|v| {
+            // 尝试直接读取 quota
+            read_number(v.get("quota"))
+                // 尝试 data 字段（可能是对象或数字）
+                .or_else(|| v.get("data").and_then(|d| {
+                    if d.is_object() {
+                        // data 是对象，尝试 data.quota
+                        read_number(d.get("quota"))
+                    } else {
+                        // data 是数字
+                        read_number(Some(d))
+                    }
+                }))
+                // 尝试其他常见字段名
+                .or_else(|| read_number(v.get("balance")))
+                .or_else(|| read_number(v.get("credit")))
+                .or_else(|| read_number(v.get("amount")))
+        });
 
-    Ok(quota)
+    if let Some(q) = quota {
+        Ok(q)
+    } else {
+        // 记录完整响应以便调试
+        tracing::error!("AnyRouter balance field not found in response: {}", text);
+        Err(read_error_message(payload.as_ref())
+            .unwrap_or_else(|| format!("余额请求失败：站点未返回余额字段。响应: {}", 
+                if text.len() > 200 { &text[..200] } else { text }
+            )).into())
+    }
 }
