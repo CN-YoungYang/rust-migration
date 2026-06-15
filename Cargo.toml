@@ -22,7 +22,7 @@ base64 = "0.21"
 bcrypt = "0.15"
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate"] }
 
 # Async & scheduling
 tokio-cron-scheduler = "0.10"

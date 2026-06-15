@@ -131,11 +131,11 @@ pub async fn fetch_balance(base_url: &str, user_id: Option<&str>, access_token: 
     if let Some(q) = quota {
         Ok(q)
     } else {
-        // 记录完整响应以便调试
-        tracing::error!("Balance field not found in response: {}", &text);
+        // 安全截断，避免切断 UTF-8 多字节字符导致 panic
+        let preview: String = text.chars().take(200).collect();
+        tracing::error!("Balance field not found in response: {}", preview);
         Err(read_error_message(payload.as_ref())
-            .unwrap_or_else(|| format!("余额请求失败：站点未返回余额字段。响应: {}", 
-                if text.len() > 200 { &text[..200] } else { &text }
-            )).into())
+            .unwrap_or_else(|| format!("余额请求失败：站点未返回余额字段。响应: {}", preview))
+            .into())
     }
 }

@@ -1,5 +1,23 @@
 # 更新日志
 
+## v2.2.1 (2026-06-15)
+
+### Bug 修复
+
+- **修复余额查询响应乱码** — reqwest 开启 `gzip`/`brotli`/`deflate` 特性后自动解压响应体，解决站点返回 gzip 压缩数据导致 `serde_json` 解析失败、报"站点未返回 quota"的问题
+- **修复 UTF-8 字节切片 panic** — new_api / arrouter / x666 三个 provider 中 `&text[..200]` 改为 `text.chars().take(200).collect()`，避免在多字节字符（中文）中间切断导致线程崩溃
+- **修复前端余额显示错误** — `AccountPanel.vue` 的 `formatBalance` 之前直接把 `quota` 当美元，现按 One API 标准 `quota / 500000 = USD` 换算，与 Next.js 版本（`QUOTA_PER_USD = 500000`）完全对齐
+
+### 增强
+
+- **反爬求解诊断日志** — `solve_acw_sc_v2` 各失败点（arg1 长度不匹配、非 hex 字符）及签到/余额查询两处调用点添加 `warn` 日志，便于将来 WAF 算法升级时快速定位（含 arg1 实际长度、期望长度、预览）
+
+### 清理
+
+- 删除误产生的 3 字节垃圾文件 `arrouter.rs`
+
+---
+
 ## v2.2.0 (2026-06-15)
 
 ### 签到逻辑完善（参考 React 项目对齐）

@@ -73,6 +73,12 @@ fn extract_arg1(text: &str) -> Option<String> {
 fn solve_acw_sc_v2(response_text: &str) -> Option<String> {
     let arg1 = extract_arg1(response_text)?;
     if arg1.len() != ACW_SC_V2_INDEXES.len() {
+        tracing::warn!(
+            actual_len = arg1.len(),
+            expected_len = ACW_SC_V2_INDEXES.len(),
+            arg1_preview = %arg1.chars().take(80).collect::<String>(),
+            "acw_sc__v2 求解失败：arg1 长度不匹配（WAF 算法可能已升级）"
+        );
         return None;
     }
 
@@ -86,6 +92,9 @@ fn solve_acw_sc_v2(response_text: &str) -> Option<String> {
 
     let hex: String = reordered.iter().collect();
     if hex.len() != arg1.len() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        tracing::warn!(
+            "acw_sc__v2 求解失败：重排后出现非 hex 字符（WAF 算法可能已升级）"
+        );
         return None;
     }
 
@@ -175,22 +184,29 @@ pub async fn checkin(
         post_checkin(&client, &url, user_id, cookie).await?;
 
     if is_challenge_page(&text, content_type.as_deref()) {
-        if let Some(acw_sc_v2) = solve_acw_sc_v2(&text) {
-            let merged = merge_cookie(cookie, "acw_sc__v2", &acw_sc_v2);
-            let (s, t, ct) = post_checkin(&client, &url, user_id, Some(&merged)).await?;
-            status = s;
-            text = t;
-            content_type = ct;
+        match solve_acw_sc_v2(&text) {
+            Some(acw_sc_v2) => {
+                let merged = merge_cookie(cookie, "acw_sc__v2", &acw_sc_v2);
+                let (s, t, ct) = post_checkin(&client, &url, user_id, Some(&merged)).await?;
+                status = s;
+                text = t;
+                content_type = ct;
+            }
+            None => {
+                tracing::warn!("签到遇到反爬挑战页但求解失败，将返回失败提示");
+            }
         }
     }
 
     if is_challenge_page(&text, content_type.as_deref()) {
+        tracing::warn!("签到重试后仍为反爬挑战页，Cookie 可能已失效");
         return Ok((
             "failed".to_string(),
             ANYROUTER_CHALLENGE_MESSAGE.to_string(),
             Some(text),
         ));
     }
+
 
     // 尝试解析 JSON，如果失败则将原始文本作为 message
     let payload: Option<serde_json::Value> = serde_json::from_str(&text).ok();
@@ -385,6 +401,7 @@ pub async fn fetch_balance(
             // Use retry response
             return parse_balance_response(&retry_text, retry_status);
         } else {
+            tracing::warn!("余额查询遇到反爬挑战页但求解失败，WAF 算法可能已升级");
             return Err("余额请求失败：AnyRouter 返回反爬挑战页，请更新 Cookie".into());
         }
     }
@@ -425,11 +442,11 @@ fn parse_balance_response(text: &str, status: reqwest::StatusCode) -> std::resul
     if let Some(q) = quota {
         Ok(q)
     } else {
-        // 记录完整响应以便调试
-        tracing::error!("AnyRouter balance field not found in response: {}", text);
+        // 安全截断，避免切断 UTF-8 多字节字符导致 panic
+        let preview: String = text.chars().take(200).collect();
+        tracing::error!("Balance field not found in response: {}", preview);
         Err(read_error_message(payload.as_ref())
-            .unwrap_or_else(|| format!("余额请求失败：站点未返回余额字段。响应: {}", 
-                if text.len() > 200 { &text[..200] } else { text }
-            )).into())
+            .unwrap_or_else(|| format!("余额请求失败：站点未返回余额字段。响应: {}", preview))
+            .into())
     }
 }

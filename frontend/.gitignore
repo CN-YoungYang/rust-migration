@@ -33,3 +33,8 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+# vue-tsc 编译副产物（防止 *.vue.js 等被误提交）
+*.vue.js
+*.vue.d.ts
+src/**/*.js

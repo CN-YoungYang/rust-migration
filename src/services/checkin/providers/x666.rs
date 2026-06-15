@@ -144,10 +144,9 @@ pub async fn fetch_balance(cookie: Option<&str>) -> std::result::Result<f64, Box
     if let Some(q) = quota {
         Ok(q)
     } else {
-        // 记录完整响应以便调试
-        tracing::error!("X666 balance field not found in response: {}", &text);
-        Err(format!("余额请求失败：站点未返回余额字段。响应: {}", 
-            if text.len() > 200 { &text[..200] } else { &text }
-        ).into())
+        // 安全截断，避免切断 UTF-8 多字节字符导致 panic
+        let preview: String = text.chars().take(200).collect();
+        tracing::error!("X666 balance field not found in response: {}", preview);
+        Err(format!("余额请求失败：站点未返回余额字段。响应: {}", preview).into())
     }
 }

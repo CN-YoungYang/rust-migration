@@ -81,11 +81,16 @@ type Account = {
   customCheckinUrl?: string | null
 }
 
+// One API / New API 系列标准换算：500000 quota = 1 美元
+// 与 Next.js 版本 (QUOTA_PER_USD = 500000) 保持一致
+const QUOTA_PER_USD = 500000
+
 function formatBalance(value: number | string | null | undefined): string {
-  if (value === null || value === undefined || value === '') return '-'
-  const num = typeof value === 'string' ? parseFloat(value) : value
-  if (!isFinite(num)) return '-'
-  return "$" + num.toFixed(2)
+  if (value === null || value === undefined || value === '') return '余额未刷新'
+  const quota = typeof value === 'string' ? parseFloat(value) : value
+  if (!isFinite(quota)) return '余额未刷新'
+  const usd = quota / QUOTA_PER_USD
+  return `${usd.toFixed(2)}`
 }
 
 const accounts = ref<Account[]>([])
