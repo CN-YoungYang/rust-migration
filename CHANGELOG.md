@@ -7,10 +7,21 @@
 - **修复余额查询响应乱码** — reqwest 开启 `gzip`/`brotli`/`deflate` 特性后自动解压响应体，解决站点返回 gzip 压缩数据导致 `serde_json` 解析失败、报"站点未返回 quota"的问题
 - **修复 UTF-8 字节切片 panic** — new_api / arrouter / x666 三个 provider 中 `&text[..200]` 改为 `text.chars().take(200).collect()`，避免在多字节字符（中文）中间切断导致线程崩溃
 - **修复前端余额显示错误** — `AccountPanel.vue` 的 `formatBalance` 之前直接把 `quota` 当美元，现按 One API 标准 `quota / 500000 = USD` 换算，与 Next.js 版本（`QUOTA_PER_USD = 500000`）完全对齐
+- **修复 arrouter 余额查询 401** — `/api/user/self` 接口强制校验 `New-API-User` 头，但 `fetch_balance` 之前只发 `User-id` 一个头。现补全 7 个 compat 头（New-API-User / Veloera-User / X-Api-User / voapi-user / User-id / Rix-Api-User / neo-api-user），主请求与 acw_sc__v2 重试请求均已补齐
+
+### 签到逻辑对齐 Next.js
+
+- **new-api 签到补 cookie 认证** — `checkin` 签名由 `(base_url, token, user_id)` 改为 `(base_url, user_id, access_token, cookie)`。之前只传 access_token，cookie-only 站点签到会失败；现 access_token 与 cookie 都按实际配置传递
+- **new-api 签到补 7 个 compat userId 头** — 与 fetch_balance 一致（之前签到路径完全没带这些头）
+- **签到展示本次获得额度** — new-api 解析 `data.quota_awarded` / `quotaAwarded` / `quota`，x666 解析 `data.quota`，拼入消息「本次获得额度：xxx quota（约 $x.xx）」。新增共享 `format_awarded_quota`（QUOTA_PER_USD = 500000）
+- **new-api checked_in 标志位判定** — 读 `data.checked_in` / `checkedIn` 布尔值判定今日已签（之前只靠 message 文本匹配，会漏判）
+- **补全已签关键词** — `已签` → `已签` / `已经签到` / `今天已经签到`（对齐 Next.js）
+- **签到成功后自动刷新余额** — 状态为 `success` 或 `already_checked` 时调用 `fetch_account_balance` 更新余额；余额刷新失败**不影响签到结果**，仅在消息追加「余额刷新失败：xxx」（完全对齐 Next.js runner.ts）
 
 ### 增强
 
 - **反爬求解诊断日志** — `solve_acw_sc_v2` 各失败点（arg1 长度不匹配、非 hex 字符）及签到/余额查询两处调用点添加 `warn` 日志，便于将来 WAF 算法升级时快速定位（含 arg1 实际长度、期望长度、预览）
+- **refresh_balance 全链路追踪** — `routes/accounts.rs` 在解密失败、provider 调用错误、成功各阶段添加 `info`/`warn`/`error` 日志
 
 ### 清理
 
