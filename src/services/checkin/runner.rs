@@ -7,6 +7,7 @@ use crate::{
     crypto::decrypt,
     db,
 };
+use super::BrowserProfile;
 use super::providers::{new_api, anyrouter, x666};
 
 /// 批量/定时签到前对单个账户的跳过判断（不涉及 DB 计数查询，便于复用）。
@@ -60,12 +61,12 @@ pub async fn execute_checkin(
     }
     
     // 防判定：每次签到使用随机 UA，降低多账户同 IP + 同 UA 的关联指纹。
-    let user_agent = super::random_user_agent();
+    let profile = super::random_browser_profile();
 
     let result = match account.site_type.as_str() {
-        "new-api" => execute_new_api_checkin(&account, user_agent).await,
-        "arrouter" => execute_arrouter_checkin(&account, user_agent).await,
-        "x666" => execute_x666_checkin(&account, user_agent).await,
+        "new-api" => execute_new_api_checkin(&account, profile).await,
+        "arrouter" => execute_arrouter_checkin(&account, profile).await,
+        "x666" => execute_x666_checkin(&account, profile).await,
         _ => Err(AppError::Validation(format!("Unsupported site type: {}", account.site_type))),
     };
     
@@ -76,7 +77,7 @@ pub async fn execute_checkin(
             // 签到成功或今日已签时刷新余额（参考 Next.js runner.ts）
             // 余额刷新失败不影响签到结果，仅在消息中追加提示
             let final_message = if status.as_str() == "success" || status.as_str() == "already_checked" {
-                match fetch_account_balance(&account).await {
+                match fetch_account_balance(&account, profile).await {
                     Ok(quota) => {
                         if let Err(e) = db::update_account_balance(db, account_id, quota).await {
                             tracing::warn!(account_id = %account_id, error = %e, "签到后余额写库失败");
@@ -104,7 +105,7 @@ pub async fn execute_checkin(
     }
 }
 
-async fn execute_new_api_checkin(account: &CheckinAccount, user_agent: &str) -> Result<(String, String, Option<String>)> {
+async fn execute_new_api_checkin(account: &CheckinAccount, profile: &BrowserProfile) -> Result<(String, String, Option<String>)> {
     // access_token 与 cookie 均可选，按实际配置传递（参考 Next.js runProvider）
     let access_token = account.access_token_enc.as_ref()
         .map(|t| decrypt(t))
@@ -118,12 +119,12 @@ async fn execute_new_api_checkin(account: &CheckinAccount, user_agent: &str) -> 
         account.user_id.as_deref(),
         access_token.as_deref(),
         cookie.as_deref(),
-        Some(user_agent),
+        profile,
     )
     .await
 }
 
-async fn execute_arrouter_checkin(account: &CheckinAccount, user_agent: &str) -> Result<(String, String, Option<String>)> {
+async fn execute_arrouter_checkin(account: &CheckinAccount, profile: &BrowserProfile) -> Result<(String, String, Option<String>)> {
     let cookie = if let Some(enc) = &account.cookie_enc {
         Some(decrypt(enc)?)
     } else {
@@ -135,32 +136,32 @@ async fn execute_arrouter_checkin(account: &CheckinAccount, user_agent: &str) ->
         account.user_id.as_deref(),
         cookie.as_deref(),
         account.custom_checkin_url.as_deref(),
-        Some(user_agent),
+        profile,
     )
     .await
 }
 
-async fn execute_x666_checkin(account: &CheckinAccount, user_agent: &str) -> Result<(String, String, Option<String>)> {
+async fn execute_x666_checkin(account: &CheckinAccount, profile: &BrowserProfile) -> Result<(String, String, Option<String>)> {
     let cookie = if let Some(enc) = &account.cookie_enc {
         decrypt(enc)?
     } else {
         return Err(AppError::Validation("Cookie required".into()));
     };
 
-    x666::checkin(&account.base_url, &cookie, account.custom_checkin_url.as_deref(), Some(user_agent)).await
+    x666::checkin(&account.base_url, &cookie, account.custom_checkin_url.as_deref(), profile).await
 }
 
 /// 查询账户余额（quota），供签到成功后刷新使用（参考 Next.js runner.ts fetchAccountBalance）。
 /// - x666: 仅 cookie
 /// - arrouter: userId + cookie（不传 access_token）
 /// - new-api 及其他: userId + access_token + cookie
-async fn fetch_account_balance(account: &CheckinAccount) -> Result<f64> {
+async fn fetch_account_balance(account: &CheckinAccount, profile: &BrowserProfile) -> Result<f64> {
     match account.site_type.as_str() {
         "x666" => {
             let enc = account.cookie_enc.as_ref()
                 .ok_or_else(|| AppError::Validation("Cookie not configured".into()))?;
             let cookie = decrypt(enc)?;
-            x666::fetch_balance(Some(&cookie))
+            x666::fetch_balance(Some(&cookie), profile)
                 .await
                 .map_err(|e| AppError::Internal(e.to_string()))
         }
@@ -174,6 +175,7 @@ async fn fetch_account_balance(account: &CheckinAccount) -> Result<f64> {
                 account.user_id.as_deref(),
                 None,
                 cookie.as_deref(),
+                profile,
             )
             .await
             .map_err(|e| AppError::Internal(e.to_string()))
@@ -191,6 +193,7 @@ async fn fetch_account_balance(account: &CheckinAccount) -> Result<f64> {
                 account.user_id.as_deref(),
                 access_token.as_deref(),
                 cookie.as_deref(),
+                profile,
             )
             .await
             .map_err(|e| AppError::Internal(e.to_string()))

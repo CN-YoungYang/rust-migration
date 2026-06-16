@@ -1,5 +1,5 @@
 use crate::error::Result;
-use super::super::http_client;
+use super::super::{BrowserProfile, http_client};
 
 const DEFAULT_CHECKIN_PATH: &str = "/api/user/sign_in";
 const ANYROUTER_CHALLENGE_MESSAGE: &str = "签到失败：yrouter 返回反爬挑战页，当前 Cookie 可能已失效。请在浏览器重新登录 yrouter，复制最新 Cookie 后更新账号。";
@@ -140,22 +140,25 @@ fn read_message(payload: Option<&serde_json::Value>) -> String {
 async fn post_checkin(
     client: &reqwest::Client,
     url: &str,
+    referer: &str,
     user_id: Option<&str>,
     cookie: Option<&str>,
-    user_agent: Option<&str>,
+    profile: &BrowserProfile,
 ) -> Result<(reqwest::StatusCode, String, Option<String>)> {
-    let mut req = client
-        .post(url)
-        .header("Accept", "application/json")
-        .header("Content-Type", "application/json")
-        .header("Pragma", "no-cache")
-        .header("X-Requested-With", "XMLHttpRequest")
-        .body("{}".to_string());
-
-    // 防判定：用随机 UA 覆盖单例默认 UA
-    if let Some(ua) = user_agent {
-        req = req.header(reqwest::header::USER_AGENT, ua);
-    }
+    let mut req = super::super::apply_browser_headers(
+        client
+            .post(url)
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .header("Pragma", "no-cache")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("Sec-Fetch-Mode", "cors")
+            .header("Sec-Fetch-Dest", "empty")
+            .header("Referer", referer)
+            .body("{}".to_string()),
+        profile,
+    );
 
     if let Some(uid) = user_id {
         req = req.header("User-id", uid);
@@ -181,20 +184,20 @@ pub async fn checkin(
     user_id: Option<&str>,
     cookie: Option<&str>,
     custom_url: Option<&str>,
-    user_agent: Option<&str>,
+    profile: &BrowserProfile,
 ) -> Result<(String, String, Option<String>)> {
     let endpoint = custom_url.unwrap_or(DEFAULT_CHECKIN_PATH);
     let url = join_url(base_url, endpoint);
     let client = http_client();
 
     let (mut status, mut text, mut content_type) =
-        post_checkin(&client, &url, user_id, cookie, user_agent).await?;
+        post_checkin(&client, &url, base_url, user_id, cookie, profile).await?;
 
     if is_challenge_page(&text, content_type.as_deref()) {
         match solve_acw_sc_v2(&text) {
             Some(acw_sc_v2) => {
                 let merged = merge_cookie(cookie, "acw_sc__v2", &acw_sc_v2);
-                let (s, t, ct) = post_checkin(&client, &url, user_id, Some(&merged), user_agent).await?;
+                let (s, t, ct) = post_checkin(&client, &url, base_url, user_id, Some(&merged), profile).await?;
                 status = s;
                 text = t;
                 content_type = ct;
@@ -341,16 +344,24 @@ pub async fn fetch_balance(
     user_id: Option<&str>,
     access_token: Option<&str>,
     cookie: Option<&str>,
+    profile: &BrowserProfile,
 ) -> std::result::Result<f64, Box<dyn std::error::Error>> {
     let client = http_client();
     let url = join_url(base_url, "/api/user/self");
 
-    let mut req = client
-        .get(&url)
-        .header("Accept", "application/json")
-        .header("Content-Type", "application/json")
-        .header("Pragma", "no-cache")
-        .header("X-Requested-With", "XMLHttpRequest");
+    let mut req = super::super::apply_browser_headers(
+        client
+            .get(&url)
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .header("Pragma", "no-cache")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("Sec-Fetch-Mode", "cors")
+            .header("Sec-Fetch-Dest", "empty")
+            .header("Referer", base_url),
+        profile,
+    );
 
     if let Some(uid) = user_id {
         req = req
@@ -383,12 +394,19 @@ pub async fn fetch_balance(
         if let Some(acw_sc_v2) = solve_acw_sc_v2(&text) {
             let merged = merge_cookie(cookie, "acw_sc__v2", &acw_sc_v2);
             
-            let mut retry_req = client
-                .get(&url)
-                .header("Accept", "application/json")
-                .header("Content-Type", "application/json")
-                .header("Pragma", "no-cache")
-                .header("X-Requested-With", "XMLHttpRequest");
+            let mut retry_req = super::super::apply_browser_headers(
+                client
+                    .get(&url)
+                    .header("Accept", "application/json")
+                    .header("Content-Type", "application/json")
+                    .header("Pragma", "no-cache")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .header("Sec-Fetch-Site", "same-origin")
+                    .header("Sec-Fetch-Mode", "cors")
+                    .header("Sec-Fetch-Dest", "empty")
+                    .header("Referer", base_url),
+                profile,
+            );
 
             if let Some(uid) = user_id {
                 retry_req = retry_req

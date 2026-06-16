@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use crate::error::Result;
-use super::super::http_client;
+use super::super::{BrowserProfile, http_client};
 use super::format_awarded_quota;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -66,21 +66,22 @@ fn with_awarded_quota(message: String, text: &str) -> String {
     }
 }
 
-pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>, user_agent: Option<&str>) -> Result<(String, String, Option<String>)> {
+pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>, profile: &BrowserProfile) -> Result<(String, String, Option<String>)> {
     let url = custom_url.unwrap_or(DEFAULT_CHECKIN_URL);
     let client = http_client();
 
-    let mut req = client.post(url)
-        .header("Cookie", cookie)
-        .header("Accept", "*/*")
-        .header("Accept-Language", "zh,zh-CN;q=0.9,en;q=0.8")
-        .header("Origin", REFERER_URL.trim_end_matches("/"))
-        .header("Referer", REFERER_URL);
-
-    // 防判定：用随机 UA 覆盖单例默认 UA
-    if let Some(ua) = user_agent {
-        req = req.header(reqwest::header::USER_AGENT, ua);
-    }
+    let req = super::super::apply_browser_headers(
+        client.post(url)
+            .header("Cookie", cookie)
+            .header("Accept", "*/*")
+            .header("Origin", REFERER_URL.trim_end_matches("/"))
+            .header("Referer", REFERER_URL)
+            // x666 签到是同源 fetch 请求
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("Sec-Fetch-Mode", "cors")
+            .header("Sec-Fetch-Dest", "empty"),
+        profile,
+    );
 
     let response = req.send().await?;
 
@@ -121,16 +122,21 @@ pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>, us
     Ok(("failed".to_string(), format!("签到失败：{}", response_msg), Some(text)))
 }
 
-pub async fn fetch_balance(cookie: Option<&str>) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+pub async fn fetch_balance(cookie: Option<&str>, profile: &BrowserProfile) -> std::result::Result<f64, Box<dyn std::error::Error>> {
     let cookie = cookie.ok_or("Cookie is required for X666 balance query")?;
     let client = http_client();
     let url = "https://up.x666.me/api/checkin/status";
 
-    let req = client.get(url)
-        .header("Accept", "*/*")
-        .header("Accept-Language", "zh,zh-CN;q=0.9,en;q=0.8")
-        .header("Cookie", cookie)
-        .header("Referer", REFERER_URL);
+    let req = super::super::apply_browser_headers(
+        client.get(url)
+            .header("Accept", "*/*")
+            .header("Cookie", cookie)
+            .header("Referer", REFERER_URL)
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("Sec-Fetch-Mode", "cors")
+            .header("Sec-Fetch-Dest", "empty"),
+        profile,
+    );
 
     let response = req.send().await?;
     let status = response.status();

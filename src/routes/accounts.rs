@@ -226,6 +226,10 @@ pub async fn refresh_balance(
 ) -> Result<Json<Value>> {
     use crate::services::checkin::providers::{new_api, anyrouter, x666};
     use crate::crypto::decrypt_secret;
+    use crate::services::checkin::random_browser_profile;
+
+    // 防判定：余额刷新同样使用随机浏览器指纹，避免和签到请求指纹不一致被 WAF 关联。
+    let profile = random_browser_profile();
 
     let account = db::find_account_by_id(&state.db, &id).await?
         .ok_or(crate::error::AppError::NotFound)?;
@@ -247,7 +251,7 @@ pub async fn refresh_balance(
                 crate::error::AppError::Internal("解密失败".to_string())
             })?;
         
-        x666::fetch_balance(Some(&cookie_decrypted)).await
+        x666::fetch_balance(Some(&cookie_decrypted), profile).await
             .map_err(|e| {
                 tracing::error!("X666 fetch_balance error: {}", e);
                 crate::error::AppError::Internal(e.to_string())
@@ -272,7 +276,8 @@ pub async fn refresh_balance(
             &account.base_url,
             account.user_id.as_deref(),
             access_token.as_deref(),
-            cookie.as_deref()
+            cookie.as_deref(),
+            profile
         ).await
         .map_err(|e| {
             tracing::error!("AnyRouter fetch_balance error: {}", e);
@@ -299,7 +304,8 @@ pub async fn refresh_balance(
             &account.base_url,
             account.user_id.as_deref(),
             access_token.as_deref(),
-            cookie.as_deref()
+            cookie.as_deref(),
+            profile
         ).await
         .map_err(|e| {
             tracing::error!("New-API fetch_balance error: {}", e);

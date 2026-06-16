@@ -1,5 +1,5 @@
 use crate::error::Result;
-use super::super::http_client;
+use super::super::{BrowserProfile, http_client};
 use super::{CheckinResponse, classify_checkin_status, format_awarded_quota};
 
 fn read_number(value: Option<&serde_json::Value>) -> Option<f64> {
@@ -51,21 +51,24 @@ pub async fn checkin(
     user_id: Option<&str>,
     access_token: Option<&str>,
     cookie: Option<&str>,
-    user_agent: Option<&str>,
+    profile: &BrowserProfile,
 ) -> Result<(String, String, Option<String>)> {
     let url = format!("{}/api/user/checkin", base_url.trim_end_matches('/'));
     let client = http_client();
 
-    let mut req = client.post(&url)
-        .header("Accept", "application/json")
-        .header("Content-Type", "application/json")
-        .header("Pragma", "no-cache")
-        .body("{}");
-
-    // 防判定：用随机 UA 覆盖单例默认 UA（reqwest 允许 RequestBuilder 覆盖 client 级 header）
-    if let Some(ua) = user_agent {
-        req = req.header(reqwest::header::USER_AGENT, ua);
-    }
+    let mut req = super::super::apply_browser_headers(
+        client.post(&url)
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .header("Pragma", "no-cache")
+            // 浏览器从同源 SPA 发起的 fetch 一致性头，缺失会被 WAF 扣分
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("Sec-Fetch-Mode", "cors")
+            .header("Sec-Fetch-Dest", "empty")
+            .header("Referer", base_url.trim_end_matches('/'))
+            .body("{}"),
+        profile,
+    );
 
     if let Some(uid) = user_id {
         req = req
@@ -120,15 +123,22 @@ pub async fn checkin(
     Ok((status.to_string(), final_message, Some(text)))
 }
 
-pub async fn fetch_balance(base_url: &str, user_id: Option<&str>, access_token: Option<&str>, cookie: Option<&str>) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+pub async fn fetch_balance(base_url: &str, user_id: Option<&str>, access_token: Option<&str>, cookie: Option<&str>, profile: &BrowserProfile) -> std::result::Result<f64, Box<dyn std::error::Error>> {
     let client = http_client();
     let url = format!("{}/api/user/self", base_url.trim_end_matches('/'));
 
-    let mut req = client.get(&url)
-        .header("Accept", "application/json")
-        .header("Content-Type", "application/json")
-        .header("Pragma", "no-cache")
-        .header("X-Requested-With", "XMLHttpRequest");
+    let mut req = super::super::apply_browser_headers(
+        client.get(&url)
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .header("Pragma", "no-cache")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("Sec-Fetch-Mode", "cors")
+            .header("Sec-Fetch-Dest", "empty")
+            .header("Referer", base_url.trim_end_matches('/')),
+        profile,
+    );
 
     if let Some(token) = access_token {
         req = req.header("Authorization", format!("Bearer {}", token));
