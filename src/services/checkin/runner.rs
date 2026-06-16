@@ -1,12 +1,48 @@
 use sqlx::SqlitePool;
 use std::time::Instant;
+use chrono::Local;
 use crate::{
-    models::{CheckinAccount, CheckinRun},
+    models::{CheckinAccount, CheckinRun, CheckinSetting},
     error::{Result, AppError},
     crypto::decrypt,
     db,
 };
 use super::providers::{new_api, anyrouter, x666};
+
+/// 批量/定时签到前对单个账户的跳过判断（不涉及 DB 计数查询，便于复用）。
+/// 返回 `Some(reason)` 表示应跳过该账户，`None` 表示需要继续执行。
+///
+/// 与 `scheduler` 内联判断保持一致：
+/// - 已禁用 -> account_disabled
+/// - 今日已 success/already_checked -> already_succeeded_today
+/// - 今日已尝试且（全局或账户）关闭重试 -> retry_disabled
+pub fn skip_reason_for_batch(
+    account: &CheckinAccount,
+    settings: &CheckinSetting,
+    today_local: chrono::NaiveDate,
+) -> Option<&'static str> {
+    if !account.enabled {
+        return Some("account_disabled");
+    }
+
+    if let Some(last_run) = account.last_run_at {
+        let last_run_local = last_run.with_timezone(&Local);
+        if last_run_local.date_naive() == today_local {
+            if let Some(status) = &account.last_status {
+                if status == "success" || status == "already_checked" {
+                    return Some("already_succeeded_today");
+                }
+            }
+
+            // 今日已尝试且未成功：仅当全局和账户都允许重试时才继续
+            if !settings.retry_enabled || !account.retry_enabled {
+                return Some("retry_disabled");
+            }
+        }
+    }
+
+    None
+}
 
 pub async fn execute_checkin(
     db: &SqlitePool,
@@ -23,10 +59,13 @@ pub async fn execute_checkin(
         return create_failed_run(db, account_id, "Account disabled", triggered_by, start).await;
     }
     
+    // 防判定：每次签到使用随机 UA，降低多账户同 IP + 同 UA 的关联指纹。
+    let user_agent = super::random_user_agent();
+
     let result = match account.site_type.as_str() {
-        "new-api" => execute_new_api_checkin(&account).await,
-        "anyrouter" => execute_anyrouter_checkin(&account).await,
-        "x666" => execute_x666_checkin(&account).await,
+        "new-api" => execute_new_api_checkin(&account, user_agent).await,
+        "arrouter" => execute_arrouter_checkin(&account, user_agent).await,
+        "x666" => execute_x666_checkin(&account, user_agent).await,
         _ => Err(AppError::Validation(format!("Unsupported site type: {}", account.site_type))),
     };
     
@@ -65,7 +104,7 @@ pub async fn execute_checkin(
     }
 }
 
-async fn execute_new_api_checkin(account: &CheckinAccount) -> Result<(String, String, Option<String>)> {
+async fn execute_new_api_checkin(account: &CheckinAccount, user_agent: &str) -> Result<(String, String, Option<String>)> {
     // access_token 与 cookie 均可选，按实际配置传递（参考 Next.js runProvider）
     let access_token = account.access_token_enc.as_ref()
         .map(|t| decrypt(t))
@@ -79,11 +118,12 @@ async fn execute_new_api_checkin(account: &CheckinAccount) -> Result<(String, St
         account.user_id.as_deref(),
         access_token.as_deref(),
         cookie.as_deref(),
+        Some(user_agent),
     )
     .await
 }
 
-async fn execute_anyrouter_checkin(account: &CheckinAccount) -> Result<(String, String, Option<String>)> {
+async fn execute_arrouter_checkin(account: &CheckinAccount, user_agent: &str) -> Result<(String, String, Option<String>)> {
     let cookie = if let Some(enc) = &account.cookie_enc {
         Some(decrypt(enc)?)
     } else {
@@ -95,18 +135,19 @@ async fn execute_anyrouter_checkin(account: &CheckinAccount) -> Result<(String, 
         account.user_id.as_deref(),
         cookie.as_deref(),
         account.custom_checkin_url.as_deref(),
+        Some(user_agent),
     )
     .await
 }
 
-async fn execute_x666_checkin(account: &CheckinAccount) -> Result<(String, String, Option<String>)> {
+async fn execute_x666_checkin(account: &CheckinAccount, user_agent: &str) -> Result<(String, String, Option<String>)> {
     let cookie = if let Some(enc) = &account.cookie_enc {
         decrypt(enc)?
     } else {
         return Err(AppError::Validation("Cookie required".into()));
     };
 
-    x666::checkin(&account.base_url, &cookie, account.custom_checkin_url.as_deref()).await
+    x666::checkin(&account.base_url, &cookie, account.custom_checkin_url.as_deref(), Some(user_agent)).await
 }
 
 /// 查询账户余额（quota），供签到成功后刷新使用（参考 Next.js runner.ts fetchAccountBalance）。

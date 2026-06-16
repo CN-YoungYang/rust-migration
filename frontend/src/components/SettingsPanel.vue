@@ -36,6 +36,17 @@
         <input v-model.number="settings.maxAttemptsPerDay" type="number" min="1" max="100" />
       </div>
 
+      <div class="form-row">
+        <div class="form-group">
+          <label>批量/定时签到最小延迟（秒）</label>
+          <input v-model.number="settings.batchDelayMin" type="number" min="0" max="600" />
+        </div>
+        <div class="form-group">
+          <label>批量/定时签到最大延迟（秒）</label>
+          <input v-model.number="settings.batchDelayMax" type="number" min="0" max="600" />
+        </div>
+      </div>
+
       <button type="submit" class="btn-primary">保存设置</button>
     </form>
 
@@ -45,6 +56,7 @@
         <li>后端会在签到窗口内执行自动签到。</li>
         <li>失败重试由全局设置和账户自身 retryEnabled 共同控制。</li>
         <li>每天最大尝试次数用于限制单个账户的自动签到尝试。</li>
+        <li>批量与定时签到均为串行执行，账户间在最小/最大延迟区间内随机等待，并随机打乱顺序与 UA，降低被站点判定为批量签到的风险。</li>
       </ul>
     </div>
   </div>
@@ -62,6 +74,8 @@ interface Settings {
   windowEnd: string
   retryEnabled: boolean
   maxAttemptsPerDay: number
+  batchDelayMin: number
+  batchDelayMax: number
   updatedAt?: string
 }
 
@@ -70,7 +84,9 @@ const settings = ref<Settings>({
   windowStart: '02:00',
   windowEnd: '05:00',
   retryEnabled: true,
-  maxAttemptsPerDay: 3
+  maxAttemptsPerDay: 3,
+  batchDelayMin: 3,
+  batchDelayMax: 10
 })
 
 const fetchSettings = async () => {

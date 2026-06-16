@@ -190,7 +190,26 @@ pub async fn create_run(
 }
 
 // CheckinSetting operations
+/// 对旧库做幂等迁移：批量签到随机延迟列在 v2.2.2 引入，
+/// 已存在的库需要补列。SQLite 不支持 ADD COLUMN IF NOT EXISTS，
+/// 故用 try + 忽略“duplicate column”错误。
+async fn ensure_setting_columns(db: &SqlitePool) -> Result<()> {
+    for col in ["batchDelayMin", "batchDelayMax"] {
+        let sql = format!("ALTER TABLE CheckinSetting ADD COLUMN {} INTEGER NOT NULL DEFAULT 0", col);
+        if let Err(e) = sqlx::query(&sql).execute(db).await {
+            // “duplicate column name” 说明列已存在，可安全忽略
+            let msg = e.to_string();
+            if !msg.contains("duplicate column") {
+                return Err(e.into());
+            }
+        }
+    }
+    Ok(())
+}
+
 pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
+    ensure_setting_columns(db).await?;
+
     let settings = sqlx::query_as::<_, CheckinSetting>(
         "SELECT * FROM CheckinSetting WHERE id = 'global'"
     )
@@ -198,12 +217,21 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
     .await?;
     
     if let Some(s) = settings {
+        // 旧库迁移后默认值是 0，这里修正为安全默认（3~10s）
+        let mut s = s;
+        if s.batch_delay_max <= 0 {
+            s.batch_delay_min = 3;
+            s.batch_delay_max = 10;
+        }
+        if s.batch_delay_min < 0 {
+            s.batch_delay_min = 0;
+        }
         Ok(s)
     } else {
         // Create default settings
         let now = Utc::now();
         sqlx::query(
-            "INSERT INTO CheckinSetting (id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO CheckinSetting (id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, batchDelayMin, batchDelayMax, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind("global")
         .bind(false)
@@ -211,6 +239,8 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
         .bind("05:00")
         .bind(true)
         .bind(3)
+        .bind(3)   // batchDelayMin 默认 3 秒
+        .bind(10)  // batchDelayMax 默认 10 秒
         .bind(now)
         .execute(db)
         .await?;
@@ -226,18 +256,22 @@ pub async fn update_settings(
     window_end: Option<&str>,
     retry_enabled: Option<bool>,
     max_attempts_per_day: Option<i32>,
+    batch_delay_min: Option<i32>,
+    batch_delay_max: Option<i32>,
 ) -> Result<CheckinSetting> {
     let now = Utc::now();
     let current = Box::pin(get_settings(db)).await?;
     
     sqlx::query(
-        "UPDATE CheckinSetting SET enabled = ?, windowStart = ?, windowEnd = ?, retryEnabled = ?, maxAttemptsPerDay = ?, updatedAt = ? WHERE id = 'global'"
+        "UPDATE CheckinSetting SET enabled = ?, windowStart = ?, windowEnd = ?, retryEnabled = ?, maxAttemptsPerDay = ?, batchDelayMin = ?, batchDelayMax = ?, updatedAt = ? WHERE id = 'global'"
     )
     .bind(enabled.unwrap_or(current.enabled))
     .bind(window_start.unwrap_or(&current.window_start))
     .bind(window_end.unwrap_or(&current.window_end))
     .bind(retry_enabled.unwrap_or(current.retry_enabled))
     .bind(max_attempts_per_day.unwrap_or(current.max_attempts_per_day))
+    .bind(batch_delay_min.unwrap_or(current.batch_delay_min))
+    .bind(batch_delay_max.unwrap_or(current.batch_delay_max))
     .bind(now)
     .execute(db)
     .await?;

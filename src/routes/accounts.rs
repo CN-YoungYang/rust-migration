@@ -12,13 +12,15 @@ use crate::{
     db,
 };
 
-fn account_to_json(acc: &CheckinAccount) -> Value {
+fn account_to_json(acc: &CheckinAccount, owner_name: Option<&str>) -> Value {
     json!({
         "id": acc.id,
         "name": acc.name,
         "siteType": acc.site_type,
         "baseUrl": acc.base_url,
         "userId": acc.user_id,
+        "ownerId": acc.owner_id,
+        "ownerName": owner_name,
         "authType": acc.auth_type,
         "accessTokenMasked": acc.access_token_enc.as_ref().map(|_| "****"),
         "cookieMasked": acc.cookie_enc.as_ref().map(|_| "****"),
@@ -33,6 +35,14 @@ fn account_to_json(acc: &CheckinAccount) -> Value {
         "createdAt": acc.created_at,
         "updatedAt": acc.updated_at,
     })
+}
+
+// Look up the username of an account's owner so the UI can group accounts by user.
+async fn resolve_owner_name(state: &AppState, owner_id: &Option<String>) -> Result<Option<String>> {
+    match owner_id.as_deref() {
+        Some(id) => Ok(db::find_user_by_id(&state.db, id).await?.map(|u| u.username)),
+        None => Ok(None),
+    }
 }
 
 pub async fn list(
@@ -51,7 +61,25 @@ pub async fn list(
     } else {
         db::list_accounts_by_user(&state.db, &user.id).await?
     };
-    let masked: Vec<Value> = accounts.iter().map(account_to_json).collect();
+
+    // Build an ownerId -> username map so the UI can group accounts by their owner.
+    let users = db::list_users(&state.db).await?;
+    let owner_map: std::collections::HashMap<&str, &str> = users
+        .iter()
+        .map(|u| (u.id.as_str(), u.username.as_str()))
+        .collect();
+
+    let masked: Vec<Value> = accounts
+        .iter()
+        .map(|acc| {
+            let owner_name = acc
+                .owner_id
+                .as_deref()
+                .and_then(|id| owner_map.get(id))
+                .copied();
+            account_to_json(acc, owner_name)
+        })
+        .collect();
 
     Ok(Json(masked))
 }
@@ -66,7 +94,8 @@ pub async fn get(
 
     check_account_ownership(&acc, &user)?;
 
-    Ok(Json(account_to_json(&acc)))
+    let owner_name = resolve_owner_name(&state, &acc.owner_id).await?;
+    Ok(Json(account_to_json(&acc, owner_name.as_deref())))
 }
 
 pub async fn create(
@@ -116,7 +145,8 @@ pub async fn create(
         &user.id,
     ).await?;
 
-    Ok(Json(account_to_json(&acc)))
+    // The new account is owned by the current user, so we can reuse their username directly.
+    Ok(Json(account_to_json(&acc, Some(&user.username))))
 }
 pub async fn update(
     State(state): State<Arc<AppState>>, Extension(user): Extension<crate::models::AppUser>,
@@ -175,7 +205,8 @@ pub async fn update(
     ).await?;
 
     let updated = db::find_account_by_id(&state.db, &id).await?.ok_or(crate::error::AppError::NotFound)?;
-    Ok(Json(account_to_json(&updated)))
+    let owner_name = resolve_owner_name(&state, &updated.owner_id).await?;
+    Ok(Json(account_to_json(&updated, owner_name.as_deref())))
 }
 
 pub async fn delete(

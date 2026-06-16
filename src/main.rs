@@ -81,6 +81,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/accounts/:id/refresh-balance", post(routes::accounts::refresh_balance))
         .route("/api/settings", get(routes::settings::get).put(routes::settings::update))
         .route("/api/checkin-runs", get(routes::checkin_runs::list).post(routes::checkin_runs::execute))
+        .route("/api/checkin-runs/batch", post(routes::checkin_runs::execute_batch))
         .route("/api/checkin-runs/cleanup", post(routes::checkin_runs::cleanup_runs))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 

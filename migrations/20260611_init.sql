@@ -55,8 +55,10 @@ CREATE TABLE IF NOT EXISTS CheckinSetting (
     windowEnd TEXT NOT NULL DEFAULT '05:00',
     retryEnabled INTEGER NOT NULL DEFAULT 1,
     maxAttemptsPerDay INTEGER NOT NULL DEFAULT 3,
+    batchDelayMin INTEGER NOT NULL DEFAULT 3,
+    batchDelayMax INTEGER NOT NULL DEFAULT 10,
     updatedAt TEXT NOT NULL
 );
 
-INSERT OR IGNORE INTO CheckinSetting (id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, updatedAt)
-VALUES ('global', 0, '02:00', '05:00', 1, 3, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));
+INSERT OR IGNORE INTO CheckinSetting (id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, batchDelayMin, batchDelayMax, updatedAt)
+VALUES ('global', 0, '02:00', '05:00', 1, 3, 3, 10, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));

@@ -66,18 +66,23 @@ fn with_awarded_quota(message: String, text: &str) -> String {
     }
 }
 
-pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>) -> Result<(String, String, Option<String>)> {
+pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>, user_agent: Option<&str>) -> Result<(String, String, Option<String>)> {
     let url = custom_url.unwrap_or(DEFAULT_CHECKIN_URL);
     let client = http_client();
 
-    let response = client.post(url)
+    let mut req = client.post(url)
         .header("Cookie", cookie)
         .header("Accept", "*/*")
         .header("Accept-Language", "zh,zh-CN;q=0.9,en;q=0.8")
         .header("Origin", REFERER_URL.trim_end_matches("/"))
-        .header("Referer", REFERER_URL)
-        .send()
-        .await?;
+        .header("Referer", REFERER_URL);
+
+    // 防判定：用随机 UA 覆盖单例默认 UA
+    if let Some(ua) = user_agent {
+        req = req.header(reqwest::header::USER_AGENT, ua);
+    }
+
+    let response = req.send().await?;
 
     let status_code = response.status();
     let text = response.text().await?;

@@ -51,6 +51,7 @@ pub async fn checkin(
     user_id: Option<&str>,
     access_token: Option<&str>,
     cookie: Option<&str>,
+    user_agent: Option<&str>,
 ) -> Result<(String, String, Option<String>)> {
     let url = format!("{}/api/user/checkin", base_url.trim_end_matches('/'));
     let client = http_client();
@@ -60,6 +61,11 @@ pub async fn checkin(
         .header("Content-Type", "application/json")
         .header("Pragma", "no-cache")
         .body("{}");
+
+    // 防判定：用随机 UA 覆盖单例默认 UA（reqwest 允许 RequestBuilder 覆盖 client 级 header）
+    if let Some(ua) = user_agent {
+        req = req.header(reqwest::header::USER_AGENT, ua);
+    }
 
     if let Some(uid) = user_id {
         req = req

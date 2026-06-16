@@ -28,6 +28,7 @@ dependencies = [
  "chrono",
  "dotenv",
  "lazy_static",
+ "rand",
  "reqwest",
  "ring",
  "serde",

@@ -5,9 +5,11 @@
       <div class="header-actions">
         <select v-model="selectedAccountId">
           <option value="">选择账户</option>
-          <option v-for="account in accounts" :key="account.id" :value="account.id">
-            {{ account.name }} ({{ account.siteType }})
-          </option>
+          <optgroup v-for="group in groupedAccounts" :key="group.key" :label="group.label">
+            <option v-for="account in group.items" :key="account.id" :value="account.id">
+              {{ account.name }} ({{ account.siteType }})
+            </option>
+          </optgroup>
         </select>
         <button @click="executeCheckin" class="btn-execute" :disabled="!selectedAccountId">执行签到</button>
         <input v-model.number="keepLatest" type="number" min="1" max="10000" class="keep-input" title="保留最新记录数" />
@@ -17,32 +19,48 @@
 
 
     <div class="runs-list">
-      <div v-for="run in runs" :key="run.id" class="run-card" :class="run.status.toLowerCase()">
-        <div class="run-info">
-          <strong>{{ accountName(run.accountId) }}</strong>
-          <span class="badge" :class="run.status.toLowerCase()">{{ statusText(run.status) }}</span>
-          <div class="run-meta">
-            <span>触发方式: {{ run.triggeredBy }}</span>
-            <span>时间: {{ formatTime(run.createdAt) }}</span>
-            <span v-if="run.durationMs">耗时: {{ run.durationMs }}ms</span>
-            <span v-if="run.message">消息: {{ run.message }}</span>
+      <section v-for="group in groupedRuns" :key="group.key" class="run-group">
+        <div class="group-header">
+          <strong>{{ group.label }}<span v-if="group.isSelf" class="self-tag">我</span></strong>
+          <span class="muted">{{ group.items.length }} 条记录</span>
+        </div>
+        <div v-for="run in group.items" :key="run.id" class="run-card" :class="run.status.toLowerCase()">
+          <div class="run-info">
+            <span class="account-name">{{ accountName(run.accountId) }}</span>
+            <span class="badge" :class="run.status.toLowerCase()">{{ statusText(run.status) }}</span>
+            <div class="run-meta">
+              <span>触发方式: {{ triggerText(run.triggeredBy) }}</span>
+              <span>时间: {{ formatTime(run.createdAt) }}</span>
+              <span v-if="run.durationMs">耗时: {{ run.durationMs }}ms</span>
+              <span v-if="run.message">消息: {{ run.message }}</span>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
       <div v-if="runs.length === 0" class="empty">暂无签到记录</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { apiUrl, authHeaders, request } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
+
+interface CurrentUser {
+  id: string
+  username: string
+  role: string
+}
+
+const props = defineProps<{ currentUser: CurrentUser | null }>()
 
 interface Account {
   id: string
   name: string
   siteType: string
+  ownerId?: string | null
+  ownerName?: string | null
 }
 
 interface CheckinRun {
@@ -56,10 +74,66 @@ interface CheckinRun {
   createdAt: string
 }
 
+interface AccountGroup {
+  key: string
+  label: string
+  items: Account[]
+}
+
+interface RunGroup {
+  key: string
+  label: string
+  isSelf: boolean
+  items: CheckinRun[]
+}
+
 const accounts = ref<Account[]>([])
 const runs = ref<CheckinRun[]>([])
 const selectedAccountId = ref('')
 const keepLatest = ref(100)
+
+// 按账户归属用户分组下拉框选项
+const groupedAccounts = computed<AccountGroup[]>(() => {
+  const groups = new Map<string, AccountGroup>()
+  for (const account of accounts.value) {
+    const key = account.ownerId || 'unknown'
+    if (!groups.has(key)) {
+      const label = account.ownerName || (account.ownerId ? `用户 ${account.ownerId.slice(0, 8)}` : '未知用户')
+      groups.set(key, { key, label, items: [] })
+    }
+    groups.get(key)!.items.push(account)
+  }
+  return Array.from(groups.values()).sort((a, b) => {
+    const aSelf = !!props.currentUser && a.key === props.currentUser.id
+    const bSelf = !!props.currentUser && b.key === props.currentUser.id
+    if (aSelf !== bSelf) return aSelf ? -1 : 1
+    return a.label.localeCompare(b.label, 'zh-Hans')
+  })
+})
+
+// 通过账户反查归属用户，把签到记录按用户分组；当前用户分组置顶。
+const groupedRuns = computed<RunGroup[]>(() => {
+  const groups = new Map<string, RunGroup>()
+  for (const run of runs.value) {
+    const account = accounts.value.find((a) => a.id === run.accountId)
+    const key = account?.ownerId || 'unknown'
+    if (!groups.has(key)) {
+      const label = account?.ownerName
+        || (account?.ownerId ? `用户 ${account.ownerId.slice(0, 8)}` : '已删除账户')
+      groups.set(key, {
+        key,
+        label,
+        isSelf: !!props.currentUser && !!account?.ownerId && account.ownerId === props.currentUser.id,
+        items: [],
+      })
+    }
+    groups.get(key)!.items.push(run)
+  }
+  return Array.from(groups.values()).sort((a, b) => {
+    if (a.isSelf !== b.isSelf) return a.isSelf ? -1 : 1
+    return a.label.localeCompare(b.label, 'zh-Hans')
+  })
+})
 
 const fetchAccounts = async () => {
   const response = await request(apiUrl('/accounts'), { headers: authHeaders() })
@@ -119,6 +193,15 @@ const statusText = (status: string) => {
   return map[normalized] || status
 }
 
+const triggerText = (trigger: string) => {
+  const map: Record<string, string> = {
+    manual: '手动',
+    manual_batch: '批量手动',
+    scheduled: '定时'
+  }
+  return map[trigger] || trigger
+}
+
 const formatTime = (time: string) => new Date(time).toLocaleString('zh-CN')
 
 onMounted(async () => {
@@ -137,13 +220,18 @@ onMounted(async () => {
 h2 { color: #fff; }
 select, input { background: #111827; color: #fff; border: 1px solid #374151; border-radius: 4px; padding: .5rem; }
 .keep-input { width: 90px; }
-.runs-list { display: grid; gap: 1rem; }
+.runs-list { display: grid; gap: 1.5rem; }
+.run-group { display: grid; gap: 0.75rem; }
+.group-header { display: flex; align-items: center; gap: 0.6rem; padding-bottom: 0.25rem; border-bottom: 1px solid #2a2a2a; }
+.group-header strong { color: #e5e7eb; font-size: 1rem; }
+.group-header .muted { font-size: 0.8rem; }
+.self-tag { background: #0070f3; border-radius: 999px; padding: 0.05rem 0.45rem; margin-left: 0.4rem; font-size: 0.7rem; color: #fff; font-weight: normal; }
 .run-card { background: #1a1a1a; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #666; }
 .run-card.success { border-left-color: #10b981; }
 .run-card.failed { border-left-color: #ef4444; }
 .run-card.already_checked { border-left-color: #3b82f6; }
 .run-card.pending { border-left-color: #f59e0b; }
-.run-info strong { color: #fff; font-size: 1.1rem; }
+.run-info .account-name { color: #fff; font-size: 1.1rem; font-weight: bold; }
 .run-info { display: flex; flex-direction: column; gap: 0.5rem; }
 .run-meta { display: flex; flex-direction: column; gap: 0.25rem; color: #888; font-size: 0.9rem; }
 .badge { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; display: inline-block; width: fit-content; background: #666; color: white; }

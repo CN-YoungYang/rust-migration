@@ -2,29 +2,52 @@
   <section class="account-panel">
     <div class="panel-header">
       <h2>签到账户管理</h2>
-      <button class="primary" @click="openCreate">新增账户</button>
+      <div class="header-actions">
+        <button
+          v-if="accounts.length > 0"
+          class="primary"
+          :disabled="batchLoading"
+          @click="batchCheckin(accounts.map((a) => a.id))"
+        >
+          {{ batchLoading ? '签到中...' : '全部签到' }}
+        </button>
+        <button class="primary" :disabled="batchLoading" @click="openCreate">新增账户</button>
+      </div>
     </div>
 
     <p v-if="loading" class="empty">加载中...</p>
 
     <div v-if="!loading" class="account-list">
-      <article v-for="account in accounts" :key="account.id" class="account-card">
-        <div>
-          <div class="title-row">
-            <strong>{{ account.name }}</strong>
-            <span class="badge">{{ account.siteType }}</span>
-            <span v-if="!account.enabled" class="badge disabled">已禁用</span>
+      <section v-for="group in groupedAccounts" :key="group.key" class="account-group">
+        <div class="group-header">
+          <h3>{{ group.label }}<span v-if="group.isSelf" class="self-tag">我</span></h3>
+          <span class="muted">{{ group.items.length }} 个账户</span>
+          <button
+            class="batch-btn"
+            :disabled="batchLoading"
+            @click="batchCheckin(group.items.map((a) => a.id))"
+          >
+            该组签到
+          </button>
+        </div>
+        <article v-for="account in group.items" :key="account.id" class="account-card">
+          <div>
+            <div class="title-row">
+              <strong>{{ account.name }}</strong>
+              <span class="badge">{{ account.siteType }}</span>
+              <span v-if="!account.enabled" class="badge disabled">已禁用</span>
+            </div>
+            <p class="muted">{{ account.baseUrl }}</p>
+            <p class="muted">认证：{{ account.authType }} ｜ 余额：{{ formatBalance(account.lastBalance) }}</p>
+            <p v-if="account.lastStatus" class="muted">最近状态：{{ account.lastStatus }} {{ account.lastMessage || '' }}</p>
           </div>
-          <p class="muted">{{ account.baseUrl }}</p>
-          <p class="muted">认证：{{ account.authType }} ｜ 余额：{{ formatBalance(account.lastBalance) }}</p>
-          <p v-if="account.lastStatus" class="muted">最近状态：{{ account.lastStatus }} {{ account.lastMessage || '' }}</p>
-        </div>
-        <div class="actions">
-          <button @click="refreshBalance(account.id)">刷新余额</button>
-          <button @click="openEdit(account)">编辑</button>
-          <button class="danger" @click="deleteAccount(account.id)">删除</button>
-        </div>
-      </article>
+          <div class="actions">
+            <button @click="refreshBalance(account.id)">刷新余额</button>
+            <button @click="openEdit(account)">编辑</button>
+            <button class="danger" @click="deleteAccount(account.id)">删除</button>
+          </div>
+        </article>
+      </section>
       <p v-if="accounts.length === 0" class="empty">暂无账户</p>
     </div>
 
@@ -62,9 +85,17 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { apiUrl, authHeaders, request } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
+
+interface CurrentUser {
+  id: string
+  username: string
+  role: string
+}
+
+const props = defineProps<{ currentUser: CurrentUser | null }>()
 
 type Account = {
   id: string
@@ -72,6 +103,8 @@ type Account = {
   siteType: string
   baseUrl: string
   userId?: string | null
+  ownerId?: string | null
+  ownerName?: string | null
   authType: string
   enabled: boolean
   retryEnabled?: boolean
@@ -79,6 +112,13 @@ type Account = {
   lastStatus?: string | null
   lastMessage?: string | null
   customCheckinUrl?: string | null
+}
+
+interface AccountGroup {
+  key: string
+  label: string
+  isSelf: boolean
+  items: Account[]
 }
 
 // One API / New API 系列标准换算：500000 quota = 1 美元
@@ -97,6 +137,58 @@ const accounts = ref<Account[]>([])
 const loading = ref(false)
 const showForm = ref(false)
 const editingId = ref('')
+const batchLoading = ref(false)
+
+// 批量手动签到：复用分组，跳过今日已签由后端统一判定。
+async function batchCheckin(accountIds: string[]) {
+  if (accountIds.length === 0 || batchLoading.value) return
+  batchLoading.value = true
+  try {
+    const response = await request(apiUrl('/checkin-runs/batch'), {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountIds }),
+    })
+    const result = await response.json() as {
+      total: number
+      succeeded: number
+      skipped: number
+      failed: number
+    }
+    showToast(
+      `批量签到完成：成功 ${result.succeeded}，跳过 ${result.skipped}，失败 ${result.failed}`,
+      result.failed > 0 ? 'error' : 'success',
+    )
+    await loadAccounts()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '批量签到失败', 'error')
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+// 管理员能看到所有用户的账户，按归属用户分组以免混淆；
+// 当前用户自己的分组排在最前，其余按用户名排序。
+const groupedAccounts = computed<AccountGroup[]>(() => {
+  const groups = new Map<string, AccountGroup>()
+  for (const account of accounts.value) {
+    const key = account.ownerId || 'unknown'
+    if (!groups.has(key)) {
+      const label = account.ownerName || (account.ownerId ? `用户 ${account.ownerId.slice(0, 8)}` : '未知用户')
+      groups.set(key, {
+        key,
+        label,
+        isSelf: !!props.currentUser && account.ownerId === props.currentUser.id,
+        items: [],
+      })
+    }
+    groups.get(key)!.items.push(account)
+  }
+  return Array.from(groups.values()).sort((a, b) => {
+    if (a.isSelf !== b.isSelf) return a.isSelf ? -1 : 1
+    return a.label.localeCompare(b.label, 'zh-Hans')
+  })
+})
 
 const form = reactive({
   name: '',
@@ -221,7 +313,14 @@ onMounted(loadAccounts)
 <style scoped>
 .account-panel { max-width: 1200px; margin: 0 auto; padding: 2rem; }
 .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
-.account-list { display: grid; gap: 1rem; }
+.header-actions { display: flex; gap: .5rem; }
+.account-list { display: grid; gap: 1.5rem; }
+.account-group { display: grid; gap: 1rem; }
+.group-header { display: flex; align-items: center; gap: .6rem; padding-bottom: .25rem; border-bottom: 1px solid #2a2a2a; }
+.group-header h3 { margin: 0; font-size: 1rem; color: #e5e7eb; }
+.group-header .muted { font-size: .8rem; flex: 1; }
+.group-header .batch-btn { background: #10b981; font-size: .8rem; padding: .3rem .7rem; }
+.self-tag { background: #2563eb; border-radius: 999px; padding: .05rem .45rem; margin-left: .4rem; font-size: .7rem; color: #fff; }
 .account-card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1rem; display: flex; justify-content: space-between; gap: 1rem; }
 .title-row { display: flex; gap: .5rem; align-items: center; margin-bottom: .5rem; }
 .badge { background: #2563eb; border-radius: 999px; padding: .15rem .5rem; font-size: .75rem; }

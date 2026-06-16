@@ -45,6 +45,9 @@ thiserror = "1.0"
 uuid = { version = "1.0", features = ["serde", "v4"] }
 lazy_static = "1.4"
 
+# Random (防判定：随机 UA / 随机间隔 / 打乱顺序)
+rand = "0.8"
+
 [profile.release]
 opt-level = 3
 lto = true

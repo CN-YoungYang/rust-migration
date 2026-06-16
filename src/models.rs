@@ -113,6 +113,14 @@ pub struct CheckinSetting {
     #[serde(rename = "maxAttemptsPerDay")]
     #[sqlx(rename = "maxAttemptsPerDay")]
     pub max_attempts_per_day: i32,
+    /// 批量/定时签到时，相邻账户之间的最小随机延迟（秒）
+    #[serde(rename = "batchDelayMin")]
+    #[sqlx(rename = "batchDelayMin")]
+    pub batch_delay_min: i32,
+    /// 批量/定时签到时，相邻账户之间的最大随机延迟（秒）
+    #[serde(rename = "batchDelayMax")]
+    #[sqlx(rename = "batchDelayMax")]
+    pub batch_delay_max: i32,
     #[serde(rename = "updatedAt")]
     #[sqlx(rename = "updatedAt")]
     pub updated_at: DateTime<Utc>,
@@ -179,6 +187,10 @@ pub struct UpdateSettingsRequest {
     pub retry_enabled: Option<bool>,
     #[serde(rename = "maxAttemptsPerDay")]
     pub max_attempts_per_day: Option<i32>,
+    #[serde(rename = "batchDelayMin")]
+    pub batch_delay_min: Option<i32>,
+    #[serde(rename = "batchDelayMax")]
+    pub batch_delay_max: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]

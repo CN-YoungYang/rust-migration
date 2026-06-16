@@ -5,7 +5,7 @@
       <div class="nav-links">
         <button @click="currentView = 'accounts'" :class="{ active: currentView === 'accounts' }">账户管理</button>
         <button @click="currentView = 'runs'" :class="{ active: currentView === 'runs' }">签到记录</button>
-        <button @click="currentView = 'settings'" :class="{ active: currentView === 'settings' }">全局设置</button>
+        <button @click="currentView = 'settings'" :class="{ active: currentView === 'settings' }" v-if="isAdmin">全局设置</button>
         <button @click="currentView = 'users'" :class="{ active: currentView === 'users' }" v-if="isAdmin">用户管理</button>
         <button @click="logout" class="btn-logout">退出</button>
       </div>
@@ -27,9 +27,9 @@
       </div>
 
       <div v-else>
-        <AccountPanel v-if="currentView === 'accounts'" />
-        <CheckinRunsPanel v-else-if="currentView === 'runs'" />
-        <SettingsPanel v-else-if="currentView === 'settings'" />
+        <AccountPanel v-if="currentView === 'accounts'" :current-user="currentUser" />
+        <CheckinRunsPanel v-else-if="currentView === 'runs'" :current-user="currentUser" />
+        <SettingsPanel v-else-if="currentView === 'settings' && isAdmin" />
         <AdminUserPanel v-else-if="currentView === 'users'" :current-user="currentUser" />
       </div>
     </div>

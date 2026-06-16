@@ -48,6 +48,18 @@ pub async fn update(
         }
     }
 
+    // 批量/定时签到随机延迟范围校验（秒）。允许 min=0 且 max=0 表示不延迟。
+    // 约束：0 <= min <= max <= 600（10 分钟封顶，避免单次签到耗时过长）。
+    if let (Some(min), Some(max)) = (payload.batch_delay_min, payload.batch_delay_max) {
+        if min < 0 || max < 0 || min > max || max > 600 {
+            return Err(AppError::Validation(
+                "batchDelayMin/Max 必须满足 0 <= min <= max <= 600（秒）".into(),
+            ));
+        }
+    } else if payload.batch_delay_min.is_some() || payload.batch_delay_max.is_some() {
+        return Err(AppError::Validation("batchDelayMin 和 batchDelayMax 必须同时提供".into()));
+    }
+
     let settings = db::update_settings(
         &state.db,
         payload.enabled,
@@ -55,6 +67,8 @@ pub async fn update(
         payload.window_end.as_deref(),
         payload.retry_enabled,
         payload.max_attempts_per_day,
+        payload.batch_delay_min,
+        payload.batch_delay_max,
     ).await?;
 
     Ok(Json(settings))

@@ -142,6 +142,7 @@ async fn post_checkin(
     url: &str,
     user_id: Option<&str>,
     cookie: Option<&str>,
+    user_agent: Option<&str>,
 ) -> Result<(reqwest::StatusCode, String, Option<String>)> {
     let mut req = client
         .post(url)
@@ -150,6 +151,11 @@ async fn post_checkin(
         .header("Pragma", "no-cache")
         .header("X-Requested-With", "XMLHttpRequest")
         .body("{}".to_string());
+
+    // 防判定：用随机 UA 覆盖单例默认 UA
+    if let Some(ua) = user_agent {
+        req = req.header(reqwest::header::USER_AGENT, ua);
+    }
 
     if let Some(uid) = user_id {
         req = req.header("User-id", uid);
@@ -175,19 +181,20 @@ pub async fn checkin(
     user_id: Option<&str>,
     cookie: Option<&str>,
     custom_url: Option<&str>,
+    user_agent: Option<&str>,
 ) -> Result<(String, String, Option<String>)> {
     let endpoint = custom_url.unwrap_or(DEFAULT_CHECKIN_PATH);
     let url = join_url(base_url, endpoint);
     let client = http_client();
 
     let (mut status, mut text, mut content_type) =
-        post_checkin(&client, &url, user_id, cookie).await?;
+        post_checkin(&client, &url, user_id, cookie, user_agent).await?;
 
     if is_challenge_page(&text, content_type.as_deref()) {
         match solve_acw_sc_v2(&text) {
             Some(acw_sc_v2) => {
                 let merged = merge_cookie(cookie, "acw_sc__v2", &acw_sc_v2);
-                let (s, t, ct) = post_checkin(&client, &url, user_id, Some(&merged)).await?;
+                let (s, t, ct) = post_checkin(&client, &url, user_id, Some(&merged), user_agent).await?;
                 status = s;
                 text = t;
                 content_type = ct;

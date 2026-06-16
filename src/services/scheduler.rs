@@ -1,14 +1,10 @@
 use sqlx::SqlitePool;
 use tokio_cron_scheduler::{JobScheduler, Job};
 use chrono::{Local, NaiveTime};
-use std::sync::Arc;
-use tokio::sync::Semaphore;
 use crate::{
     db,
-    services::checkin::runner::execute_checkin,
+    services::checkin::runner::{execute_checkin, skip_reason_for_batch},
 };
-
-const MAX_CONCURRENT_CHECKINS: usize = 10;
 
 pub async fn start_scheduler(db: SqlitePool) {
     tokio::spawn(async move {
@@ -80,32 +76,20 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
         return Ok(());
     }
 
-    let accounts = db::list_accounts(db).await?;
+    let mut accounts = db::list_accounts(db).await?;
     let today_local = Local::now().date_naive();
 
-    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_CHECKINS));
-    let mut tasks = Vec::new();
+    // 防判定：打乱执行顺序，避免每次按固定顺序签到
+    use rand::seq::SliceRandom;
+    accounts.shuffle(&mut rand::thread_rng());
 
+    // 串行执行 + 随机间隔：与批量手动签到一致，避免瞬时并发被站点判定为机器人
+    let mut executed = 0usize;
     for account in accounts {
-        if !account.enabled {
+        // 跳过今日已签/已禁用/不允许重试的账户（与批量手动签到共用同一判断）
+        if let Some(reason) = skip_reason_for_batch(&account, &settings, today_local) {
+            tracing::debug!("Skipping account {}: {}", account.id, reason);
             continue;
-        }
-
-        // Already succeeded today (in local time) -> skip
-        if let Some(last_run) = account.last_run_at {
-            let last_run_local = last_run.with_timezone(&Local);
-            if last_run_local.date_naive() == today_local {
-                if let Some(status) = &account.last_status {
-                    if status == "success" || status == "already_checked" {
-                        continue;
-                    }
-                }
-
-                // Check if retry is allowed (both global and per-account)
-                if !settings.retry_enabled || !account.retry_enabled {
-                    continue;
-                }
-            }
         }
 
         // Enforce maxAttemptsPerDay: count today's runs for this account
@@ -118,20 +102,22 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
             continue;
         }
 
-        let db = db.clone();
-        let account_id = account.id.clone();
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
-        tasks.push(tokio::spawn(async move {
-            let _permit = permit;
-            match execute_checkin(&db, &account_id, "scheduled").await {
-                Ok(_) => tracing::info!("Scheduled checkin completed for account {}", account_id),
-                Err(e) => tracing::error!("Scheduled checkin failed for account {}: {}", account_id, e),
+        // 首个账户不延迟，其余账户签到前随机 sleep（按管理员设置）
+        if executed > 0 {
+            if let Some(secs) = crate::services::checkin::random_delay_secs(
+                settings.batch_delay_min,
+                settings.batch_delay_max,
+            ) {
+                tracing::debug!("Scheduled checkin: account {} waiting {}s", account.id, secs);
+                tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
             }
-        }));
-    }
+        }
 
-    for task in tasks {
-        let _ = task.await;
+        match execute_checkin(db, &account.id, "scheduled").await {
+            Ok(_) => tracing::info!("Scheduled checkin completed for account {}", account.id),
+            Err(e) => tracing::error!("Scheduled checkin failed for account {}: {}", account.id, e),
+        }
+        executed += 1;
     }
 
     Ok(())
