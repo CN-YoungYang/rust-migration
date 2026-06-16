@@ -60,5 +60,11 @@ CREATE TABLE IF NOT EXISTS CheckinSetting (
     updatedAt TEXT NOT NULL
 );
 
-INSERT OR IGNORE INTO CheckinSetting (id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, batchDelayMin, batchDelayMax, updatedAt)
-VALUES ('global', 0, '02:00', '05:00', 1, 3, 3, 10, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));
+-- 注意：此处不写入 batchDelayMin / batchDelayMax。这两列在 v2.2.2 才引入，
+-- 旧库的 CheckinSetting 可能尚未包含（CREATE TABLE IF NOT EXISTS 不会给老表补列）。
+-- 在此 INSERT 引用缺失列会导致启动报错：
+--   "table CheckinSetting has no column named batchDelayMin"
+-- 新库通过上面的列定义 DEFAULT 取得 3 / 10；
+-- 旧库由 db::ensure_setting_columns() 运行时补列并修正默认值。
+INSERT OR IGNORE INTO CheckinSetting (id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, updatedAt)
+VALUES ('global', 0, '02:00', '05:00', 1, 3, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));
