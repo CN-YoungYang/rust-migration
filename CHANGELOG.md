@@ -1,5 +1,48 @@
 # 更新日志
 
+## v2.3.1 (2026-06-16)
+
+### Bug 修复
+
+- **修复余额查询被 Cloudflare WAF 拦截（403）** — `zxiaoruan.cn` 等 Cloudflare 防护站点签到后余额刷新返回 `403 Sorry, you have been blocked`，导致余额写库失败。根因三层：① `fetch_balance` 之前完全不传 UA，永远用 `http_client` 单例的固定 UA；② UA 池停在 Chrome/126（2024-06），落后近两年，是 WAF 强 bot 信号；③ 缺 `Accept-Language` / `sec-ch-ua` / `Sec-Fetch-*` 等浏览器一致性头，“声称是 Chrome 但缺客户端提示”直接被扣分
+- **修复旧库启动崩溃** — `CheckinSetting.batchDelayMin/Max` 两列在 v2.3.0 才引入。旧库执行 `20260611_init.sql` 时 `CREATE TABLE IF NOT EXISTS` 命中已存在的表直接跳过、不补列，随后 seed `INSERT` 显式引用这两列，触发 `table CheckinSetting has no column named batchDelayMin`，程序在启动迁移阶段直接崩溃（`ensure_setting_columns()` 在 `get_settings()` 才调用，崩溃时根本走不到）。修复：seed `INSERT` 不再写入这两列，新库由列定义 `DEFAULT 3/10` 取值，旧库由 `ensure_setting_columns()` 运行时补列并修正默认值，新老库均能正常启动
+
+### 防判定（header / UA 层）
+
+- **浏览器指纹池** — `checkin/mod.rs` 新增 `BrowserProfile`（UA + `sec-ch-ua` + `sec-ch-ua-platform` + `Accept-Language` 自洽组合），5 个近期版本指纹池：Chrome 134/135（Windows）、Chrome 135（macOS）、Firefox 137（Windows，无 `sec-ch-ua`）、Edge 135（Windows）
+- **`random_browser_profile()` / `apply_browser_headers()`** — 每次签到 / 余额查询随机选一个 profile，统一注入 `User-Agent`、`Accept-Language`、`sec-ch-ua`、`sec-ch-ua-mobile`、`sec-ch-ua-platform`；`http_client` 单例默认 UA 同步升到 Chrome/135
+- **三 provider 签名统一** — `checkin` / `fetch_balance` 由 `user_agent: Option<&str>` 改为 `profile: &BrowserProfile`，所有请求补齐 `Sec-Fetch-Site/Mode/Dest`、`Referer`（同源）；余额查询现在也走随机 UA，且与签到指纹保持一致
+
+> 仅解决 header/UA 层拦截。若部署后仍 403，则拦截在更底层：JA3/JA4 TLS 指纹（需换 rrequest/BoringSSL 模拟 Chrome 握手）或 IP 信誉（Oracle Cloud 数据中心 IP 常被降权，需住宅代理）。
+
+---
+
+## v2.3.0 (2026-06-16)
+
+### 新功能
+
+- **账户 / 记录按归属用户分组** — 账户管理、签到记录均按 owner 折叠分组，避免多用户混淆；当前用户自己的分组置顶。账户 JSON 新增 `ownerId` / `ownerName`，`list` 路由构建 `owner_map` 一次性反查归属用户名
+- **批量手动签到** — 新增 `POST /api/checkin-runs/batch` 端点（`main.rs` 注册）。支持「全部签到」/「该组签到」，自动跳过今日已 `success`/`already_checked`、已禁用、关闭重试、达到每日上限的账户；响应 `BatchCheckinResponse { items, total, succeeded, skipped, failed }`
+- **非管理员隐藏全局设置** — 「全局设置」入口与 `SettingsPanel` 对 `role != ADMIN/SUPER_ADMIN` 隐藏（`App.vue` 用 `v-if="isAdmin"` 守卫），避免普通用户误改调度参数
+
+### 防批量判定（批量 + 定时两条路径统一应用）
+
+> 同一站点多账户瞬时并发是最大的机器人指纹。改为逐个签到，相邻账户之间按管理员设置随机延迟，并打乱执行顺序、轮换 UA。
+
+- **由并发改为串行执行** — 账户间在 `[batchDelayMin, batchDelayMax]` 秒区间内随机 `sleep`；每轮执行前用 `SliceRandom::shuffle` 随机打乱账户顺序
+- **随机 UA** — 每个账户签到使用随机 UA（v2.3.1 进一步升级为完整浏览器指纹 profile）
+- **随机延迟可配置** — `CheckinSetting` / `UpdateSettingsRequest` 新增 `batchDelayMin` / `batchDelayMax`（默认 3 / 10 秒）；`settings.rs` 校验 `0 <= min <= max <= 600` 且二者须同时提供
+- **调度器重构** — `scheduler.rs` 移除 `Semaphore(10)` 并发，改为串行执行 + 随机延迟 + 打乱顺序；跳过判断提取为 `runner::skip_reason_for_batch`，定时与批量手动签到共用同一套规则
+- **db.rs 幂等迁移** — `ensure_setting_columns()` 对旧库用 `ALTER TABLE ADD COLUMN`（忽略 "duplicate column" 错误）补 `batchDelayMin/Max` 两列
+
+### 构建 / 部署
+
+- `Cargo.toml` 增加 `rand = "0.8"`
+- 修复 `runner.rs` 字节级调用错误：`execute_arrouter_checkin` 原误调 4-arg 的 x666 provider，现已正确命中 arrouter provider
+- 前端重新构建，新 bundle `index-CzpkatJQ.js` / `index-BamDdJe3.css`
+
+---
+
 ## v2.2.1 (2026-06-15)
 
 ### Bug 修复

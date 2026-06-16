@@ -82,8 +82,38 @@
 
 1. **JSON 解析失败** → 将原始响应文本作为消息使用
 2. **HTTP 非 2xx** → 先检查是否"已签到"，再判定失败
-3. **空消息** → 使用默认消息（anyrouter 空消息视为已签到）
+3. **空消息** → 使用默认消息（arrouter 空消息视为已签到）
 4. **HTML 404** → 不再导致 500 错误，正确识别为失败
+
+## 防判定（浏览器指纹）
+
+为降低被站点 WAF（Cloudflare 等）判定为 bot 的概率，所有签到与余额查询请求都使用随机浏览器指纹：
+
+- **`BrowserProfile`**（`checkin/mod.rs`）— 一组自洽的指纹：`User-Agent` 与配套的 `sec-ch-ua` / `sec-ch-ua-platform` / `Accept-Language` 必须保持一致，否则“UA 声称是 Chrome 但缺少客户端提示”会被扣分。Firefox 系无 `sec-ch-ua`
+- **指纹池（5 个近期版本）** — Chrome 134/135（Windows）、Chrome 135（macOS）、Firefox 137（Windows）、Edge 135（Windows）。版本号贴近当前主流，落后两年的 UA 是 WAF 的强 bot 信号
+- **`random_browser_profile()`** — 每次签到 / 余额刷新随机选一个 profile
+- **`apply_browser_headers()`** — 统一注入 `User-Agent`、`Accept-Language`、`sec-ch-ua`、`sec-ch-ua-mobile`、`sec-ch-ua-platform`；`Sec-Fetch-*` 与 `Referer` 因请求上下文而异，由各 provider 按需补
+- **签到与余额同指纹** — `execute_checkin` 内一次性生成 profile，签到与随后的 `fetch_account_balance` 复用同一 profile，避免两次请求指纹不一致被关联
+
+> 仅解决 header/UA 层拦截。若部署后仍 403，则拦截在更底层：JA3/JA4 TLS 指纹或 IP 信誉。
+
+## 批量与定时签到的防批量判定
+
+批量手动签到（`POST /api/checkin-runs/batch`）与定时签到共用同一套防批量策略（`runner::skip_reason_for_batch`）：
+
+- **串行执行** — 不再瞬时并发，相邻账户之间按 `batchDelayMin`~`batchDelayMax`（管理员设置，默认 3~10 秒）随机 `sleep`
+- **随机打乱顺序** — 每轮执行前用 `SliceRandom::shuffle` 打乱，避免每次按固定顺序签到
+- **自动跳过** — 今日已 `success`/`already_checked`、已禁用、关闭重试、达到每日上限的账户跳过，计入 `skipped`
+- **首账户不延迟** — 避免无谓等待
+
+批量响应：
+
+```json
+{
+  "items": [{ "accountId": "...", "accountName": "...", "status": "success", "message": "..." }],
+  "total": 12, "succeeded": 10, "skipped": 1, "failed": 1
+}
+```
 
 ## 账号验证
 
@@ -148,6 +178,8 @@ RUST_LOG=debug cargo run
 
 ## 版本历史
 
+- **v2.3.1** (2026-06-16) - 修复余额查询被 Cloudflare WAF 拦截（403）：随机浏览器指纹 profile（`BrowserProfile` + `apply_browser_headers`）、余额查询补齐浏览器头；修复旧库启动报 `batchDelayMin` 列不存在
+- **v2.3.0** (2026-06-16) - 账户/记录按归属用户分组、批量手动签到（`POST /api/checkin-runs/batch`）、防批量判定（串行 + 随机延迟 + 打乱顺序 + 随机 UA）、调度器由并发改串行
 - **v2.2.1** (2026-06-15) - 修复余额查询（gzip/401/panic）、签到逻辑对齐 Next.js（cookie/awardedQuota/checked_in）、签到后刷新余额、Docker 多阶段构建
 - **v2.2.0** (2026-06-15) - 新增 arrouter 余额查询、完善错误处理、账号验证
 - **v2.1.0** (2026-06-13) - 安全加固、性能优化、时区修复

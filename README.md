@@ -4,11 +4,14 @@
 
 ## 功能
 
-- **多站点签到** — 支持 new-api、anyrouter、x666 三种站点类型
+- **多站点签到** — 支持 new-api、arrouter、x666 三种站点类型
 - **用户管理** — USER / ADMIN / SUPER_ADMIN 三级角色，完整 CRUD
 - **所有权隔离** — 普通用户只能查看和操作自己的账户，管理员可管理所有
+- **按用户分组** — 账户管理与签到记录均按归属用户折叠分组，当前用户分组置顶，避免多用户混淆
 - **自动调度** — 可配置签到窗口（本地时间）、重试策略、每日尝试上限
-- **余额查询** — 支持 new-api、anyrouter 和 x666 站点的实时余额查询
+- **批量手动签到** — 「全部签到」/「该组签到」，自动跳过今日已签等账户，返回成功 / 跳过 / 失败汇总
+- **防批量判定** — 批量与定时签到均改为串行执行 + 账户间随机延迟 + 随机打乱顺序 + 随机浏览器指纹，降低被站点判定为机器人的风险
+- **余额查询** — 支持 new-api、arrouter 和 x666 站点的实时余额查询
 - **签到反馈** — 签到成功后显示本次获得额度（quota + 美元换算，500000 quota = 1 USD）
 - **余额联动** — 签到成功 / 已签到后自动刷新账户余额（失败不阻塞签到）
 - **反爬处理** — arrouter 自动识别并求解 acw_sc__v2 反爬挑战
@@ -83,7 +86,7 @@ rust-migration/
 │   │   ├── settings.rs      # 全局设置（仅管理员）
 │   │   └── checkin_runs.rs  # 签到记录 + 手动执行 + 清理
 │   └── services/
-│       ├── scheduler.rs     # Cron 调度器（并发控制）
+│       ├── scheduler.rs     # Cron 调度器（串行执行 + 随机延迟）
 │       └── checkin/
 │           ├── runner.rs    # 签到执行器
 │           └── providers/   # 站点适配器
@@ -136,6 +139,7 @@ rust-migration/
 |------|------|------|
 | GET | `/api/checkin-runs` | 签到历史 |
 | POST | `/api/checkin-runs` | 手动执行签到 |
+| POST | `/api/checkin-runs/batch` | 批量签到（串行 + 随机延迟 + 打乱顺序） |
 | POST | `/api/checkin-runs/cleanup` | 清理记录 |
 
 ### 设置（需 ADMIN+）
@@ -191,7 +195,7 @@ ADMIN_PASSWORD=admin123456       # 初始管理员密码
 - SQLite 连接池上限 5
 - bcrypt cost 降为 10（平衡安全与性能）
 - 共享 HTTP 客户端（OnceLock，30s 超时）
-- 调度器并发上限 10（Semaphore）
+- 调度器串行执行签到，账户间随机延迟（防批量判定，可配置）
 - Docker 多阶段构建，CARGO_BUILD_JOBS=1
 - 非 root 用户运行
 
