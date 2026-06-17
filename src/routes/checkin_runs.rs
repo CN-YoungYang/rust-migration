@@ -224,9 +224,9 @@ pub async fn cleanup_runs(
     Json(payload): Json<serde_json::Value>,
 ) -> Result<Json<Value>> {
     let keep_latest_raw = payload["keepLatest"].as_i64().unwrap_or(100);
-    if keep_latest_raw < 1 || keep_latest_raw > 10000 {
+    if keep_latest_raw < 0 || keep_latest_raw > 10000 {
         return Err(crate::error::AppError::Validation(
-            format!("keepLatest 必须在 1~10000 之间，收到 {}", keep_latest_raw)
+            format!("keepLatest 必须在 0~10000 之间（0 表示清除全部），收到 {}", keep_latest_raw)
         ));
     }
     let keep_latest = keep_latest_raw as usize;

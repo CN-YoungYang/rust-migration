@@ -17,7 +17,7 @@
           </optgroup>
         </select>
         <button @click="executeCheckin" class="btn-execute" :disabled="!selectedAccountId">执行签到</button>
-        <input v-model.number="keepLatest" type="number" min="1" max="10000" class="keep-input" title="保留最新记录数" />
+        <input v-model.number="keepLatest" type="number" min="0" max="10000" class="keep-input" title="保留最新记录数（0=清除全部）" />
         <button @click="cleanupRuns" class="btn-cleanup">清理记录</button>
       </div>
     </div>
@@ -218,7 +218,10 @@ const executeCheckin = async () => {
 }
 
 const cleanupRuns = async () => {
-  if (!(await confirmAction(`确定清理记录并保留最新 ${keepLatest.value} 条吗？`))) return
+  const msg = keepLatest.value === 0
+    ? '确定清除全部签到记录吗？此操作不可撤销！'
+    : `确定清理记录并保留最新 ${keepLatest.value} 条吗？`
+  if (!(await confirmAction(msg))) return
   try {
     await request(apiUrl('/checkin-runs/cleanup'), {
       method: 'POST',
