@@ -30,6 +30,7 @@
 
     <div class="user-list">
       <h3>用户列表</h3>
+      <p v-if="loading" class="loading-hint">加载中...</p>
       <div v-for="user in users" :key="user.id" class="user-card">
         <div class="user-info">
           <strong>{{ user.username }}</strong>
@@ -49,7 +50,7 @@
       </div>
     </div>
 
-    <div v-if="editingUser" class="modal">
+    <div v-if="editingUser" class="modal" @click.self="editingUser = null" @keydown.escape="editingUser = null">
       <div class="modal-content">
         <h3>编辑用户</h3>
         <form @submit.prevent="updateUser">
@@ -88,13 +89,7 @@
 import { ref, onMounted } from 'vue'
 import { apiUrl, authHeaders, request } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
-
-interface CurrentUser {
-  id: string
-  username: string
-  role: string
-  enabled: boolean
-}
+import type { CurrentUser } from '../types'
 
 interface User {
   id: string
@@ -107,6 +102,7 @@ interface User {
 const props = defineProps<{ currentUser: CurrentUser | null }>()
 
 const users = ref<User[]>([])
+const loading = ref(false)
 const newUser = ref({
   username: '',
   password: '',
@@ -124,6 +120,7 @@ const canManage = (user: User) => {
 }
 
 const fetchUsers = async () => {
+  loading.value = true
   try {
     const res = await request(apiUrl('/admin/users'), {
       headers: authHeaders()
@@ -131,6 +128,8 @@ const fetchUsers = async () => {
     users.value = await res.json()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '加载用户失败', 'error')
+  } finally {
+    loading.value = false
   }
 }
 
@@ -369,5 +368,11 @@ h3 {
   padding: 0.5rem 1.5rem;
   border-radius: 4px;
   cursor: pointer;
+}
+
+.loading-hint {
+  color: #9ca3af;
+  text-align: center;
+  padding: 1.5rem;
 }
 </style>

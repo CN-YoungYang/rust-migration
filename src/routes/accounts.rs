@@ -102,14 +102,31 @@ pub async fn create(
     State(state): State<Arc<AppState>>, Extension(user): Extension<crate::models::AppUser>,
     Json(payload): Json<CreateAccountRequest>,
 ) -> Result<Json<Value>> {
+    // 基础校验
+    let valid_site_types = ["new-api", "anyrouter", "x666"];
+    if !valid_site_types.contains(&payload.site_type.as_str()) {
+        return Err(crate::error::AppError::Validation(
+            format!("不支持的站点类型: {}，可选: {:?}", payload.site_type, valid_site_types)
+        ));
+    }
+    if !payload.base_url.starts_with("http://") && !payload.base_url.starts_with("https://") {
+        return Err(crate::error::AppError::Validation("站点地址必须以 http:// 或 https:// 开头".into()));
+    }
+    if payload.name.trim().is_empty() {
+        return Err(crate::error::AppError::Validation("账户名称不能为空".into()));
+    }
+    if payload.name.len() > 200 {
+        return Err(crate::error::AppError::Validation("账户名称不能超过 200 字符".into()));
+    }
+
     // Validate required fields based on site type
     if payload.site_type == "anyrouter" && payload.user_id.is_none() {
-        return Err(crate::error::AppError::Validation("userId is required for AnyRouter".into()));
+        return Err(crate::error::AppError::Validation("AnyRouter 必须填写 userId".into()));
     }
-    
+
     if (payload.site_type == "anyrouter" || payload.site_type == "x666") && payload.cookie.is_none() {
         return Err(crate::error::AppError::Validation(
-            format!("cookie is required for {}", payload.site_type)
+            format!("{} 必须填写 cookie", payload.site_type)
         ));
     }
     
@@ -120,10 +137,10 @@ pub async fn create(
         payload.auth_type.clone()
     };
     
-    if payload.site_type != "anyrouter" && payload.site_type != "x666" 
+    if payload.site_type != "anyrouter" && payload.site_type != "x666"
         && auth_type == "access_token" && payload.access_token.is_none() {
         return Err(crate::error::AppError::Validation(
-            "accessToken is required when authType is access_token".into()
+            "认证方式为 access_token 时必须填写 accessToken".into()
         ));
     }
     
@@ -164,7 +181,7 @@ pub async fn update(
         let has_user_id = payload.user_id.as_ref().map(|s| !s.is_empty()).unwrap_or(false) 
             || existing.user_id.is_some();
         if !has_user_id {
-            return Err(crate::error::AppError::Validation("userId is required for AnyRouter".into()));
+            return Err(crate::error::AppError::Validation("AnyRouter 必须填写 userId".into()));
         }
     }
     
@@ -173,7 +190,7 @@ pub async fn update(
         let has_cookie = payload.cookie.is_some() || existing.cookie_enc.is_some();
         if !has_cookie {
             return Err(crate::error::AppError::Validation(
-                format!("cookie is required for {}", site_type)
+                format!("{} 必须填写 cookie", site_type)
             ));
         }
     }
@@ -183,7 +200,7 @@ pub async fn update(
         let has_token = payload.access_token.is_some() || existing.access_token_enc.is_some();
         if !has_token {
             return Err(crate::error::AppError::Validation(
-                "accessToken is required when authType is access_token".into()
+                "认证方式为 access_token 时必须填写 accessToken".into()
             ));
         }
     }
@@ -224,9 +241,7 @@ pub async fn refresh_balance(
     State(state): State<Arc<AppState>>, Extension(user): Extension<crate::models::AppUser>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>> {
-    use crate::services::checkin::providers::{new_api, anyrouter, x666};
-    use crate::crypto::decrypt_secret;
-    use crate::services::checkin::random_browser_profile;
+    use crate::services::checkin::{runner, random_browser_profile};
 
     // 防判定：余额刷新同样使用随机浏览器指纹，避免和签到请求指纹不一致被 WAF 关联。
     let profile = random_browser_profile();
@@ -242,85 +257,21 @@ pub async fn refresh_balance(
         "Refreshing balance"
     );
 
-    let quota = if account.site_type == "x666" {
-        let cookie = account.cookie_enc.as_ref()
-            .ok_or_else(|| crate::error::AppError::Validation("Cookie not configured".into()))?;
-        let cookie_decrypted = decrypt_secret(cookie)
-            .map_err(|e| {
-                tracing::error!("Failed to decrypt cookie: {}", e);
-                crate::error::AppError::Internal("解密失败".to_string())
-            })?;
-        
-        x666::fetch_balance(Some(&cookie_decrypted), profile).await
-            .map_err(|e| {
-                tracing::error!("X666 fetch_balance error: {}", e);
-                crate::error::AppError::Internal(e.to_string())
-            })?
-    } else if account.site_type == "anyrouter" {
-        let access_token = account.access_token_enc.as_ref()
-            .map(|t| decrypt_secret(t))
-            .transpose()
-            .map_err(|e| {
-                tracing::error!("Failed to decrypt access_token: {}", e);
-                crate::error::AppError::Internal("解密失败".to_string())
-            })?;
-        let cookie = account.cookie_enc.as_ref()
-            .map(|c| decrypt_secret(c))
-            .transpose()
-            .map_err(|e| {
-                tracing::error!("Failed to decrypt cookie: {}", e);
-                crate::error::AppError::Internal("解密失败".to_string())
-            })?;
-        
-        anyrouter::fetch_balance(
-            &account.base_url,
-            account.user_id.as_deref(),
-            access_token.as_deref(),
-            cookie.as_deref(),
-            profile
-        ).await
+    // 复用 runner 的余额查询逻辑，避免代码重复
+    let quota = runner::fetch_account_balance(&account, profile).await
         .map_err(|e| {
-            tracing::error!("AnyRouter fetch_balance error: {}", e);
-            crate::error::AppError::Internal(e.to_string())
-        })?
-    } else {
-        // new-api or other types
-        let access_token = account.access_token_enc.as_ref()
-            .map(|t| decrypt_secret(t))
-            .transpose()
-            .map_err(|e| {
-                tracing::error!("Failed to decrypt access_token: {}", e);
-                crate::error::AppError::Internal("解密失败".to_string())
-            })?;
-        let cookie = account.cookie_enc.as_ref()
-            .map(|c| decrypt_secret(c))
-            .transpose()
-            .map_err(|e| {
-                tracing::error!("Failed to decrypt cookie: {}", e);
-                crate::error::AppError::Internal("解密失败".to_string())
-            })?;
-        
-        new_api::fetch_balance(
-            &account.base_url,
-            account.user_id.as_deref(),
-            access_token.as_deref(),
-            cookie.as_deref(),
-            profile
-        ).await
-        .map_err(|e| {
-            tracing::error!("New-API fetch_balance error: {}", e);
-            crate::error::AppError::Internal(e.to_string())
-        })?
-    };
-    
+            tracing::error!("fetch_balance error: {}", e);
+            e
+        })?;
+
     tracing::info!(
         account_id = %id,
         quota = %quota,
         "Balance refreshed successfully"
     );
-    
+
     db::update_account_balance(&state.db, &id, quota).await?;
-    
+
     Ok(Json(json!({
         "success": true,
         "balance": quota

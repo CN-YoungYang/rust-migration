@@ -34,17 +34,17 @@ pub async fn update(
     require_admin(&user)?;
     if let Some(ref start) = payload.window_start {
         if start.parse::<chrono::NaiveTime>().is_err() {
-            return Err(AppError::Validation("windowStart must be in HH:MM format".into()));
+            return Err(AppError::Validation("签到窗口开始时间格式应为 HH:MM".into()));
         }
     }
     if let Some(ref end) = payload.window_end {
         if end.parse::<chrono::NaiveTime>().is_err() {
-            return Err(AppError::Validation("windowEnd must be in HH:MM format".into()));
+            return Err(AppError::Validation("签到窗口结束时间格式应为 HH:MM".into()));
         }
     }
     if let Some(max) = payload.max_attempts_per_day {
         if max < 1 || max > 100 {
-            return Err(AppError::Validation("maxAttemptsPerDay must be between 1 and 100".into()));
+            return Err(AppError::Validation("每天最大尝试次数必须在 1~100 之间".into()));
         }
     }
 

@@ -42,7 +42,8 @@
           </div>
         </div>
       </section>
-      <div v-if="runs.length === 0" class="empty">暂无签到记录</div>
+      <div v-if="runs.length === 0 && !runsLoading" class="empty">暂无签到记录</div>
+      <div v-if="runsLoading" class="empty">加载中...</div>
     </div>
   </div>
 </template>
@@ -51,29 +52,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { apiUrl, authHeaders, request } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
-
-interface CurrentUser {
-  id: string
-  username: string
-  role: string
-}
-
-const props = defineProps<{
-  currentUser: CurrentUser | null
-  isAdmin: boolean
-}>()
-
-const allUsers = ref<{ id: string; username: string }[]>([])
-const filterUserId = ref('')
-const usersLoading = ref(false)
-
-interface Account {
-  id: string
-  name: string
-  siteType: string
-  ownerId?: string | null
-  ownerName?: string | null
-}
+import type { CurrentUser, Account, AccountGroup } from '../types'
+import { useUsers } from '../composables/useUsers'
 
 interface CheckinRun {
   id: string
@@ -86,12 +66,6 @@ interface CheckinRun {
   createdAt: string
 }
 
-interface AccountGroup {
-  key: string
-  label: string
-  items: Account[]
-}
-
 interface RunGroup {
   key: string
   label: string
@@ -99,10 +73,19 @@ interface RunGroup {
   items: CheckinRun[]
 }
 
+const props = defineProps<{
+  currentUser: CurrentUser | null
+  isAdmin: boolean
+}>()
+
+const { allUsers, usersLoading, loadUsers: fetchUsers } = useUsers(() => props.isAdmin)
+const filterUserId = ref('')
+
 const accounts = ref<Account[]>([])
 const runs = ref<CheckinRun[]>([])
 const selectedAccountId = ref('')
 const keepLatest = ref(100)
+const runsLoading = ref(false)
 
 // 按账户归属用户分组下拉框选项
 const groupedAccounts = computed<AccountGroup[]>(() => {
@@ -164,25 +147,16 @@ const fetchAccounts = async () => {
 }
 
 const fetchRuns = async () => {
-  let url = apiUrl('/checkin-runs')
-  if (props.isAdmin && filterUserId.value) {
-    url += `?userId=${encodeURIComponent(filterUserId.value)}`
-  }
-  const response = await request(url, { headers: authHeaders() })
-  runs.value = await response.json()
-}
-
-const fetchUsers = async () => {
-  if (!props.isAdmin) return
-  usersLoading.value = true
+  runsLoading.value = true
   try {
-    const res = await request(apiUrl('/admin/users?scope=all'), { headers: authHeaders() })
-    const data = await res.json()
-    allUsers.value = data.users ?? data ?? []
-  } catch {
-    showToast('加载用户列表失败', 'error')
+    let url = apiUrl('/checkin-runs')
+    if (props.isAdmin && filterUserId.value) {
+      url += `?userId=${encodeURIComponent(filterUserId.value)}`
+    }
+    const response = await request(url, { headers: authHeaders() })
+    runs.value = await response.json()
   } finally {
-    usersLoading.value = false
+    runsLoading.value = false
   }
 }
 
@@ -285,7 +259,7 @@ select, input { background: #111827; color: #fff; border: 1px solid #374151; bor
 .badge.already_checked { background: #3b82f6; }
 .badge.pending { background: #f59e0b; }
 button { color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; }
-button:disabled { background: #666 !important; cursor: not-allowed; }
+button:disabled { background: #555; cursor: not-allowed; opacity: 0.6; }
 .btn-execute { background: #0070f3; }
 .btn-cleanup { background: #ef4444; }
 .empty { text-align: center; color: #666; padding: 3rem; background: #1a1a1a; border-radius: 8px; }

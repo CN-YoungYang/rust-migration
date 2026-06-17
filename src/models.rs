@@ -85,7 +85,7 @@ pub struct CheckinRun {
     pub message: Option<String>,
     #[serde(rename = "durationMs")]
     #[sqlx(rename = "durationMs")]
-    pub duration_ms: Option<i32>,
+    pub duration_ms: Option<i64>,
     #[serde(rename = "triggeredBy")]
     #[sqlx(rename = "triggeredBy")]
     pub triggered_by: String,

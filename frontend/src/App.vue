@@ -42,7 +42,7 @@ import AccountPanel from './components/AccountPanel.vue'
 import CheckinRunsPanel from './components/CheckinRunsPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import AdminUserPanel from './components/AdminUserPanel.vue'
-import { apiUrl, getToken } from './utils/api'
+import { apiUrl, getToken, request } from './utils/api'
 interface AppUser {
   id: string
   username: string
@@ -63,21 +63,17 @@ const isAdmin = computed(() => {
 const login = async () => {
   error.value = ''
   try {
-    const res = await fetch(apiUrl('/auth/login'), {
+    const res = await request(apiUrl('/auth/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(loginForm.value)
     })
-    if (res.ok) {
-      const data = await res.json()
-      localStorage.setItem('token', data.token)
-      await fetchCurrentUser()
-      isLoggedIn.value = true
-    } else {
-      error.value = '登录失败'
-    }
+    const data = await res.json()
+    localStorage.setItem('token', data.token)
+    await fetchCurrentUser()
+    isLoggedIn.value = true
   } catch (e) {
-    error.value = '网络错误'
+    error.value = e instanceof Error ? e.message : '登录失败'
   }
 }
 
@@ -85,14 +81,14 @@ const fetchCurrentUser = async () => {
   const token = getToken()
   if (!token) return
 
-  const res = await fetch(apiUrl('/auth/me'), {
-    headers: { 'Authorization': `Bearer ${token}` }
-  })
-  if (res.ok) {
+  try {
+    const res = await request(apiUrl('/auth/me'), {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
     const data = await res.json()
     currentUser.value = data.user
     isLoggedIn.value = !!data.user
-  } else {
+  } catch {
     localStorage.removeItem('token')
     isLoggedIn.value = false
     currentUser.value = null
@@ -103,11 +99,11 @@ const logout = async () => {
   const token = getToken()
   if (token) {
     try {
-      await fetch(apiUrl('/auth/logout'), {
+      await request(apiUrl('/auth/logout'), {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       })
-    } catch (e) {
+    } catch {
       // 本地退出优先，不阻塞用户操作
     }
   }
@@ -128,8 +124,8 @@ onMounted(fetchCurrentUser)
 .nav-links button { background: transparent; color: #ccc; border: none; padding: 0.5rem 1rem; cursor: pointer; border-radius: 4px; transition: all 0.2s; }
 .nav-links button.active { background: #0070f3; color: white; }
 .nav-links button:hover:not(.active) { background: #2a2a2a; }
-.btn-logout { background: #ef4444 !important; color: white !important; }
-.btn-logout:hover { background: #dc2626 !important; }
+.btn-logout { background: #ef4444; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; }
+.btn-logout:hover { background: #dc2626; }
 .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
 .login-page { display: flex; align-items: center; justify-content: center; min-height: 80vh; }
 .login-form { background: #1a1a1a; padding: 2rem; border-radius: 8px; width: 100%; max-width: 400px; }
@@ -139,6 +135,13 @@ onMounted(fetchCurrentUser)
 .btn-primary { width: 100%; background: #0070f3; color: white; border: none; padding: 0.75rem; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: 500; }
 .btn-primary:hover { background: #0051cc; }
 .error { color: #ef4444; margin-top: 1rem; text-align: center; }
+
+@media (max-width: 768px) {
+  .navbar { flex-direction: column; gap: 0.75rem; padding: 0.75rem 1rem; }
+  .nav-links { flex-wrap: wrap; justify-content: center; gap: 0.5rem; }
+  .nav-links button { padding: 0.4rem 0.75rem; font-size: 0.85rem; }
+  .container { padding: 1rem; }
+}
 </style>
 
 

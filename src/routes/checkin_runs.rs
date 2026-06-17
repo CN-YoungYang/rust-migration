@@ -99,6 +99,9 @@ pub async fn execute_batch(
     let today_local = chrono::Local::now().date_naive();
     let is_admin = user.role == "ADMIN" || user.role == "SUPER_ADMIN";
 
+    // 批量查询今日各账户签到次数，避免逐账户 COUNT
+    let today_counts = db::count_runs_today_batch(&state.db).await.unwrap_or_default();
+
     // 收集账户用户名用于结果展示
     let users = db::list_users(&state.db).await?;
     let user_name_map: std::collections::HashMap<&str, &str> = users
@@ -140,8 +143,8 @@ pub async fn execute_batch(
             continue;
         }
 
-        // 每日次数上限
-        let today_runs = db::count_runs_by_account_today(&state.db, account_id).await?;
+        // 每日次数上限（使用批量查询结果）
+        let today_runs = today_counts.get(account_id.as_str()).copied().unwrap_or(0);
         if today_runs >= settings.max_attempts_per_day.max(1) {
             items.push(BatchResultItem {
                 account_id: account_id.clone(),
@@ -226,7 +229,13 @@ pub async fn cleanup_runs(
     Extension(user): Extension<crate::models::AppUser>,
     Json(payload): Json<serde_json::Value>,
 ) -> Result<Json<Value>> {
-    let keep_latest = payload["keepLatest"].as_i64().unwrap_or(100) as usize;
+    let keep_latest_raw = payload["keepLatest"].as_i64().unwrap_or(100);
+    if keep_latest_raw < 1 || keep_latest_raw > 10000 {
+        return Err(crate::error::AppError::Validation(
+            format!("keepLatest 必须在 1~10000 之间，收到 {}", keep_latest_raw)
+        ));
+    }
+    let keep_latest = keep_latest_raw as usize;
     
     let deleted_count = if user.role == "ADMIN" || user.role == "SUPER_ADMIN" {
         db::cleanup_checkin_runs(&state.db, keep_latest).await?

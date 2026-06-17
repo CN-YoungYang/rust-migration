@@ -1,5 +1,6 @@
 use crate::error::Result;
 use super::super::{BrowserProfile, http_client};
+use super::{read_number, read_error_message};
 
 const DEFAULT_CHECKIN_PATH: &str = "/api/user/sign_in";
 const ANYROUTER_CHALLENGE_MESSAGE: &str = "签到失败：yrouter 返回反爬挑战页，当前 Cookie 可能已失效。请在浏览器重新登录 yrouter，复制最新 Cookie 后更新账号。";
@@ -313,29 +314,6 @@ pub async fn checkin(
         },
         Some(text),
     ))
-}
-
-fn read_number(value: Option<&serde_json::Value>) -> Option<f64> {
-    let v = value?;
-    if let Some(n) = v.as_f64() {
-        return Some(n);
-    }
-    if let Some(s) = v.as_str() {
-        let trimmed = s.trim();
-        if !trimmed.is_empty() {
-            if let Ok(n) = trimmed.parse::<f64>() {
-                return Some(n);
-            }
-        }
-    }
-    None
-}
-
-fn read_error_message(payload: Option<&serde_json::Value>) -> Option<String> {
-    payload
-        .and_then(|v| v.get("message").or_else(|| v.get("error")))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
 }
 
 /// Fetch balance for AnyRouter sites (uses /api/user/self endpoint)

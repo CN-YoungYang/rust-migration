@@ -5,10 +5,9 @@ use axum::{
     http::StatusCode,
 };
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 use crate::{AppState, db};
-use lazy_static::lazy_static;
 
 #[derive(Clone)]
 struct SessionEntry {
@@ -16,9 +15,8 @@ struct SessionEntry {
     expires_at: SystemTime,
 }
 
-lazy_static! {
-    static ref SESSIONS: Mutex<HashMap<String, SessionEntry>> = Mutex::new(HashMap::new());
-}
+static SESSIONS: LazyLock<Mutex<HashMap<String, SessionEntry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 const MAX_SESSIONS: usize = 1000;
 

@@ -79,6 +79,9 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
     let mut accounts = db::list_accounts(db).await?;
     let today_local = Local::now().date_naive();
 
+    // 批量查询今日各账户签到次数，避免逐账户 COUNT
+    let today_counts = db::count_runs_today_batch(db).await.unwrap_or_default();
+
     // 防判定：打乱执行顺序，避免每次按固定顺序签到
     use rand::seq::SliceRandom;
     accounts.shuffle(&mut rand::thread_rng());
@@ -92,8 +95,8 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
             continue;
         }
 
-        // Enforce maxAttemptsPerDay: count today's runs for this account
-        let today_runs = db::count_runs_by_account_today(db, &account.id).await?;
+        // Enforce maxAttemptsPerDay: 使用批量查询结果
+        let today_runs = today_counts.get(&account.id).copied().unwrap_or(0);
         if today_runs >= settings.max_attempts_per_day.max(1) {
             tracing::debug!(
                 "Skipping account {}: {}/{} attempts today",

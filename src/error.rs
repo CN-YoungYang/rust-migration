@@ -7,28 +7,28 @@ use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("Database error: {0}")]
+    #[error("数据库错误: {0}")]
     Database(#[from] sqlx::Error),
-    
-    #[error("Authentication failed")]
+
+    #[error("认证失败")]
     Unauthorized,
-    
-    #[error("Not found")]
+
+    #[error("资源不存在")]
     NotFound,
-    
-    #[error("Forbidden")]
+
+    #[error("权限不足")]
     Forbidden,
-    
-    #[error("Validation error: {0}")]
+
+    #[error("校验失败: {0}")]
     Validation(String),
-    
-    #[error("Crypto error: {0}")]
+
+    #[error("加密错误: {0}")]
     Crypto(String),
-    
-    #[error("HTTP request error: {0}")]
+
+    #[error("HTTP 请求失败: {0}")]
     Http(#[from] reqwest::Error),
-    
-    #[error("Internal error: {0}")]
+
+    #[error("内部错误: {0}")]
     Internal(String),
 }
 
@@ -37,23 +37,23 @@ impl IntoResponse for AppError {
         let (status, message, details) = match self {
             AppError::Database(ref e) => {
                 tracing::error!("Database error: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Database error", None)
+                (StatusCode::INTERNAL_SERVER_ERROR, "数据库错误", None)
             }
-            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized", None),
-            AppError::NotFound => (StatusCode::NOT_FOUND, "Not found", None),
-            AppError::Forbidden => (StatusCode::FORBIDDEN, "Forbidden", None),
-            AppError::Validation(ref msg) => (StatusCode::BAD_REQUEST, "Validation error", Some(msg.clone())),
+            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "认证失败", None),
+            AppError::NotFound => (StatusCode::NOT_FOUND, "资源不存在", None),
+            AppError::Forbidden => (StatusCode::FORBIDDEN, "权限不足", None),
+            AppError::Validation(ref msg) => (StatusCode::BAD_REQUEST, "校验失败", Some(msg.clone())),
             AppError::Crypto(ref e) => {
                 tracing::error!("Crypto error: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Crypto error", None)
+                (StatusCode::INTERNAL_SERVER_ERROR, "加密错误", None)
             }
             AppError::Http(ref e) => {
                 tracing::error!("HTTP request error: {}", e);
-                (StatusCode::BAD_GATEWAY, "HTTP request failed", None)
+                (StatusCode::BAD_GATEWAY, "HTTP 请求失败", None)
             }
             AppError::Internal(ref e) => {
                 tracing::error!("Internal error: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal error", None)
+                (StatusCode::INTERNAL_SERVER_ERROR, "内部错误", None)
             }
         };
 

@@ -19,15 +19,14 @@ dependencies = [
 
 [[package]]
 name = "ai-hub-rust"
-version = "0.1.0"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "axum",
  "base64 0.21.7",
  "bcrypt",
  "chrono",
- "dotenv",
- "lazy_static",
+ "dotenvy",
  "rand",
  "reqwest",
  "ring",
@@ -477,12 +476,6 @@ dependencies = [
  "quote",
  "syn 2.0.117",
 ]
-
-[[package]]
-name = "dotenv"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
 name = "dotenvy"

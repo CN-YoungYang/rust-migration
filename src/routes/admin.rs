@@ -11,9 +11,8 @@ use crate::{
     db,
     crypto::hash_password,
     AppState,
+    error::Result,
 };
-
-type Result<T> = std::result::Result<T, crate::error::AppError>;
 
 // Check if current user can manage target user
 fn check_admin_permission(current_user: &AppUser, target_user: &AppUser) -> Result<()> {
@@ -47,7 +46,7 @@ fn check_role_assignment(current_user: &AppUser, role: Option<&str>) -> Result<(
             }
         }
         "SUPER_ADMIN" => Err(crate::error::AppError::Forbidden),
-        _ => Err(crate::error::AppError::Validation("Invalid role".into())),
+        _ => Err(crate::error::AppError::Validation("无效角色".into())),
     }
 }
 
@@ -86,14 +85,14 @@ pub async fn create_user(
     check_role_assignment(&current_user, payload.role.as_deref())?;
 
     if payload.username.trim().is_empty() {
-        return Err(crate::error::AppError::Validation("Username cannot be empty".into()));
+        return Err(crate::error::AppError::Validation("用户名不能为空".into()));
     }
     if payload.password.len() < 8 {
-        return Err(crate::error::AppError::Validation("Password must be at least 8 characters".into()));
+        return Err(crate::error::AppError::Validation("密码至少需要 8 位".into()));
     }
 
     if db::find_user_by_username(&state.db, &payload.username).await?.is_some() {
-        return Err(crate::error::AppError::Validation("Username already exists".into()));
+        return Err(crate::error::AppError::Validation("用户名已存在".into()));
     }
 
     let password_hash = hash_password(&payload.password)?;
@@ -126,7 +125,7 @@ pub async fn update_user(
     
     let password_hash = if let Some(pwd) = &payload.password {
         if pwd.len() < 8 {
-            return Err(crate::error::AppError::Validation("Password must be at least 8 characters".into()));
+            return Err(crate::error::AppError::Validation("密码至少需要 8 位".into()));
         }
         Some(hash_password(pwd)?)
     } else {

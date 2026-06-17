@@ -16,8 +16,7 @@ use crate::{
 
 const DUMMY_BCRYPT_HASH: &str = "$2b$10$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 use serde_json::{json, Value};
-use lazy_static::lazy_static;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 const MAX_LOGIN_ATTEMPTS: u8 = 5;
 const LOGIN_LOCKOUT_SECS: u64 = 300; // 5 minutes
@@ -28,9 +27,8 @@ struct LoginAttempt {
     first_attempt: Instant,
 }
 
-lazy_static! {
-    static ref LOGIN_ATTEMPTS: Mutex<HashMap<String, LoginAttempt>> = Mutex::new(HashMap::new());
-}
+static LOGIN_ATTEMPTS: LazyLock<Mutex<HashMap<String, LoginAttempt>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn check_login_rate(username: &str) -> Result<()> {
     let mut attempts = LOGIN_ATTEMPTS.lock().unwrap_or_else(|p| p.into_inner());
@@ -44,7 +42,7 @@ fn check_login_rate(username: &str) -> Result<()> {
         if entry.count >= MAX_LOGIN_ATTEMPTS {
             if entry.first_attempt.elapsed().as_secs() < LOGIN_LOCKOUT_SECS {
                 return Err(crate::error::AppError::Validation(
-                    format!("Too many login attempts, try again in {} seconds",
+                    format!("登录尝试过于频繁，请 {} 秒后重试",
                         LOGIN_LOCKOUT_SECS - entry.first_attempt.elapsed().as_secs())
                 ));
             }
@@ -76,19 +74,19 @@ pub async fn login(
 
     let user = db::find_user_by_username(&state.db, &payload.username).await?;
 
-    let (user, hash) = match user {
+    let (user_id, hash) = match &user {
         Some(u) if u.enabled => (Some(u.id.clone()), u.password_hash.clone()),
         _ => (None, DUMMY_BCRYPT_HASH.to_string()),
     };
 
     let valid = verify_password(&payload.password, &hash).unwrap_or(false);
 
-    match (user, valid) {
-        (Some(user_id), true) => {
+    match (user_id, valid) {
+        (Some(uid), true) => {
             clear_login_attempts(&payload.username);
-            let token = create_session(&user_id);
-            let user = db::find_user_by_username(&state.db, &payload.username).await?
-                .ok_or(crate::error::AppError::Internal("User disappeared during login".into()))?;
+            let token = create_session(&uid);
+            // 复用第一次查询结果，避免重复 DB 查询
+            let user = user.unwrap();
             Ok(Json(LoginResponse { token, user }))
         }
         _ => {

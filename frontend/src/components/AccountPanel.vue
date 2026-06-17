@@ -56,7 +56,7 @@
       <p v-if="accounts.length === 0" class="empty">暂无账户</p>
     </div>
 
-    <div v-if="showForm" class="modal">
+    <div v-if="showForm" class="modal" @click.self="closeForm" @keydown.escape="closeForm">
       <form class="modal-content" @submit.prevent="submitForm">
         <h3>{{ editingId ? '编辑账户' : '新增账户' }}</h3>
         <label>名称<input v-model="form.name" required /></label>
@@ -93,45 +93,16 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { apiUrl, authHeaders, request } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
-
-interface CurrentUser {
-  id: string
-  username: string
-  role: string
-}
+import type { CurrentUser, Account, AccountGroup } from '../types'
+import { useUsers } from '../composables/useUsers'
 
 const props = defineProps<{
   currentUser: CurrentUser | null
   isAdmin: boolean
 }>()
 
-const allUsers = ref<{ id: string; username: string }[]>([])
+const { allUsers, usersLoading, loadUsers } = useUsers(() => props.isAdmin)
 const filterUserId = ref('')
-const usersLoading = ref(false)
-
-type Account = {
-  id: string
-  name: string
-  siteType: string
-  baseUrl: string
-  userId?: string | null
-  ownerId?: string | null
-  ownerName?: string | null
-  authType: string
-  enabled: boolean
-  retryEnabled?: boolean
-  lastBalance?: number | string | null
-  lastStatus?: string | null
-  lastMessage?: string | null
-  customCheckinUrl?: string | null
-}
-
-interface AccountGroup {
-  key: string
-  label: string
-  isSelf: boolean
-  items: Account[]
-}
 
 // One API / New API 系列标准换算：500000 quota = 1 美元
 // 与 Next.js 版本 (QUOTA_PER_USD = 500000) 保持一致
@@ -154,6 +125,8 @@ const batchLoading = ref(false)
 // 批量手动签到：复用分组，跳过今日已签由后端统一判定。
 async function batchCheckin(accountIds: string[]) {
   if (accountIds.length === 0 || batchLoading.value) return
+  const label = filterUserId.value ? '该用户的所有账户' : '全部账户'
+  if (!(await confirmAction(`确定要对 ${label}（${accountIds.length} 个）执行签到吗？`))) return
   batchLoading.value = true
   try {
     const response = await request(apiUrl('/checkin-runs/batch'), {
@@ -243,20 +216,6 @@ async function loadAccounts() {
     showToast(error instanceof Error ? error.message : '加载账户失败', 'error')
   } finally {
     loading.value = false
-  }
-}
-
-async function loadUsers() {
-  if (!props.isAdmin) return
-  usersLoading.value = true
-  try {
-    const res = await request(apiUrl('/admin/users?scope=all'), { headers: authHeaders() })
-    const data = await res.json()
-    allUsers.value = data.users ?? data ?? []
-  } catch {
-    showToast('加载用户列表失败', 'error')
-  } finally {
-    usersLoading.value = false
   }
 }
 
@@ -356,15 +315,15 @@ watch(filterUserId, () => loadAccounts())
 .group-header h3 { margin: 0; font-size: 1rem; color: #e5e7eb; }
 .group-header .muted { font-size: .8rem; flex: 1; }
 .group-header .batch-btn { background: #10b981; font-size: .8rem; padding: .3rem .7rem; }
-.self-tag { background: #2563eb; border-radius: 999px; padding: .05rem .45rem; margin-left: .4rem; font-size: .7rem; color: #fff; }
+.self-tag { background: #0070f3; border-radius: 999px; padding: .05rem .45rem; margin-left: .4rem; font-size: .7rem; color: #fff; }
 .account-card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1rem; display: flex; justify-content: space-between; gap: 1rem; }
 .title-row { display: flex; gap: .5rem; align-items: center; margin-bottom: .5rem; }
-.badge { background: #2563eb; border-radius: 999px; padding: .15rem .5rem; font-size: .75rem; }
+.badge { background: #0070f3; border-radius: 999px; padding: .15rem .5rem; font-size: .75rem; }
 .badge.disabled { background: #6b7280; }
 .muted { color: #9ca3af; margin: .25rem 0; }
 .actions { display: flex; gap: .5rem; align-items: center; }
 button { border: 0; border-radius: 4px; padding: .5rem .75rem; cursor: pointer; background: #374151; color: white; }
-button.primary, .primary { background: #2563eb; }
+button.primary, .primary { background: #0070f3; }
 button.danger { background: #dc2626; }
 .empty { color: #9ca3af; text-align: center; padding: 2rem; }
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: flex; align-items: center; justify-content: center; z-index: 20; }

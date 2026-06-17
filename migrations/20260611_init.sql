@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS AppUser (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
     passwordHash TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'USER',
+    role TEXT NOT NULL DEFAULT 'USER' CHECK (role IN ('USER', 'ADMIN', 'SUPER_ADMIN')),
     enabled INTEGER NOT NULL DEFAULT 1,
     note TEXT,
     createdAt TEXT NOT NULL,
@@ -12,11 +12,11 @@ CREATE TABLE IF NOT EXISTS AppUser (
 CREATE TABLE IF NOT EXISTS CheckinAccount (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    siteType TEXT NOT NULL DEFAULT 'new-api',
+    siteType TEXT NOT NULL DEFAULT 'new-api' CHECK (siteType IN ('new-api', 'anyrouter', 'x666')),
     baseUrl TEXT NOT NULL,
     userId TEXT,
     ownerId TEXT,
-    authType TEXT NOT NULL DEFAULT 'access_token',
+    authType TEXT NOT NULL DEFAULT 'access_token' CHECK (authType IN ('access_token', 'cookie')),
     accessTokenEnc TEXT,
     cookieEnc TEXT,
     customCheckinUrl TEXT,
@@ -34,10 +34,10 @@ CREATE TABLE IF NOT EXISTS CheckinAccount (
 CREATE TABLE IF NOT EXISTS CheckinRun (
     id TEXT PRIMARY KEY,
     accountId TEXT NOT NULL,
-    status TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('success', 'failed', 'already_checked', 'pending')),
     message TEXT,
     durationMs INTEGER,
-    triggeredBy TEXT NOT NULL DEFAULT 'manual',
+    triggeredBy TEXT NOT NULL DEFAULT 'manual' CHECK (triggeredBy IN ('manual', 'manual_batch', 'scheduled')),
     rawResponse TEXT,
     createdAt TEXT NOT NULL,
     FOREIGN KEY (accountId) REFERENCES CheckinAccount(id) ON DELETE CASCADE
@@ -47,6 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_checkin_run_account_created ON CheckinRun(account
 CREATE INDEX IF NOT EXISTS idx_checkin_run_account_status_created ON CheckinRun(accountId, status, createdAt);
 CREATE INDEX IF NOT EXISTS idx_checkin_run_created ON CheckinRun(createdAt);
 CREATE INDEX IF NOT EXISTS idx_checkin_account_owner ON CheckinAccount(ownerId);
+CREATE INDEX IF NOT EXISTS idx_checkin_account_enabled ON CheckinAccount(enabled);
 
 CREATE TABLE IF NOT EXISTS CheckinSetting (
     id TEXT PRIMARY KEY,

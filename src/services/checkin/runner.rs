@@ -57,7 +57,7 @@ pub async fn execute_checkin(
         .ok_or(AppError::NotFound)?;
     
     if !account.enabled {
-        return create_failed_run(db, account_id, "Account disabled", triggered_by, start).await;
+        return create_failed_run(db, account_id, "账户已禁用", triggered_by, start).await;
     }
     
     // 防判定：每次签到使用随机 UA，降低多账户同 IP + 同 UA 的关联指纹。
@@ -67,10 +67,10 @@ pub async fn execute_checkin(
         "new-api" => execute_new_api_checkin(&account, profile).await,
         "anyrouter" => execute_anyrouter_checkin(&account, profile).await,
         "x666" => execute_x666_checkin(&account, profile).await,
-        _ => Err(AppError::Validation(format!("Unsupported site type: {}", account.site_type))),
+        _ => Err(AppError::Validation(format!("不支持的站点类型: {}", account.site_type))),
     };
     
-    let duration_ms = start.elapsed().as_millis() as i32;
+    let duration_ms = start.elapsed().as_millis().min(i64::MAX as u128) as i64;
     
     match result {
         Ok((status, message, raw_response)) => {
@@ -145,7 +145,7 @@ async fn execute_x666_checkin(account: &CheckinAccount, profile: &BrowserProfile
     let cookie = if let Some(enc) = &account.cookie_enc {
         decrypt(enc)?
     } else {
-        return Err(AppError::Validation("Cookie required".into()));
+        return Err(AppError::Validation("必须填写 cookie".into()));
     };
 
     x666::checkin(&account.base_url, &cookie, account.custom_checkin_url.as_deref(), profile).await
@@ -155,11 +155,11 @@ async fn execute_x666_checkin(account: &CheckinAccount, profile: &BrowserProfile
 /// - x666: 仅 cookie
 /// - arrouter: userId + cookie（不传 access_token）
 /// - new-api 及其他: userId + access_token + cookie
-async fn fetch_account_balance(account: &CheckinAccount, profile: &BrowserProfile) -> Result<f64> {
+pub async fn fetch_account_balance(account: &CheckinAccount, profile: &BrowserProfile) -> Result<f64> {
     match account.site_type.as_str() {
         "x666" => {
             let enc = account.cookie_enc.as_ref()
-                .ok_or_else(|| AppError::Validation("Cookie not configured".into()))?;
+                .ok_or_else(|| AppError::Validation("未配置 cookie".into()))?;
             let cookie = decrypt(enc)?;
             x666::fetch_balance(Some(&cookie), profile)
                 .await
@@ -208,6 +208,6 @@ async fn create_failed_run(
     triggered_by: &str,
     start: Instant,
 ) -> Result<CheckinRun> {
-    let duration_ms = start.elapsed().as_millis() as i32;
+    let duration_ms = start.elapsed().as_millis().min(i64::MAX as u128) as i64;
     db::create_run(db, account_id, "failed", Some(message), Some(duration_ms), triggered_by, None).await
 }

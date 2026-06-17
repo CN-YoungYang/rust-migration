@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use super::super::{BrowserProfile, http_client};
-use super::format_awarded_quota;
+use super::{format_awarded_quota, read_number, is_already_checked_message};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct X666Response {
@@ -25,29 +25,6 @@ fn normalize_message(value: Option<&serde_json::Value>) -> String {
         }
         None => String::new(),
     }
-}
-
-fn is_already_checked_message(message: &str) -> bool {
-    let lower = message.to_lowercase();
-    ["今日已签", "已签到", "已经签到", "already"]
-        .iter()
-        .any(|text| lower.contains(text))
-}
-
-fn read_number(value: Option<&serde_json::Value>) -> Option<f64> {
-    let v = value?;
-    if let Some(n) = v.as_f64() {
-        return Some(n);
-    }
-    if let Some(s) = v.as_str() {
-        let trimmed = s.trim();
-        if !trimmed.is_empty() {
-            if let Ok(n) = trimmed.parse::<f64>() {
-                return Some(n);
-            }
-        }
-    }
-    None
 }
 
 /// 读取本次签到获得的额度（参考 Next.js readAwardedQuota: data.quota）
@@ -123,7 +100,7 @@ pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>, pr
 }
 
 pub async fn fetch_balance(cookie: Option<&str>, profile: &BrowserProfile) -> std::result::Result<f64, Box<dyn std::error::Error>> {
-    let cookie = cookie.ok_or("Cookie is required for X666 balance query")?;
+    let cookie = cookie.ok_or("X666 余额查询必须填写 Cookie")?;
     let client = http_client();
     let url = "https://up.x666.me/api/checkin/status";
 

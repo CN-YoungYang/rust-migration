@@ -1,29 +1,6 @@
 use crate::error::Result;
 use super::super::{BrowserProfile, http_client};
-use super::{CheckinResponse, classify_checkin_status, format_awarded_quota};
-
-fn read_number(value: Option<&serde_json::Value>) -> Option<f64> {
-    let v = value?;
-    if let Some(n) = v.as_f64() {
-        return Some(n);
-    }
-    if let Some(s) = v.as_str() {
-        let trimmed = s.trim();
-        if !trimmed.is_empty() {
-            if let Ok(n) = trimmed.parse::<f64>() {
-                return Some(n);
-            }
-        }
-    }
-    None
-}
-
-fn read_error_message(payload: Option<&serde_json::Value>) -> Option<String> {
-    payload
-        .and_then(|v| v.get("message").or_else(|| v.get("error")))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
+use super::{CheckinResponse, classify_checkin_status, format_awarded_quota, read_number, read_error_message};
 
 /// 读取本次签到获得的额度（参考 Next.js readAwardedQuota）
 /// 依次尝试 data.quota_awarded / data.quotaAwarded / data.quota
@@ -98,11 +75,11 @@ pub async fn checkin(
     let parsed: CheckinResponse = serde_json::from_str(&text)
         .unwrap_or(CheckinResponse {
             success: false,
-            message: Some("Failed to parse response".into()),
+            message: Some("响应解析失败".into()),
             data: None,
         });
 
-    let message = parsed.message.unwrap_or_else(|| "No message".to_string());
+        let message = parsed.message.unwrap_or_else(|| "站点未返回消息".to_string());
 
     // 状态判定：已签关键词 > checked_in 标志 > success（与 Next.js 顺序对齐）
     let status = {

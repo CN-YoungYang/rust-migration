@@ -36,9 +36,9 @@ pub async fn list_users(db: &SqlitePool) -> Result<Vec<AppUser>> {
 pub async fn create_user(db: &SqlitePool, username: &str, password_hash: &str, role: &str, enabled: bool, note: Option<&str>) -> Result<AppUser> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now();
-    
-    sqlx::query(
-        "INSERT INTO AppUser (id, username, passwordHash, role, enabled, note, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+
+    let user = sqlx::query_as::<_, AppUser>(
+        "INSERT INTO AppUser (id, username, passwordHash, role, enabled, note, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *"
     )
     .bind(&id)
     .bind(username)
@@ -48,10 +48,10 @@ pub async fn create_user(db: &SqlitePool, username: &str, password_hash: &str, r
     .bind(note)
     .bind(now)
     .bind(now)
-    .execute(db)
+    .fetch_one(db)
     .await?;
-    
-    find_user_by_id(db, &id).await?.ok_or(crate::error::AppError::NotFound)
+
+    Ok(user)
 }
 
 // CheckinAccount operations
@@ -90,9 +90,9 @@ pub async fn create_account(
 ) -> Result<CheckinAccount> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now();
-    
-    sqlx::query(
-        "INSERT INTO CheckinAccount (id, name, siteType, baseUrl, userId, ownerId, authType, accessTokenEnc, cookieEnc, customCheckinUrl, enabled, retryEnabled, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+
+    let account = sqlx::query_as::<_, CheckinAccount>(
+        "INSERT INTO CheckinAccount (id, name, siteType, baseUrl, userId, ownerId, authType, accessTokenEnc, cookieEnc, customCheckinUrl, enabled, retryEnabled, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *"
     )
     .bind(&id)
     .bind(name)
@@ -108,10 +108,10 @@ pub async fn create_account(
     .bind(retry_enabled)
     .bind(now)
     .bind(now)
-    .execute(db)
+    .fetch_one(db)
     .await?;
-    
-    find_account_by_id(db, &id).await?.ok_or(crate::error::AppError::NotFound)
+
+    Ok(account)
 }
 
 pub async fn update_account_status(
@@ -168,15 +168,15 @@ pub async fn create_run(
     account_id: &str,
     status: &str,
     message: Option<&str>,
-    duration_ms: Option<i32>,
+    duration_ms: Option<i64>,
     triggered_by: &str,
     raw_response: Option<&str>,
 ) -> Result<CheckinRun> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now();
-    
-    sqlx::query(
-        "INSERT INTO CheckinRun (id, accountId, status, message, durationMs, triggeredBy, rawResponse, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+
+    let run = sqlx::query_as::<_, CheckinRun>(
+        "INSERT INTO CheckinRun (id, accountId, status, message, durationMs, triggeredBy, rawResponse, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *"
     )
     .bind(&id)
     .bind(account_id)
@@ -186,16 +186,9 @@ pub async fn create_run(
     .bind(triggered_by)
     .bind(raw_response)
     .bind(now)
-    .execute(db)
-    .await?;
-    
-    let run = sqlx::query_as::<_, CheckinRun>(
-        "SELECT * FROM CheckinRun WHERE id = ?"
-    )
-    .bind(&id)
     .fetch_one(db)
     .await?;
-    
+
     Ok(run)
 }
 
@@ -203,7 +196,7 @@ pub async fn create_run(
 /// 对旧库做幂等迁移：批量签到随机延迟列在 v2.2.2 引入，
 /// 已存在的库需要补列。SQLite 不支持 ADD COLUMN IF NOT EXISTS，
 /// 故用 try + 忽略“duplicate column”错误。
-async fn ensure_setting_columns(db: &SqlitePool) -> Result<()> {
+pub async fn ensure_setting_columns(db: &SqlitePool) -> Result<()> {
     for col in ["batchDelayMin", "batchDelayMax"] {
         let sql = format!("ALTER TABLE CheckinSetting ADD COLUMN {} INTEGER NOT NULL DEFAULT 0", col);
         if let Err(e) = sqlx::query(&sql).execute(db).await {
@@ -218,8 +211,6 @@ async fn ensure_setting_columns(db: &SqlitePool) -> Result<()> {
 }
 
 pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
-    ensure_setting_columns(db).await?;
-
     let settings = sqlx::query_as::<_, CheckinSetting>(
         "SELECT * FROM CheckinSetting WHERE id = 'global'"
     )
@@ -349,25 +340,29 @@ pub async fn update_user(
 }
 
 pub async fn delete_user(db: &SqlitePool, id: &str) -> Result<()> {
+    let mut tx = db.begin().await?;
+
     // Cascade: delete runs for accounts owned by this user
     sqlx::query(
         "DELETE FROM CheckinRun WHERE accountId IN (SELECT id FROM CheckinAccount WHERE ownerId = ?)"
     )
     .bind(id)
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
 
     // Cascade: delete accounts owned by this user
     sqlx::query("DELETE FROM CheckinAccount WHERE ownerId = ?")
         .bind(id)
-        .execute(db)
+        .execute(&mut *tx)
         .await?;
 
     // Delete the user
     sqlx::query("DELETE FROM AppUser WHERE id = ?")
         .bind(id)
-        .execute(db)
+        .execute(&mut *tx)
         .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 
@@ -420,15 +415,19 @@ pub async fn count_runs_by_account_today(db: &SqlitePool, account_id: &str) -> R
     .await?;
     Ok(count as i32)
 }
-pub async fn list_runs_by_user(db: &SqlitePool, user_id: &str, limit: usize) -> Result<Vec<CheckinRun>> {
-    let runs = sqlx::query_as::<_, CheckinRun>(
-        "SELECT r.* FROM CheckinRun r JOIN CheckinAccount a ON r.accountId = a.id WHERE a.ownerId = ? ORDER BY r.createdAt DESC LIMIT ?"
+
+/// 批量查询今日各账户签到次数，返回 accountId -> count 映射。
+/// 比逐账户 COUNT 更高效（单条 SQL 替代 N 条）。
+pub async fn count_runs_today_batch(db: &SqlitePool) -> Result<std::collections::HashMap<String, i32>> {
+    let local_midnight = Local::now().date_naive().and_hms_opt(0, 0, 0).expect("midnight is always valid");
+    let today_start_utc = Local.from_local_datetime(&local_midnight).single().expect("invalid midnight").to_utc();
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT accountId, COUNT(*) FROM CheckinRun WHERE createdAt >= ? GROUP BY accountId"
     )
-    .bind(user_id)
-    .bind(limit as i64)
+    .bind(today_start_utc)
     .fetch_all(db)
     .await?;
-    Ok(runs)
+    Ok(rows.into_iter().map(|(id, cnt)| (id, cnt as i32)).collect())
 }
 
 pub async fn cleanup_checkin_runs_by_user(db: &SqlitePool, user_id: &str, keep_latest: usize) -> Result<u64> {

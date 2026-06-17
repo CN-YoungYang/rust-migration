@@ -32,7 +32,7 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
@@ -61,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
     sqlx::query(migration_sql).execute(&db).await?;
 
     initialize_admin(&db).await?;
+    db::ensure_setting_columns(&db).await?;
 
     let state = Arc::new(AppState { db: db.clone() });
 
@@ -145,9 +146,9 @@ async fn initialize_admin(db: &SqlitePool) -> anyhow::Result<()> {
     
     if existing.is_none() {
         let admin_password = std::env::var("ADMIN_PASSWORD")
-            .map_err(|_| anyhow::anyhow!("ADMIN_PASSWORD must be set before creating the initial admin user"))?;
+            .map_err(|_| anyhow::anyhow!("ADMIN_PASSWORD 环境变量必须设置"))?;
         if admin_password.len() < 8 {
-            anyhow::bail!("ADMIN_PASSWORD must be at least 8 characters long");
+            anyhow::bail!("ADMIN_PASSWORD 至少需要 8 个字符");
         }
         let password_hash = crypto::hash_password(&admin_password)?;
         db::create_user(db, &admin_username, &password_hash, "SUPER_ADMIN", true, None).await?;

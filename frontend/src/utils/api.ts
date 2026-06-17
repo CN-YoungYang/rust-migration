@@ -11,6 +11,12 @@ export function authHeaders(): Record<string, string> {
 export async function request(url: string, options: RequestInit = {}): Promise<Response> {
   const response = await fetch(url, options)
   if (!response.ok) {
+    // 401: token 过期或无效，清除本地状态并刷新页面
+    if (response.status === 401) {
+      localStorage.removeItem('token')
+      window.location.reload()
+      throw new Error('登录已过期，请重新登录')
+    }
     const text = await response.text()
     try {
       const json = JSON.parse(text)

@@ -47,7 +47,7 @@
         </div>
       </div>
 
-      <button type="submit" class="btn-primary">保存设置</button>
+      <button type="submit" class="btn-primary" :disabled="saving">{{ saving ? '保存中...' : '保存设置' }}</button>
     </form>
 
     <div class="info-section">
@@ -88,6 +88,7 @@ const settings = ref<Settings>({
   batchDelayMin: 3,
   batchDelayMax: 10
 })
+const saving = ref(false)
 
 const fetchSettings = async () => {
   try {
@@ -101,6 +102,7 @@ const fetchSettings = async () => {
 }
 
 const saveSettings = async () => {
+  saving.value = true
   try {
     const response = await request(apiUrl('/settings'), {
       method: 'PUT',
@@ -111,6 +113,8 @@ const saveSettings = async () => {
     showToast('设置已保存', 'success')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '保存设置失败', 'error')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -137,4 +141,10 @@ input:checked + .slider:before { transform: translateX(26px); }
 .info-section { background: #1a1a1a; padding: 1.5rem; border-radius: 8px; }
 .info-section ul { color: #888; padding-left: 1.5rem; }
 .info-section li { margin-bottom: 0.5rem; }
+
+@media (max-width: 768px) {
+  .settings-panel { padding: 1rem; }
+  .form-row { grid-template-columns: 1fr; }
+  .settings-form { padding: 1rem; }
+}
 </style>
