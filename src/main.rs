@@ -10,6 +10,7 @@ use tower_http::{
     services::ServeDir,
     trace::TraceLayer,
     cors::CorsLayer,
+    compression::CompressionLayer,
 };
 use axum::http::{HeaderValue, Method, HeaderName};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -97,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(public_routes)
         .merge(protected_routes)
         .merge(admin_routes)
+        .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
         .layer(cors_layer())
         .fallback_service(ServeDir::new("public"))

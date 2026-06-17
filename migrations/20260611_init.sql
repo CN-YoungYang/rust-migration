@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS CheckinAccount (
     lastStatus TEXT,
     lastMessage TEXT,
     lastRunAt TEXT,
+    note TEXT,
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL
 );

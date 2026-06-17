@@ -44,6 +44,9 @@
       </section>
       <div v-if="runs.length === 0 && !runsLoading" class="empty">暂无签到记录</div>
       <div v-if="runsLoading" class="empty">加载中...</div>
+      <div v-if="hasMore && runs.length > 0 && !runsLoading" class="load-more">
+        <button @click="loadMoreRuns">加载更多</button>
+      </div>
     </div>
   </div>
 </template>
@@ -86,6 +89,10 @@ const runs = ref<CheckinRun[]>([])
 const selectedAccountId = ref('')
 const keepLatest = ref(100)
 const runsLoading = ref(false)
+const runsOffset = ref(0)
+const hasMore = ref(true)
+const PAGE_SIZE = 100
+const maxAttemptsPerDay = ref(3)
 
 // 按账户归属用户分组下拉框选项
 const groupedAccounts = computed<AccountGroup[]>(() => {
@@ -131,37 +138,72 @@ const groupedRuns = computed<RunGroup[]>(() => {
 })
 
 const fetchAccounts = async () => {
-  let url = apiUrl('/accounts')
-  if (props.isAdmin && filterUserId.value) {
-    url += `?userId=${encodeURIComponent(filterUserId.value)}`
-  }
-  const response = await request(url, { headers: authHeaders() })
-  accounts.value = await response.json()
-  // 如果当前选中的账户不在新列表中，清除选择
-  if (selectedAccountId.value && !accounts.value.find((a) => a.id === selectedAccountId.value)) {
-    selectedAccountId.value = ''
-  }
-  if (!selectedAccountId.value && accounts.value.length > 0) {
-    selectedAccountId.value = accounts.value[0].id
-  }
-}
-
-const fetchRuns = async () => {
-  runsLoading.value = true
   try {
-    let url = apiUrl('/checkin-runs')
+    let url = apiUrl('/accounts')
     if (props.isAdmin && filterUserId.value) {
       url += `?userId=${encodeURIComponent(filterUserId.value)}`
     }
     const response = await request(url, { headers: authHeaders() })
-    runs.value = await response.json()
+    accounts.value = await response.json()
+    // 如果当前选中的账户不在新列表中，清除选择
+    if (selectedAccountId.value && !accounts.value.find((a) => a.id === selectedAccountId.value)) {
+      selectedAccountId.value = ''
+    }
+    if (!selectedAccountId.value && accounts.value.length > 0) {
+      selectedAccountId.value = accounts.value[0].id
+    }
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载账户失败', 'error')
+  }
+}
+
+const fetchRuns = async (append = false) => {
+  runsLoading.value = true
+  try {
+    const offset = append ? runsOffset.value : 0
+    let url = apiUrl(`/checkin-runs?limit=${PAGE_SIZE}&offset=${offset}`)
+    if (props.isAdmin && filterUserId.value) {
+      url += `&userId=${encodeURIComponent(filterUserId.value)}`
+    }
+    const response = await request(url, { headers: authHeaders() })
+    const data = await response.json()
+    if (append) {
+      runs.value.push(...data)
+    } else {
+      runs.value = data
+      runsOffset.value = 0
+    }
+    runsOffset.value += data.length
+    hasMore.value = data.length >= PAGE_SIZE
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载签到记录失败', 'error')
   } finally {
     runsLoading.value = false
   }
 }
 
+const loadMoreRuns = () => fetchRuns(true)
+
+const fetchSettings = async () => {
+  try {
+    const res = await request(apiUrl('/settings'), { headers: authHeaders() })
+    const data = await res.json()
+    maxAttemptsPerDay.value = data.maxAttemptsPerDay ?? 3
+  } catch {
+    // 使用默认值
+  }
+}
+
 const executeCheckin = async () => {
   if (!selectedAccountId.value) return
+  // 检查是否达到每日上限，达到则弹窗确认
+  const account = accounts.value.find((a) => a.id === selectedAccountId.value)
+  if (account && (account.todayRuns ?? 0) >= maxAttemptsPerDay.value) {
+    const confirmed = await confirmAction(
+      `该账户今日已签到 ${account.todayRuns} 次，已达每日上限（${maxAttemptsPerDay.value} 次）。\n手动签到不受限制，确定继续吗？`
+    )
+    if (!confirmed) return
+  }
   try {
     await request(apiUrl('/checkin-runs'), {
       method: 'POST',
@@ -218,7 +260,7 @@ const formatTime = (time: string) => new Date(time).toLocaleString('zh-CN')
 
 onMounted(async () => {
   try {
-    await Promise.all([fetchAccounts(), fetchRuns(), fetchUsers()])
+    await Promise.all([fetchAccounts(), fetchRuns(), fetchUsers(), fetchSettings()])
   } catch (error) {
     showToast(error instanceof Error ? error.message : '加载失败', 'error')
   }
@@ -263,4 +305,7 @@ button:disabled { background: #555; cursor: not-allowed; opacity: 0.6; }
 .btn-execute { background: #0070f3; }
 .btn-cleanup { background: #ef4444; }
 .empty { text-align: center; color: #666; padding: 3rem; background: #1a1a1a; border-radius: 8px; }
+.load-more { text-align: center; padding: 1rem; }
+.load-more button { background: #374151; color: #9ca3af; border: 1px solid #4b5563; padding: 0.5rem 1.5rem; border-radius: 4px; cursor: pointer; }
+.load-more button:hover { background: #4b5563; color: #fff; }
 </style>

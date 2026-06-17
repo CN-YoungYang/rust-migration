@@ -27,11 +27,40 @@ fn account_to_json(acc: &CheckinAccount, owner_name: Option<&str>) -> Value {
         "customCheckinUrl": acc.custom_checkin_url,
         "enabled": acc.enabled,
         "retryEnabled": acc.retry_enabled,
+        "note": acc.note,
         "lastBalance": acc.last_balance,
         "lastBalanceAt": acc.last_balance_at,
         "lastStatus": acc.last_status,
         "lastMessage": acc.last_message,
         "lastRunAt": acc.last_run_at,
+        "createdAt": acc.created_at,
+        "updatedAt": acc.updated_at,
+    })
+}
+
+/// 带今日签到次数的账户 JSON（供列表接口使用）
+fn account_to_json_with_runs(acc: &CheckinAccount, owner_name: Option<&str>, today_runs: i32) -> Value {
+    json!({
+        "id": acc.id,
+        "name": acc.name,
+        "siteType": acc.site_type,
+        "baseUrl": acc.base_url,
+        "userId": acc.user_id,
+        "ownerId": acc.owner_id,
+        "ownerName": owner_name,
+        "authType": acc.auth_type,
+        "accessTokenMasked": acc.access_token_enc.as_ref().map(|_| "****"),
+        "cookieMasked": acc.cookie_enc.as_ref().map(|_| "****"),
+        "customCheckinUrl": acc.custom_checkin_url,
+        "enabled": acc.enabled,
+        "retryEnabled": acc.retry_enabled,
+        "note": acc.note,
+        "lastBalance": acc.last_balance,
+        "lastBalanceAt": acc.last_balance_at,
+        "lastStatus": acc.last_status,
+        "lastMessage": acc.last_message,
+        "lastRunAt": acc.last_run_at,
+        "todayRuns": today_runs,
         "createdAt": acc.created_at,
         "updatedAt": acc.updated_at,
     })
@@ -51,23 +80,23 @@ pub async fn list(
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Vec<Value>>> {
     let filter_user_id = params.get("userId");
-    
+    let limit: i32 = params.get("limit").and_then(|s| s.parse().ok()).unwrap_or(500).min(1000);
+    let offset: i32 = params.get("offset").and_then(|s| s.parse().ok()).unwrap_or(0).max(0);
+
     let accounts = if user.role == "ADMIN" || user.role == "SUPER_ADMIN" {
         if let Some(uid) = filter_user_id {
-            db::list_accounts_by_user(&state.db, uid).await?
+            db::list_accounts_by_user_paginated(&state.db, uid, limit, offset).await?
         } else {
-            db::list_accounts(&state.db).await?
+            db::list_accounts_paginated(&state.db, limit, offset).await?
         }
     } else {
-        db::list_accounts_by_user(&state.db, &user.id).await?
+        db::list_accounts_by_user_paginated(&state.db, &user.id, limit, offset).await?
     };
 
-    // Build an ownerId -> username map so the UI can group accounts by their owner.
-    let users = db::list_users(&state.db).await?;
-    let owner_map: std::collections::HashMap<&str, &str> = users
-        .iter()
-        .map(|u| (u.id.as_str(), u.username.as_str()))
-        .collect();
+    // 轻量查询：只取 id + username，避免拉取 passwordHash 等无关字段
+    let owner_map = db::list_user_id_name_map(&state.db).await?;
+    // 批量查询今日各账户签到次数，用于前端判断是否达到每日上限
+    let today_counts = db::count_runs_today_batch(&state.db).await.unwrap_or_default();
 
     let masked: Vec<Value> = accounts
         .iter()
@@ -76,8 +105,9 @@ pub async fn list(
                 .owner_id
                 .as_deref()
                 .and_then(|id| owner_map.get(id))
-                .copied();
-            account_to_json(acc, owner_name)
+                .map(|s| s.as_str());
+            let today_runs = today_counts.get(&acc.id).copied().unwrap_or(0);
+            account_to_json_with_runs(acc, owner_name, today_runs)
         })
         .collect();
 
@@ -160,6 +190,7 @@ pub async fn create(
         payload.enabled.unwrap_or(true),
         payload.retry_enabled.unwrap_or(true),
         &user.id,
+        payload.note.as_deref(),
     ).await?;
 
     // The new account is owned by the current user, so we can reuse their username directly.
@@ -208,7 +239,7 @@ pub async fn update(
     let access_token_enc = payload.access_token.as_ref().map(|t| encrypt(t)).transpose()?;
     let cookie_enc = payload.cookie.as_ref().map(|c| encrypt(c)).transpose()?;
         
-    db::update_account(
+    let updated = db::update_account(
         &state.db,
         &id,
         payload.name.as_deref(),
@@ -219,9 +250,10 @@ pub async fn update(
         payload.custom_checkin_url.as_deref(),
         payload.enabled,
         payload.retry_enabled,
+        payload.note.as_deref(),
     ).await?;
 
-    let updated = db::find_account_by_id(&state.db, &id).await?.ok_or(crate::error::AppError::NotFound)?;
+    // update_account 已返回更新后的账户，无需再次查询
     let owner_name = resolve_owner_name(&state, &updated.owner_id).await?;
     Ok(Json(account_to_json(&updated, owner_name.as_deref())))
 }

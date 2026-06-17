@@ -76,7 +76,8 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
         return Ok(());
     }
 
-    let mut accounts = db::list_accounts(db).await?;
+    // 只查询已启用账户，避免拉取禁用账户再在 Rust 中过滤
+    let mut accounts = db::list_enabled_accounts(db).await?;
     let today_local = Local::now().date_naive();
 
     // 批量查询今日各账户签到次数，避免逐账户 COUNT

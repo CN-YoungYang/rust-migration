@@ -20,6 +20,8 @@ export interface Account {
   lastStatus?: string | null
   lastMessage?: string | null
   customCheckinUrl?: string | null
+  note?: string | null
+  todayRuns?: number
 }
 
 export interface AccountGroup {

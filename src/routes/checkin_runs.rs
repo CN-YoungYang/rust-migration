@@ -53,14 +53,17 @@ pub async fn list(
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Vec<CheckinRun>>> {
     let filter_user_id = params.get("userId");
+    let limit: i32 = params.get("limit").and_then(|s| s.parse().ok()).unwrap_or(100).min(500);
+    let offset: i32 = params.get("offset").and_then(|s| s.parse().ok()).unwrap_or(0).max(0);
+
     let runs = if user.role == "ADMIN" || user.role == "SUPER_ADMIN" {
         if let Some(uid) = filter_user_id {
-            db::list_runs(&state.db, 100, Some(uid)).await?
+            db::list_runs(&state.db, limit, offset, Some(uid)).await?
         } else {
-            db::list_runs(&state.db, 100, None).await?
+            db::list_runs(&state.db, limit, offset, None).await?
         }
     } else {
-        db::list_runs(&state.db, 100, Some(&user.id)).await?
+        db::list_runs(&state.db, limit, offset, Some(&user.id)).await?
     };
     Ok(Json(runs))
 }
@@ -74,14 +77,7 @@ pub async fn execute(
         return Err(crate::error::AppError::Forbidden);
     }
 
-    let today_count = db::count_runs_by_account_today(&state.db, &payload.account_id).await?;
-    let settings = db::get_settings(&state.db).await?;
-    if today_count >= settings.max_attempts_per_day {
-        return Err(crate::error::AppError::Validation(
-            format!("已达到今日最大尝试次数 ({})", settings.max_attempts_per_day)
-        ));
-    }
-
+    // 手动签到不受每日上限限制，前端会在达到上限时弹窗确认
     let run = execute_checkin(&state.db, &payload.account_id, "manual").await?;
     Ok(Json(run))
 }
@@ -102,21 +98,19 @@ pub async fn execute_batch(
     // 批量查询今日各账户签到次数，避免逐账户 COUNT
     let today_counts = db::count_runs_today_batch(&state.db).await.unwrap_or_default();
 
-    // 收集账户用户名用于结果展示
-    let users = db::list_users(&state.db).await?;
-    let user_name_map: std::collections::HashMap<&str, &str> = users
-        .iter()
-        .map(|u| (u.id.as_str(), u.username.as_str()))
-        .collect();
+    // 轻量查询：只取 id + username，避免拉取 passwordHash
+    let user_name_map = db::list_user_id_name_map(&state.db).await?;
 
     let mut items: Vec<BatchResultItem> = Vec::new();
     let mut to_execute: Vec<(String, String)> = Vec::new(); // (account_id, account_name)
 
+    // 批量查询账户，替代逐个 find_account_by_id（N+1 → 1 次查询）
+    let account_map = db::find_accounts_by_ids(&state.db, &payload.account_ids).await?;
+
     // 阶段一：校验 + 跳过判断（串行）
     // 权限：任一账户无归属权即整体拒绝，避免部分执行带来的混淆。
     for account_id in &payload.account_ids {
-        let account = db::find_account_by_id(&state.db, account_id)
-            .await?
+        let account = account_map.get(account_id.as_str())
             .ok_or(AppError::NotFound)?;
 
         // 归属权校验（与单次签到一致）
@@ -128,7 +122,7 @@ pub async fn execute_batch(
             .owner_id
             .as_deref()
             .and_then(|oid| user_name_map.get(oid))
-            .copied()
+            .map(|s| s.as_str())
             .unwrap_or("")
             .to_string();
 

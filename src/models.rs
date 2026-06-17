@@ -67,6 +67,7 @@ pub struct CheckinAccount {
     #[serde(rename = "lastRunAt")]
     #[sqlx(rename = "lastRunAt")]
     pub last_run_at: Option<DateTime<Utc>>,
+    pub note: Option<String>,
     #[serde(rename = "createdAt")]
     #[sqlx(rename = "createdAt")]
     pub created_at: DateTime<Utc>,
@@ -145,6 +146,7 @@ pub struct CreateAccountRequest {
     pub enabled: Option<bool>,
     #[serde(rename = "retryEnabled")]
     pub retry_enabled: Option<bool>,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,6 +164,7 @@ pub struct UpdateAccountRequest {
     pub enabled: Option<bool>,
     #[serde(rename = "retryEnabled")]
     pub retry_enabled: Option<bool>,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

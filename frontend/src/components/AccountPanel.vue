@@ -45,6 +45,7 @@
             <p class="muted">{{ account.baseUrl }}</p>
             <p class="muted">认证：{{ account.authType }} ｜ 余额：{{ formatBalance(account.lastBalance) }}</p>
             <p v-if="account.lastStatus" class="muted">最近状态：{{ account.lastStatus }} {{ account.lastMessage || '' }}</p>
+            <p v-if="account.note" class="note">📝 {{ account.note }}</p>
           </div>
           <div class="actions">
             <button @click="refreshBalance(account.id)">刷新余额</button>
@@ -80,6 +81,7 @@
         <label>自定义签到URL<input v-model="form.customCheckinUrl" /></label>
         <label class="inline"><input v-model="form.enabled" type="checkbox" /> 启用</label>
         <label class="inline"><input v-model="form.retryEnabled" type="checkbox" /> 允许重试</label>
+        <label>备注<input v-model="form.note" placeholder="可选，方便识别账户" /></label>
         <div class="modal-actions">
           <button class="primary" type="submit">保存</button>
           <button type="button" @click="closeForm">取消</button>
@@ -186,6 +188,7 @@ const form = reactive({
   customCheckinUrl: '',
   enabled: true,
   retryEnabled: true,
+  note: '',
 })
 
 function resetForm() {
@@ -200,6 +203,7 @@ function resetForm() {
     customCheckinUrl: '',
     enabled: true,
     retryEnabled: true,
+    note: '',
   })
 }
 
@@ -238,6 +242,7 @@ function openEdit(account: Account) {
     customCheckinUrl: account.customCheckinUrl || '',
     enabled: account.enabled,
     retryEnabled: account.retryEnabled ?? true,
+    note: account.note || '',
   })
   showForm.value = true
 }
@@ -321,6 +326,7 @@ watch(filterUserId, () => loadAccounts())
 .badge { background: #0070f3; border-radius: 999px; padding: .15rem .5rem; font-size: .75rem; }
 .badge.disabled { background: #6b7280; }
 .muted { color: #9ca3af; margin: .25rem 0; }
+.note { color: #fbbf24; margin: .25rem 0; font-size: .85rem; }
 .actions { display: flex; gap: .5rem; align-items: center; }
 button { border: 0; border-radius: 4px; padding: .5rem .75rem; cursor: pointer; background: #374151; color: white; }
 button.primary, .primary { background: #0070f3; }
