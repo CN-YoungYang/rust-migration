@@ -3,13 +3,18 @@
     <div class="panel-header">
       <h2>签到账户管理</h2>
       <div class="header-actions">
+        <select v-if="isAdmin" v-model="filterUserId" class="user-filter">
+          <option value="">全部用户</option>
+          <option v-if="usersLoading" disabled>加载中...</option>
+          <option v-for="u in allUsers" :key="u.id" :value="u.id">{{ u.username }}</option>
+        </select>
         <button
           v-if="accounts.length > 0"
           class="primary"
           :disabled="batchLoading"
           @click="batchCheckin(accounts.map((a) => a.id))"
         >
-          {{ batchLoading ? '签到中...' : '全部签到' }}
+          {{ batchLoading ? '签到中...' : (filterUserId ? '该用户签到' : '全部签到') }}
         </button>
         <button class="primary" :disabled="batchLoading" @click="openCreate">新增账户</button>
       </div>
@@ -85,7 +90,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { apiUrl, authHeaders, request } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
 
@@ -95,7 +100,14 @@ interface CurrentUser {
   role: string
 }
 
-const props = defineProps<{ currentUser: CurrentUser | null }>()
+const props = defineProps<{
+  currentUser: CurrentUser | null
+  isAdmin: boolean
+}>()
+
+const allUsers = ref<{ id: string; username: string }[]>([])
+const filterUserId = ref('')
+const usersLoading = ref(false)
 
 type Account = {
   id: string
@@ -221,12 +233,30 @@ function resetForm() {
 async function loadAccounts() {
   loading.value = true
   try {
-    const response = await request(apiUrl('/accounts'), { headers: authHeaders() })
+    let url = apiUrl('/accounts')
+    if (props.isAdmin && filterUserId.value) {
+      url += `?userId=${encodeURIComponent(filterUserId.value)}`
+    }
+    const response = await request(url, { headers: authHeaders() })
     accounts.value = await response.json()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '加载账户失败', 'error')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadUsers() {
+  if (!props.isAdmin) return
+  usersLoading.value = true
+  try {
+    const res = await request(apiUrl('/admin/users?scope=all'), { headers: authHeaders() })
+    const data = await res.json()
+    allUsers.value = data.users ?? data ?? []
+  } catch {
+    showToast('加载用户列表失败', 'error')
+  } finally {
+    usersLoading.value = false
   }
 }
 
@@ -307,13 +337,19 @@ async function refreshBalance(id: string) {
   }
 }
 
-onMounted(loadAccounts)
+onMounted(() => {
+  loadAccounts()
+  loadUsers()
+})
+
+watch(filterUserId, () => loadAccounts())
 </script>
 
 <style scoped>
 .account-panel { max-width: 1200px; margin: 0 auto; padding: 2rem; }
-.panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
-.header-actions { display: flex; gap: .5rem; }
+.user-filter { background: #1a2937; color: #fff; border: 1px solid #374151; border-radius: 4px; padding: .4rem .6rem; font-size: .85rem; }
+.panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: .75rem; }
+.header-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 .account-list { display: grid; gap: 1.5rem; }
 .account-group { display: grid; gap: 1rem; }
 .group-header { display: flex; align-items: center; gap: .6rem; padding-bottom: .25rem; border-bottom: 1px solid #2a2a2a; }

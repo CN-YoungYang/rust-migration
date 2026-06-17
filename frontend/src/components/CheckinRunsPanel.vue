@@ -3,6 +3,11 @@
     <div class="header">
       <h2>签到记录</h2>
       <div class="header-actions">
+        <select v-if="isAdmin" v-model="filterUserId" class="user-filter">
+          <option value="">全部用户</option>
+          <option v-if="usersLoading" disabled>加载中...</option>
+          <option v-for="u in allUsers" :key="u.id" :value="u.id">{{ u.username }}</option>
+        </select>
         <select v-model="selectedAccountId">
           <option value="">选择账户</option>
           <optgroup v-for="group in groupedAccounts" :key="group.key" :label="group.label">
@@ -43,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { apiUrl, authHeaders, request } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
 
@@ -53,7 +58,14 @@ interface CurrentUser {
   role: string
 }
 
-const props = defineProps<{ currentUser: CurrentUser | null }>()
+const props = defineProps<{
+  currentUser: CurrentUser | null
+  isAdmin: boolean
+}>()
+
+const allUsers = ref<{ id: string; username: string }[]>([])
+const filterUserId = ref('')
+const usersLoading = ref(false)
 
 interface Account {
   id: string
@@ -136,16 +148,42 @@ const groupedRuns = computed<RunGroup[]>(() => {
 })
 
 const fetchAccounts = async () => {
-  const response = await request(apiUrl('/accounts'), { headers: authHeaders() })
+  let url = apiUrl('/accounts')
+  if (props.isAdmin && filterUserId.value) {
+    url += `?userId=${encodeURIComponent(filterUserId.value)}`
+  }
+  const response = await request(url, { headers: authHeaders() })
   accounts.value = await response.json()
+  // 如果当前选中的账户不在新列表中，清除选择
+  if (selectedAccountId.value && !accounts.value.find((a) => a.id === selectedAccountId.value)) {
+    selectedAccountId.value = ''
+  }
   if (!selectedAccountId.value && accounts.value.length > 0) {
     selectedAccountId.value = accounts.value[0].id
   }
 }
 
 const fetchRuns = async () => {
-  const response = await request(apiUrl('/checkin-runs'), { headers: authHeaders() })
+  let url = apiUrl('/checkin-runs')
+  if (props.isAdmin && filterUserId.value) {
+    url += `?userId=${encodeURIComponent(filterUserId.value)}`
+  }
+  const response = await request(url, { headers: authHeaders() })
   runs.value = await response.json()
+}
+
+const fetchUsers = async () => {
+  if (!props.isAdmin) return
+  usersLoading.value = true
+  try {
+    const res = await request(apiUrl('/admin/users?scope=all'), { headers: authHeaders() })
+    const data = await res.json()
+    allUsers.value = data.users ?? data ?? []
+  } catch {
+    showToast('加载用户列表失败', 'error')
+  } finally {
+    usersLoading.value = false
+  }
 }
 
 const executeCheckin = async () => {
@@ -206,17 +244,24 @@ const formatTime = (time: string) => new Date(time).toLocaleString('zh-CN')
 
 onMounted(async () => {
   try {
-    await Promise.all([fetchAccounts(), fetchRuns()])
+    await Promise.all([fetchAccounts(), fetchRuns(), fetchUsers()])
   } catch (error) {
     showToast(error instanceof Error ? error.message : '加载失败', 'error')
   }
+})
+
+watch(filterUserId, () => {
+  selectedAccountId.value = ''
+  fetchAccounts()
+  fetchRuns()
 })
 </script>
 
 <style scoped>
 .checkin-runs-panel { max-width: 1200px; margin: 0 auto; padding: 2rem; }
-.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; gap: 1rem; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; gap: 1rem; flex-wrap: wrap; }
 .header-actions { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+.user-filter { background: #1a2937; color: #fff; border: 1px solid #374151; border-radius: 4px; padding: .4rem .6rem; font-size: .85rem; }
 h2 { color: #fff; }
 select, input { background: #111827; color: #fff; border: 1px solid #374151; border-radius: 4px; padding: .5rem; }
 .keep-input { width: 90px; }

@@ -54,9 +54,12 @@ fn check_role_assignment(current_user: &AppUser, role: Option<&str>) -> Result<(
 pub async fn list_users(
     State(state): State<Arc<AppState>>,
     Extension(current_user): Extension<AppUser>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Vec<AppUser>>> {
     let mut users = db::list_users(&state.db).await?;
-    if current_user.role == "ADMIN" {
+    // ?scope=all 用于筛选下拉框：返回全部用户（密码哈希已 skip_serializing，安全）
+    // 默认行为：ADMIN 只能看到 USER 角色
+    if current_user.role == "ADMIN" && params.get("scope").map(|s| s.as_str()) != Some("all") {
         users.retain(|user| user.role == "USER");
     }
     Ok(Json(users))

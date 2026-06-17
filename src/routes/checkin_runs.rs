@@ -50,11 +50,17 @@ pub struct BatchCheckinResponse {
 pub async fn list(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<crate::models::AppUser>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Vec<CheckinRun>>> {
+    let filter_user_id = params.get("userId");
     let runs = if user.role == "ADMIN" || user.role == "SUPER_ADMIN" {
-        db::list_runs(&state.db, 100).await?
+        if let Some(uid) = filter_user_id {
+            db::list_runs(&state.db, 100, Some(uid)).await?
+        } else {
+            db::list_runs(&state.db, 100, None).await?
+        }
     } else {
-        db::list_runs_by_user(&state.db, &user.id, 100).await?
+        db::list_runs(&state.db, 100, Some(&user.id)).await?
     };
     Ok(Json(runs))
 }

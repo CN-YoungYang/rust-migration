@@ -143,13 +143,23 @@ pub async fn delete_account(db: &SqlitePool, id: &str) -> Result<()> {
 }
 
 // CheckinRun operations
-pub async fn list_runs(db: &SqlitePool, limit: i32) -> Result<Vec<CheckinRun>> {
-    let runs = sqlx::query_as::<_, CheckinRun>(
-        "SELECT * FROM CheckinRun ORDER BY createdAt DESC LIMIT ?"
-    )
-    .bind(limit)
-    .fetch_all(db)
-    .await?;
+pub async fn list_runs(db: &SqlitePool, limit: i32, owner_id: Option<&str>) -> Result<Vec<CheckinRun>> {
+    let runs = if let Some(oid) = owner_id {
+        sqlx::query_as::<_, CheckinRun>(
+            "SELECT r.* FROM CheckinRun r JOIN CheckinAccount a ON r.accountId = a.id WHERE a.ownerId = ? ORDER BY r.createdAt DESC LIMIT ?"
+        )
+        .bind(oid)
+        .bind(limit)
+        .fetch_all(db)
+        .await?
+    } else {
+        sqlx::query_as::<_, CheckinRun>(
+            "SELECT * FROM CheckinRun ORDER BY createdAt DESC LIMIT ?"
+        )
+        .bind(limit)
+        .fetch_all(db)
+        .await?
+    };
     Ok(runs)
 }
 
