@@ -65,7 +65,7 @@ pub async fn execute_checkin(
 
     let result = match account.site_type.as_str() {
         "new-api" => execute_new_api_checkin(&account, profile).await,
-        "arrouter" => execute_arrouter_checkin(&account, profile).await,
+        "anyrouter" => execute_anyrouter_checkin(&account, profile).await,
         "x666" => execute_x666_checkin(&account, profile).await,
         _ => Err(AppError::Validation(format!("Unsupported site type: {}", account.site_type))),
     };
@@ -124,7 +124,7 @@ async fn execute_new_api_checkin(account: &CheckinAccount, profile: &BrowserProf
     .await
 }
 
-async fn execute_arrouter_checkin(account: &CheckinAccount, profile: &BrowserProfile) -> Result<(String, String, Option<String>)> {
+async fn execute_anyrouter_checkin(account: &CheckinAccount, profile: &BrowserProfile) -> Result<(String, String, Option<String>)> {
     let cookie = if let Some(enc) = &account.cookie_enc {
         Some(decrypt(enc)?)
     } else {
@@ -165,7 +165,7 @@ async fn fetch_account_balance(account: &CheckinAccount, profile: &BrowserProfil
                 .await
                 .map_err(|e| AppError::Internal(e.to_string()))
         }
-        "arrouter" => {
+        "anyrouter" => {
             let cookie = account.cookie_enc.as_ref()
                 .map(|c| decrypt(c))
                 .transpose()?;

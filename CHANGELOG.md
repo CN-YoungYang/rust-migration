@@ -38,7 +38,7 @@
 ### 构建 / 部署
 
 - `Cargo.toml` 增加 `rand = "0.8"`
-- 修复 `runner.rs` 字节级调用错误：`execute_arrouter_checkin` 原误调 4-arg 的 x666 provider，现已正确命中 arrouter provider
+- 修复 `runner.rs` 字节级调用错误：`execute_anyrouter_checkin` 原误调 4-arg 的 x666 provider，现已正确命中 arrouter provider
 - 前端重新构建，新 bundle `index-CzpkatJQ.js` / `index-BamDdJe3.css`
 
 ---
