@@ -25,6 +25,10 @@
           启用
         </label>
       </div>
+      <div class="form-group">
+        <label>备注</label>
+        <input v-model="newUser.note" placeholder="可选，方便管理员标识用户" />
+      </div>
       <button type="submit" class="btn-primary">创建用户</button>
     </form>
 
@@ -36,6 +40,7 @@
           <strong>{{ user.username }}</strong>
           <span class="badge" :class="user.role.toLowerCase()">{{ user.role }}</span>
           <span v-if="!user.enabled" class="badge disabled">已禁用</span>
+          <span v-if="user.note" class="user-note" :title="user.note">{{ user.note }}</span>
         </div>
         <div class="user-actions">
           <button @click="editUser(user)" class="btn-edit" :disabled="!canManage(user)">编辑</button>
@@ -75,6 +80,10 @@
               启用
             </label>
           </div>
+          <div class="form-group">
+            <label>备注</label>
+            <input v-model="editingUser.note" placeholder="可选，方便管理员标识用户" />
+          </div>
           <div class="modal-actions">
             <button type="submit" class="btn-primary">保存</button>
             <button type="button" @click="editingUser = null" class="btn-cancel">取消</button>
@@ -96,6 +105,7 @@ interface User {
   username: string
   role: string
   enabled: boolean
+  note?: string | null
   password?: string
 }
 
@@ -107,7 +117,8 @@ const newUser = ref({
   username: '',
   password: '',
   role: 'USER',
-  enabled: true
+  enabled: true,
+  note: ''
 })
 const editingUser = ref<User | null>(null)
 
@@ -140,7 +151,7 @@ const createUser = async () => {
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(newUser.value)
     })
-    newUser.value = { username: '', password: '', role: 'USER', enabled: true }
+    newUser.value = { username: '', password: '', role: 'USER', enabled: true, note: '' }
     showToast('用户已创建', 'success')
     await fetchUsers()
   } catch (error) {
@@ -157,7 +168,8 @@ const updateUser = async () => {
   if (!editingUser.value) return
   const payload: Record<string, unknown> = {
     role: editingUser.value.role,
-    enabled: editingUser.value.enabled
+    enabled: editingUser.value.enabled,
+    note: editingUser.value.note || null
   }
   if (editingUser.value.password) payload.password = editingUser.value.password
 
@@ -374,5 +386,15 @@ h3 {
   color: #9ca3af;
   text-align: center;
   padding: 1.5rem;
+}
+
+.user-note {
+  color: #9ca3af;
+  font-size: 0.85rem;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
 }
 </style>

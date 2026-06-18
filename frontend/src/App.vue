@@ -9,6 +9,10 @@
         <button @click="currentView = 'users'" :class="{ active: currentView === 'users' }" v-if="isAdmin">用户管理</button>
         <button @click="logout" class="btn-logout">退出</button>
       </div>
+      <div class="server-status" :title="serverTime || '服务器时间'">
+        <span class="status-dot" :class="serverOk ? 'online' : 'offline'"></span>
+        <span class="status-text">{{ serverOk ? '在线' : '离线' }}</span>
+      </div>
     </nav>
 
     <div class="container">
@@ -37,7 +41,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import AccountPanel from './components/AccountPanel.vue'
 import CheckinRunsPanel from './components/CheckinRunsPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
@@ -55,6 +59,10 @@ const currentUser = ref<AppUser | null>(null)
 const currentView = ref('accounts')
 const loginForm = ref({ username: '', password: '' })
 const error = ref('')
+const serverOk = ref(true)
+const serverTime = ref('')
+let serverTimeOffset = 0 // 服务器时间与本地时间的差值（毫秒）
+let timeTimer: ReturnType<typeof setInterval> | null = null
 
 const isAdmin = computed(() => {
   return currentUser.value?.role === 'ADMIN' || currentUser.value?.role === 'SUPER_ADMIN'
@@ -113,7 +121,55 @@ const logout = async () => {
   currentView.value = 'accounts'
 }
 
-onMounted(fetchCurrentUser)
+let healthTimer: ReturnType<typeof setInterval> | null = null
+
+const checkHealth = async () => {
+  try {
+    const res = await fetch(apiUrl('/health'), { signal: AbortSignal.timeout(5000) })
+    serverOk.value = res.ok
+  } catch {
+    serverOk.value = false
+  }
+}
+
+const updateDisplayTime = () => {
+  if (serverTimeOffset === 0) return
+  const now = new Date(Date.now() + serverTimeOffset)
+  serverTime.value = now.toLocaleString('zh-CN')
+}
+
+const fetchServerTime = async () => {
+  try {
+    const localBefore = Date.now()
+    const res = await fetch(apiUrl('/server-time'), { signal: AbortSignal.timeout(5000) })
+    if (res.ok) {
+      const data = await res.json()
+      const serverMs = new Date(data.serverTime).getTime()
+      const localAfter = Date.now()
+      // 补偿网络延迟：取请求前后本地时间的中点
+      const localMid = (localBefore + localAfter) / 2
+      serverTimeOffset = serverMs - localMid
+      updateDisplayTime()
+    }
+  } catch {
+    // 静默失败
+  }
+}
+
+onMounted(() => {
+  fetchCurrentUser()
+  checkHealth()
+  fetchServerTime()
+  // 健康检查：每 60 秒
+  healthTimer = setInterval(checkHealth, 60000)
+  // 服务器时间：每秒本地计算，无需请求
+  timeTimer = setInterval(updateDisplayTime, 1000)
+})
+
+onUnmounted(() => {
+  if (healthTimer) clearInterval(healthTimer)
+  if (timeTimer) clearInterval(timeTimer)
+})
 </script>
 
 <style>
@@ -135,6 +191,11 @@ onMounted(fetchCurrentUser)
 .btn-primary { width: 100%; background: #0070f3; color: white; border: none; padding: 0.75rem; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: 500; }
 .btn-primary:hover { background: #0051cc; }
 .error { color: #ef4444; margin-top: 1rem; text-align: center; }
+.server-status { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: #9ca3af; cursor: default; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; }
+.status-dot.online { background: #10b981; }
+.status-dot.offline { background: #ef4444; }
+.status-text { letter-spacing: 0.5px; }
 
 @media (max-width: 768px) {
   .navbar { flex-direction: column; gap: 0.75rem; padding: 0.75rem 1rem; }
