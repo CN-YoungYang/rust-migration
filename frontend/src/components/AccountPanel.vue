@@ -264,6 +264,7 @@ async function submitForm() {
     customCheckinUrl: form.customCheckinUrl || undefined,
     enabled: form.enabled,
     retryEnabled: form.retryEnabled,
+    note: form.note || undefined,
   }
 
   try {
