@@ -1,6 +1,8 @@
 use sqlx::SqlitePool;
 use tokio_cron_scheduler::{JobScheduler, Job};
 use chrono::{Local, NaiveTime};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use crate::{
     db,
     services::checkin::runner::{execute_checkin, skip_reason_for_batch},
@@ -17,12 +19,26 @@ pub async fn start_scheduler(db: SqlitePool) {
 async fn run_scheduler(db: SqlitePool) -> anyhow::Result<()> {
     let scheduler = JobScheduler::new().await?;
 
+    // 防重复触发：用 Mutex 保证同一时刻只有一个定时签到任务在执行。
+    // 当 cron 每 5 分钟触发时，如果上一轮还没跑完就 try_lock 失败，直接跳过本轮。
+    let checkin_lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
+
     // Checkin job every 5 minutes
     let db_clone = db.clone();
+    let lock_clone = checkin_lock.clone();
     scheduler.add(
         Job::new_async("0 */5 * * * *", move |_uuid, _l| {
             let db = db_clone.clone();
+            let lock = lock_clone.clone();
             Box::pin(async move {
+                // try_lock: 获取不到锁说明上一轮还在执行，跳过本轮避免重复签到
+                let _guard = match lock.try_lock() {
+                    Ok(guard) => guard,
+                    Err(_) => {
+                        tracing::warn!("上一轮定时签到尚未完成，跳过本轮以避免重复触发");
+                        return;
+                    }
+                };
                 if let Err(e) = check_and_run_scheduled_checkins(&db).await {
                     tracing::error!("Scheduled checkin error: {}", e);
                 }
@@ -50,7 +66,11 @@ async fn run_scheduler(db: SqlitePool) -> anyhow::Result<()> {
 }
 
 async fn cleanup_old_runs(db: &SqlitePool) {
-    if let Err(e) = db::cleanup_checkin_runs(db, 500).await {
+    let keep_latest = match db::get_settings(db).await {
+        Ok(s) => s.cleanup_keep_latest.max(0) as usize,
+        Err(_) => 500, // fallback
+    };
+    if let Err(e) = db::cleanup_checkin_runs(db, keep_latest).await {
         tracing::warn!("Run cleanup error: {}", e);
     }
 }
@@ -81,7 +101,7 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
     let today_local = Local::now().date_naive();
 
     // 批量查询今日各账户签到次数，避免逐账户 COUNT
-    let today_counts = db::count_runs_today_batch(db).await.unwrap_or_default();
+    let mut today_counts = db::count_runs_today_batch(db).await.unwrap_or_default();
 
     // 防判定：打乱执行顺序，避免每次按固定顺序签到
     use rand::seq::SliceRandom;
@@ -96,7 +116,7 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
             continue;
         }
 
-        // Enforce maxAttemptsPerDay: 使用批量查询结果
+        // Enforce maxAttemptsPerDay: 使用内存计数器（含本轮已执行的签到）
         let today_runs = today_counts.get(&account.id).copied().unwrap_or(0);
         if today_runs >= settings.max_attempts_per_day.max(1) {
             tracing::debug!(
@@ -117,8 +137,13 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
             }
         }
 
-        match execute_checkin(db, &account.id, "scheduled").await {
-            Ok(_) => tracing::info!("Scheduled checkin completed for account {}", account.id),
+        // 传入 settings 供 execute_checkin 做 TOCTOU 重检查
+        match execute_checkin(db, &account.id, "scheduled", Some(&settings)).await {
+            Ok(_) => {
+                tracing::info!("Scheduled checkin completed for account {}", account.id);
+                // 更新内存计数器，避免后续账户因过期计数而超限
+                *today_counts.entry(account.id.clone()).or_insert(0) += 1;
+            }
             Err(e) => tracing::error!("Scheduled checkin failed for account {}: {}", account.id, e),
         }
         executed += 1;

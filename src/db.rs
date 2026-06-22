@@ -2,15 +2,15 @@ use sqlx::SqlitePool;
 use crate::models::*;
 use crate::error::Result;
 use chrono::{Utc, TimeZone, Local};
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 // Settings 内存缓存：避免每次请求都查 DB（单行表，变更极少）
-static SETTINGS_CACHE: std::sync::OnceLock<Arc<RwLock<Option<(CheckinSetting, Instant)>>>> = std::sync::OnceLock::new();
+static SETTINGS_CACHE: std::sync::OnceLock<RwLock<Option<(CheckinSetting, Instant)>>> = std::sync::OnceLock::new();
 const SETTINGS_CACHE_TTL: Duration = Duration::from_secs(30);
 
-fn settings_cache() -> &'static Arc<RwLock<Option<(CheckinSetting, Instant)>>> {
-    SETTINGS_CACHE.get_or_init(|| Arc::new(RwLock::new(None)))
+fn settings_cache() -> &'static RwLock<Option<(CheckinSetting, Instant)>> {
+    SETTINGS_CACHE.get_or_init(|| RwLock::new(None))
 }
 
 // 列表查询排除加密字段和 rawResponse，减少 I/O 和内存开销
@@ -265,6 +265,52 @@ pub async fn create_run(
     Ok(run)
 }
 
+/// 原子操作：在同一事务中更新账户状态并创建签到记录。
+/// 避免 `update_account_status` 成功但 `create_run` 失败时数据不一致。
+pub async fn create_run_with_status_update(
+    db: &SqlitePool,
+    account_id: &str,
+    status: &str,
+    message: Option<&str>,
+    duration_ms: Option<i64>,
+    triggered_by: &str,
+    raw_response: Option<&str>,
+) -> Result<CheckinRun> {
+    let mut tx = db.begin().await?;
+    let now = Utc::now();
+
+    // 1. 更新账户状态
+    sqlx::query(
+        "UPDATE CheckinAccount SET lastStatus = ?, lastMessage = ?, lastRunAt = ?, updatedAt = ? WHERE id = ?"
+    )
+    .bind(status)
+    .bind(message)
+    .bind(now)
+    .bind(now)
+    .bind(account_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // 2. 创建签到记录
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let run = sqlx::query_as::<_, CheckinRun>(
+        "INSERT INTO CheckinRun (id, accountId, status, message, durationMs, triggeredBy, rawResponse, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *"
+    )
+    .bind(&run_id)
+    .bind(account_id)
+    .bind(status)
+    .bind(message)
+    .bind(duration_ms)
+    .bind(triggered_by)
+    .bind(raw_response)
+    .bind(now)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(run)
+}
+
 // CheckinSetting operations
 /// 对旧库做幂等迁移：批量签到随机延迟列在 v2.2.2 引入，
 /// 已存在的库需要补列。SQLite 不支持 ADD COLUMN IF NOT EXISTS，
@@ -277,6 +323,13 @@ pub async fn ensure_setting_columns(db: &SqlitePool) -> Result<()> {
             if !msg.contains("duplicate column") {
                 return Err(e.into());
             }
+        }
+    }
+    // cleanupKeepLatest 列（定时清理保留条数，v2.3.3 引入）
+    if let Err(e) = sqlx::query("ALTER TABLE CheckinSetting ADD COLUMN cleanupKeepLatest INTEGER NOT NULL DEFAULT 500").execute(db).await {
+        let msg = e.to_string();
+        if !msg.contains("duplicate column") {
+            return Err(e.into());
         }
     }
     // CheckinAccount.note 列（v2.3.2 引入）
@@ -292,7 +345,7 @@ pub async fn ensure_setting_columns(db: &SqlitePool) -> Result<()> {
 pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
     // 检查缓存
     {
-        let cache = settings_cache().read().unwrap();
+        let cache = settings_cache().read().unwrap_or_else(|e| e.into_inner());
         if let Some((settings, cached_at)) = cache.as_ref() {
             if cached_at.elapsed() < SETTINGS_CACHE_TTL {
                 return Ok(settings.clone());
@@ -307,18 +360,37 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
     .await?;
 
     if let Some(s) = settings {
-        // 旧库迁移后默认值是 0，这里修正为安全默认（3~10s）
+        // 旧库迁移后默认值是 0，这里修正为安全默认（3~10s），并回写 DB 避免每次缓存过期都重复修正
         let mut s = s;
+        let mut needs_update = false;
         if s.batch_delay_max <= 0 {
             s.batch_delay_min = 3;
             s.batch_delay_max = 10;
+            needs_update = true;
         }
         if s.batch_delay_min < 0 {
             s.batch_delay_min = 0;
+            needs_update = true;
+        }
+        if s.cleanup_keep_latest <= 0 {
+            s.cleanup_keep_latest = 500;
+            needs_update = true;
+        }
+        if needs_update {
+            if let Err(e) = sqlx::query(
+                "UPDATE CheckinSetting SET batchDelayMin = ?, batchDelayMax = ?, cleanupKeepLatest = ? WHERE id = 'global'"
+            )
+            .bind(s.batch_delay_min)
+            .bind(s.batch_delay_max)
+            .bind(s.cleanup_keep_latest)
+            .execute(db)
+            .await {
+                tracing::warn!("回写 settings 默认值失败: {}", e);
+            }
         }
         // 写入缓存
         {
-            let mut cache = settings_cache().write().unwrap();
+            let mut cache = settings_cache().write().unwrap_or_else(|e| e.into_inner());
             *cache = Some((s.clone(), Instant::now()));
         }
         Ok(s)
@@ -326,7 +398,7 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
         // Create default settings
         let now = Utc::now();
         sqlx::query(
-            "INSERT INTO CheckinSetting (id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, batchDelayMin, batchDelayMax, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO CheckinSetting (id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, batchDelayMin, batchDelayMax, cleanupKeepLatest, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind("global")
         .bind(false)
@@ -336,6 +408,7 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
         .bind(3)
         .bind(3)   // batchDelayMin 默认 3 秒
         .bind(10)  // batchDelayMax 默认 10 秒
+        .bind(500) // cleanupKeepLatest 默认 500 条
         .bind(now)
         .execute(db)
         .await?;
@@ -353,12 +426,13 @@ pub async fn update_settings(
     max_attempts_per_day: Option<i32>,
     batch_delay_min: Option<i32>,
     batch_delay_max: Option<i32>,
+    cleanup_keep_latest: Option<i32>,
 ) -> Result<CheckinSetting> {
     let now = Utc::now();
     let current = Box::pin(get_settings(db)).await?;
 
     let settings = sqlx::query_as::<_, CheckinSetting>(
-        "UPDATE CheckinSetting SET enabled = ?, windowStart = ?, windowEnd = ?, retryEnabled = ?, maxAttemptsPerDay = ?, batchDelayMin = ?, batchDelayMax = ?, updatedAt = ? WHERE id = 'global' RETURNING *"
+        "UPDATE CheckinSetting SET enabled = ?, windowStart = ?, windowEnd = ?, retryEnabled = ?, maxAttemptsPerDay = ?, batchDelayMin = ?, batchDelayMax = ?, cleanupKeepLatest = ?, updatedAt = ? WHERE id = 'global' RETURNING *"
     )
     .bind(enabled.unwrap_or(current.enabled))
     .bind(window_start.unwrap_or(&current.window_start))
@@ -367,6 +441,7 @@ pub async fn update_settings(
     .bind(max_attempts_per_day.unwrap_or(current.max_attempts_per_day))
     .bind(batch_delay_min.unwrap_or(current.batch_delay_min))
     .bind(batch_delay_max.unwrap_or(current.batch_delay_max))
+    .bind(cleanup_keep_latest.unwrap_or(current.cleanup_keep_latest))
     .bind(now)
     .fetch_one(db)
     .await?;
@@ -385,29 +460,44 @@ pub async fn update_account(
     id: &str,
     name: Option<&str>,
     base_url: Option<&str>,
-    user_id: Option<&str>,
-    access_token_enc: Option<&str>,
-    cookie_enc: Option<&str>,
-    custom_checkin_url: Option<&str>,
+    user_id: Option<Option<&str>>,
+    access_token_enc: Option<Option<&str>>,
+    cookie_enc: Option<Option<&str>>,
+    custom_checkin_url: Option<Option<&str>>,
     enabled: Option<bool>,
     retry_enabled: Option<bool>,
-    note: Option<&str>,
+    note: Option<Option<&str>>,
 ) -> Result<CheckinAccount> {
     let now = Utc::now();
     let current = find_account_by_id(db, id).await?.ok_or(crate::error::AppError::NotFound)?;
+
+    // 三态处理：None=保持原值, Some(None)=清空为NULL, Some(Some(v))=设为新值
+    let resolve = |cur: &Option<String>, new: Option<Option<&str>>| -> Option<Option<String>> {
+        match new {
+            None => cur.as_ref().map(|s| Some(s.clone())),            // 保持原值
+            Some(None) => Some(None),                                  // 清空为 NULL
+            Some(Some(v)) => Some(Some(v.to_string())),               // 设为新值
+        }
+    };
+
+    let new_user_id = resolve(&current.user_id, user_id);
+    let new_access_token_enc = resolve(&current.access_token_enc, access_token_enc);
+    let new_cookie_enc = resolve(&current.cookie_enc, cookie_enc);
+    let new_custom_checkin_url = resolve(&current.custom_checkin_url, custom_checkin_url);
+    let new_note = resolve(&current.note, note);
 
     let account = sqlx::query_as::<_, CheckinAccount>(
         "UPDATE CheckinAccount SET name = ?, baseUrl = ?, userId = ?, accessTokenEnc = ?, cookieEnc = ?, customCheckinUrl = ?, enabled = ?, retryEnabled = ?, note = ?, updatedAt = ? WHERE id = ? RETURNING *"
     )
     .bind(name.unwrap_or(&current.name))
     .bind(base_url.unwrap_or(&current.base_url))
-    .bind(user_id.or(current.user_id.as_deref()))
-    .bind(access_token_enc.or(current.access_token_enc.as_deref()))
-    .bind(cookie_enc.or(current.cookie_enc.as_deref()))
-    .bind(custom_checkin_url.or(current.custom_checkin_url.as_deref()))
+    .bind(new_user_id.flatten().as_deref())
+    .bind(new_access_token_enc.flatten().as_deref())
+    .bind(new_cookie_enc.flatten().as_deref())
+    .bind(new_custom_checkin_url.flatten().as_deref())
     .bind(enabled.unwrap_or(current.enabled))
     .bind(retry_enabled.unwrap_or(current.retry_enabled))
-    .bind(note.or(current.note.as_deref()))
+    .bind(new_note.flatten().as_deref())
     .bind(now)
     .bind(id)
     .fetch_one(db)
@@ -501,7 +591,12 @@ pub async fn cleanup_checkin_runs(db: &SqlitePool, keep_latest: usize) -> Result
 /// 比逐账户 COUNT 更高效（单条 SQL 替代 N 条）。
 pub async fn count_runs_today_batch(db: &SqlitePool) -> Result<std::collections::HashMap<String, i32>> {
     let local_midnight = Local::now().date_naive().and_hms_opt(0, 0, 0).expect("midnight is always valid");
-    let today_start_utc = Local.from_local_datetime(&local_midnight).single().expect("invalid midnight").to_utc();
+    // DST 安全：spring-forward 时 midnight 可能不存在，用 earliest() 回退到前一天 23:00
+    // 这样最多多算几条昨日记录，不会 panic 也不会漏算今日记录
+    let today_start_utc = Local.from_local_datetime(&local_midnight)
+        .earliest()
+        .unwrap_or_else(|| Local::now().date_naive().and_hms_opt(0, 0, 0).unwrap().and_local_timezone(Local).unwrap())
+        .to_utc();
     let rows: Vec<(String, i64)> = sqlx::query_as(
         "SELECT accountId, COUNT(*) FROM CheckinRun WHERE createdAt >= ? GROUP BY accountId"
     )

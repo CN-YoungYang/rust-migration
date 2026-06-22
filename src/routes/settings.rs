@@ -59,6 +59,11 @@ pub async fn update(
     } else if payload.batch_delay_min.is_some() || payload.batch_delay_max.is_some() {
         return Err(AppError::Validation("batchDelayMin 和 batchDelayMax 必须同时提供".into()));
     }
+    if let Some(keep) = payload.cleanup_keep_latest {
+        if keep < 0 || keep > 10000 {
+            return Err(AppError::Validation("cleanupKeepLatest 必须在 0~10000 之间（0 表示清除全部）".into()));
+        }
+    }
 
     let settings = db::update_settings(
         &state.db,
@@ -69,6 +74,7 @@ pub async fn update(
         payload.max_attempts_per_day,
         payload.batch_delay_min,
         payload.batch_delay_max,
+        payload.cleanup_keep_latest,
     ).await?;
 
     Ok(Json(settings))

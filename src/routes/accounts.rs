@@ -12,6 +12,59 @@ use crate::{
     db,
 };
 
+/// SSRF 防护：检查 URL 是否指向内网/私有地址。
+/// 拒绝 127.0.0.0/8、10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、
+/// 169.254.0.0/16（云元数据）、0.0.0.0、localhost、::1 等。
+fn is_private_url(url: &str) -> bool {
+    // 提取 host 部分（reqwest 依赖已包含 url crate）
+    let host = match reqwest::Url::parse(url) {
+        Ok(u) => u.host_str().unwrap_or("").to_lowercase(),
+        Err(_) => return true, // 无法解析的 URL 视为不安全
+    };
+
+    // 域名检查
+    if host == "localhost" || host.ends_with(".local") || host.ends_with(".internal") {
+        return true;
+    }
+
+    // IPv6 回环
+    if host == "::1" || host == "[::1]" {
+        return true;
+    }
+
+    // IPv4 解析
+    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+        let octets: [u8; 4] = ip.octets();
+        return match octets {
+            [127, ..] => true,                              // 127.0.0.0/8
+            [10, ..] => true,                               // 10.0.0.0/8
+            [172, b, ..] if b >= 16 && b <= 31 => true,     // 172.16.0.0/12
+            [192, 168, ..] => true,                         // 192.168.0.0/16
+            [169, 254, ..] => true,                         // 169.254.0.0/16 (云元数据)
+            [0, 0, 0, 0] => true,                           // 0.0.0.0
+            _ => false,
+        };
+    }
+
+    // IPv6 私有地址
+    if let Ok(ip) = host.trim_matches(|c| c == '[' || c == ']').parse::<std::net::Ipv6Addr>() {
+        if ip.is_loopback() || ip.is_unspecified() {
+            return true;
+        }
+        // fc00::/7 (ULA)
+        let segments = ip.segments();
+        if (segments[0] & 0xfe00) == 0xfc00 {
+            return true;
+        }
+        // fe80::/10 (link-local)
+        if (segments[0] & 0xffc0) == 0xfe80 {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn account_to_json(acc: &CheckinAccount, owner_name: Option<&str>) -> Value {
     json!({
         "id": acc.id,
@@ -142,6 +195,9 @@ pub async fn create(
     if !payload.base_url.starts_with("http://") && !payload.base_url.starts_with("https://") {
         return Err(crate::error::AppError::Validation("站点地址必须以 http:// 或 https:// 开头".into()));
     }
+    if is_private_url(&payload.base_url) {
+        return Err(crate::error::AppError::Validation("站点地址不能指向内网/私有地址（SSRF 防护）".into()));
+    }
     if payload.name.trim().is_empty() {
         return Err(crate::error::AppError::Validation("账户名称不能为空".into()));
     }
@@ -203,54 +259,84 @@ pub async fn update(
 ) -> Result<Json<Value>> {
     let existing = db::find_account_by_id(&state.db, &id).await?.ok_or(crate::error::AppError::NotFound)?;
     check_account_ownership(&existing, &user)?;
-    
+
+    // SSRF 防护：如果修改了 base_url，检查是否指向内网
+    if let Some(ref new_base) = payload.base_url {
+        if !new_base.starts_with("http://") && !new_base.starts_with("https://") {
+            return Err(crate::error::AppError::Validation("站点地址必须以 http:// 或 https:// 开头".into()));
+        }
+        if is_private_url(new_base) {
+            return Err(crate::error::AppError::Validation("站点地址不能指向内网/私有地址（SSRF 防护）".into()));
+        }
+    }
+
     // Validate based on site type (use existing site_type since it can't be changed)
     let site_type = &existing.site_type;
     
     // Check if user_id is being cleared for anyrouter
     if site_type == "anyrouter" {
-        let has_user_id = payload.user_id.as_ref().map(|s| !s.is_empty()).unwrap_or(false) 
-            || existing.user_id.is_some();
+        let has_user_id = match &payload.user_id {
+            Some(Some(_)) => true,        // 设置了新值
+            Some(None) => false,           // 明确清空
+            None => existing.user_id.is_some(), // 未传，看原值
+        };
         if !has_user_id {
             return Err(crate::error::AppError::Validation("AnyRouter 必须填写 userId".into()));
         }
     }
-    
+
     // Check if cookie is being cleared for anyrouter/x666
     if site_type == "anyrouter" || site_type == "x666" {
-        let has_cookie = payload.cookie.is_some() || existing.cookie_enc.is_some();
+        let has_cookie = match &payload.cookie {
+            Some(Some(_)) => true,
+            Some(None) => false,
+            None => existing.cookie_enc.is_some(),
+        };
         if !has_cookie {
             return Err(crate::error::AppError::Validation(
                 format!("{} 必须填写 cookie", site_type)
             ));
         }
     }
-    
+
     // Check if access_token is being cleared for new-api with access_token auth
     if site_type != "anyrouter" && site_type != "x666" && existing.auth_type == "access_token" {
-        let has_token = payload.access_token.is_some() || existing.access_token_enc.is_some();
+        let has_token = match &payload.access_token {
+            Some(Some(_)) => true,
+            Some(None) => false,
+            None => existing.access_token_enc.is_some(),
+        };
         if !has_token {
             return Err(crate::error::AppError::Validation(
                 "认证方式为 access_token 时必须填写 accessToken".into()
             ));
         }
     }
-    
-    let access_token_enc = payload.access_token.as_ref().map(|t| encrypt(t)).transpose()?;
-    let cookie_enc = payload.cookie.as_ref().map(|c| encrypt(c)).transpose()?;
-        
+
+    // 三态处理加密字段：None=保持原值, Some(None)=清空, Some(Some(v))=加密后存储
+    let access_token_enc: Option<Option<String>> = match &payload.access_token {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(t)) => Some(Some(encrypt(t)?)),
+    };
+    let cookie_enc: Option<Option<String>> = match &payload.cookie {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(c)) => Some(Some(encrypt(c)?)),
+    };
+
     let updated = db::update_account(
         &state.db,
         &id,
         payload.name.as_deref(),
         payload.base_url.as_deref(),
-        payload.user_id.as_deref(),
-        access_token_enc.as_deref(),
-        cookie_enc.as_deref(),
-        payload.custom_checkin_url.as_deref(),
+        payload.user_id.as_ref().map(|o| o.as_deref()),
+        access_token_enc.as_ref().map(|o| o.as_deref()),
+        cookie_enc.as_ref().map(|o| o.as_deref()),
+        payload.custom_checkin_url.as_ref().map(|o| o.as_deref()),
         payload.enabled,
         payload.retry_enabled,
-        payload.note.as_deref(),
+        payload.note.as_ref().map(|o| o.as_deref()),
     ).await?;
 
     // update_account 已返回更新后的账户，无需再次查询

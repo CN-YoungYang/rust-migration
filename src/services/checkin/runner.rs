@@ -1,4 +1,6 @@
 use sqlx::SqlitePool;
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 use chrono::Local;
 use crate::{
@@ -9,6 +11,37 @@ use crate::{
 };
 use super::BrowserProfile;
 use super::providers::{new_api, anyrouter, x666};
+
+// ── 防并发签到：同一账户同时只能有一个签到任务在执行 ──────────────────────
+// 定时签到、手动单个签到、手动批量签到共用此锁，避免同一账户被重复签到。
+fn in_flight_accounts() -> &'static Mutex<HashSet<String>> {
+    static INSTANCE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    INSTANCE.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// RAII 守卫：获取成功时插入 account_id，Drop 时自动移除。
+struct InFlightGuard {
+    account_id: String,
+}
+
+impl InFlightGuard {
+    /// 尝试获取指定账户的签到锁。返回 `None` 表示该账户正在签到中。
+    fn try_acquire(account_id: &str) -> Option<Self> {
+        let mut set = in_flight_accounts().lock().unwrap_or_else(|e| e.into_inner());
+        if set.contains(account_id) {
+            return None;
+        }
+        set.insert(account_id.to_string());
+        Some(InFlightGuard { account_id: account_id.to_string() })
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        let mut set = in_flight_accounts().lock().unwrap_or_else(|e| e.into_inner());
+        set.remove(&self.account_id);
+    }
+}
 
 /// 批量/定时签到前对单个账户的跳过判断（不涉及 DB 计数查询，便于复用）。
 /// 返回 `Some(reason)` 表示应跳过该账户，`None` 表示需要继续执行。
@@ -49,17 +82,35 @@ pub async fn execute_checkin(
     db: &SqlitePool,
     account_id: &str,
     triggered_by: &str,
+    settings: Option<&CheckinSetting>,
 ) -> Result<CheckinRun> {
     let start = Instant::now();
-    
+
+    // 防并发：同一账户同时只能有一个签到任务（定时/手动/批量共用）
+    let _guard = match InFlightGuard::try_acquire(account_id) {
+        Some(g) => g,
+        None => {
+            return create_failed_run(db, account_id, "该账户正在签到中，请稍后再试", triggered_by, start).await;
+        }
+    };
+
     let account = db::find_account_by_id(db, account_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    
+
     if !account.enabled {
         return create_failed_run(db, account_id, "账户已禁用", triggered_by, start).await;
     }
-    
+
+    // TOCTOU 重检查：用刚从 DB 取到的最新账户状态再做一次 skip 判断，
+    // 避免调用方的 skip_reason_for_batch 与实际执行之间账户状态已变化。
+    if let Some(s) = settings {
+        let today_local = chrono::Local::now().date_naive();
+        if let Some(reason) = skip_reason_for_batch(&account, s, today_local) {
+            return create_failed_run(db, account_id, reason, triggered_by, start).await;
+        }
+    }
+
     // 防判定：每次签到使用随机 UA，降低多账户同 IP + 同 UA 的关联指纹。
     let profile = super::random_browser_profile();
 
@@ -69,9 +120,9 @@ pub async fn execute_checkin(
         "x666" => execute_x666_checkin(&account, profile).await,
         _ => Err(AppError::Validation(format!("不支持的站点类型: {}", account.site_type))),
     };
-    
+
     let duration_ms = start.elapsed().as_millis().min(i64::MAX as u128) as i64;
-    
+
     match result {
         Ok((status, message, raw_response)) => {
             // 签到成功或今日已签时刷新余额（参考 Next.js runner.ts）
@@ -94,13 +145,18 @@ pub async fn execute_checkin(
                 message
             };
 
-            db::update_account_status(db, account_id, &status, Some(&final_message)).await?;
-            db::create_run(db, account_id, &status, Some(&final_message), Some(duration_ms), triggered_by, raw_response.as_deref()).await
+            // 原子操作：状态更新 + 记录创建放在同一个事务中，避免部分失败
+            db::create_run_with_status_update(
+                db, account_id, &status, Some(&final_message),
+                Some(duration_ms), triggered_by, raw_response.as_deref(),
+            ).await
         }
         Err(e) => {
             let msg = e.to_string();
-            db::update_account_status(db, account_id, "failed", Some(&msg)).await?;
-            db::create_run(db, account_id, "failed", Some(&msg), Some(duration_ms), triggered_by, None).await
+            db::create_run_with_status_update(
+                db, account_id, "failed", Some(&msg),
+                Some(duration_ms), triggered_by, None,
+            ).await
         }
     }
 }
@@ -161,7 +217,7 @@ pub async fn fetch_account_balance(account: &CheckinAccount, profile: &BrowserPr
             let enc = account.cookie_enc.as_ref()
                 .ok_or_else(|| AppError::Validation("未配置 cookie".into()))?;
             let cookie = decrypt(enc)?;
-            x666::fetch_balance(Some(&cookie), profile)
+            x666::fetch_balance(Some(&account.base_url), Some(&cookie), profile)
                 .await
                 .map_err(|e| AppError::Internal(e.to_string()))
         }

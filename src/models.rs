@@ -122,6 +122,10 @@ pub struct CheckinSetting {
     #[serde(rename = "batchDelayMax")]
     #[sqlx(rename = "batchDelayMax")]
     pub batch_delay_max: i32,
+    /// 定时清理时保留的最新签到记录条数（0 表示清除全部）
+    #[serde(rename = "cleanupKeepLatest")]
+    #[sqlx(rename = "cleanupKeepLatest")]
+    pub cleanup_keep_latest: i32,
     #[serde(rename = "updatedAt")]
     #[sqlx(rename = "updatedAt")]
     pub updated_at: DateTime<Utc>,
@@ -154,17 +158,20 @@ pub struct UpdateAccountRequest {
     pub name: Option<String>,
     #[serde(rename = "baseUrl")]
     pub base_url: Option<String>,
-    #[serde(rename = "userId")]
-    pub user_id: Option<String>,
-    #[serde(rename = "accessToken")]
-    pub access_token: Option<String>,
-    pub cookie: Option<String>,
-    #[serde(rename = "customCheckinUrl")]
-    pub custom_checkin_url: Option<String>,
+    // 可清空字段：None=不改, Some(None)=清空为NULL, Some(Some(v))=设为v
+    #[serde(rename = "userId", default)]
+    pub user_id: Option<Option<String>>,
+    #[serde(rename = "accessToken", default)]
+    pub access_token: Option<Option<String>>,
+    #[serde(default)]
+    pub cookie: Option<Option<String>>,
+    #[serde(rename = "customCheckinUrl", default)]
+    pub custom_checkin_url: Option<Option<String>>,
     pub enabled: Option<bool>,
     #[serde(rename = "retryEnabled")]
     pub retry_enabled: Option<bool>,
-    pub note: Option<String>,
+    #[serde(default)]
+    pub note: Option<Option<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -194,6 +201,8 @@ pub struct UpdateSettingsRequest {
     pub batch_delay_min: Option<i32>,
     #[serde(rename = "batchDelayMax")]
     pub batch_delay_max: Option<i32>,
+    #[serde(rename = "cleanupKeepLatest")]
+    pub cleanup_keep_latest: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -78,7 +78,7 @@ pub async fn execute(
     }
 
     // 手动签到不受每日上限限制，前端会在达到上限时弹窗确认
-    let run = execute_checkin(&state.db, &payload.account_id, "manual").await?;
+    let run = execute_checkin(&state.db, &payload.account_id, "manual", None).await?;
     Ok(Json(run))
 }
 
@@ -96,7 +96,7 @@ pub async fn execute_batch(
     let is_admin = user.role == "ADMIN" || user.role == "SUPER_ADMIN";
 
     // 批量查询今日各账户签到次数，避免逐账户 COUNT
-    let today_counts = db::count_runs_today_batch(&state.db).await.unwrap_or_default();
+    let mut today_counts = db::count_runs_today_batch(&state.db).await.unwrap_or_default();
 
     // 轻量查询：只取 id + username，避免拉取 passwordHash
     let user_name_map = db::list_user_id_name_map(&state.db).await?;
@@ -180,13 +180,18 @@ pub async fn execute_batch(
             }
         }
 
-        match execute_checkin(&state.db, &account_id, "manual_batch").await {
-            Ok(run) => items.push(BatchResultItem {
-                account_id,
-                account_name,
-                status: run.status,
-                message: run.message,
-            }),
+        // 传入 settings 供 execute_checkin 做 TOCTOU 重检查
+        match execute_checkin(&state.db, &account_id, "manual_batch", Some(&settings)).await {
+            Ok(run) => {
+                // 更新内存计数器，避免后续账户因过期计数而超限
+                *today_counts.entry(account_id.clone()).or_insert(0) += 1;
+                items.push(BatchResultItem {
+                    account_id,
+                    account_name,
+                    status: run.status,
+                    message: run.message,
+                })
+            }
             Err(e) => items.push(BatchResultItem {
                 account_id,
                 account_name,

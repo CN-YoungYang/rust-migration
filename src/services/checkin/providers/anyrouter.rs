@@ -25,7 +25,9 @@ fn join_url(base_url: &str, path: &str) -> String {
 fn is_already_checked_message(message: &str) -> bool {
     let normalized = message.trim().to_lowercase();
     if normalized.is_empty() {
-        return true;
+        // 空消息不代表"已签到"——服务器可能返回 500 + 空 body，
+        // 误判会导致跳过重试。交给调用方根据 HTTP 状态码判断。
+        return false;
     }
     ["已签", "已经签到", "今天已经签到", "already"]
         .iter()

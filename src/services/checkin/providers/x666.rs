@@ -11,8 +11,20 @@ pub struct X666Response {
     pub quota: Option<f64>,
 }
 
-const DEFAULT_CHECKIN_URL: &str = "https://up.x666.me/api/checkin/spin";
-const REFERER_URL: &str = "https://up.x666.me/";
+const DEFAULT_CHECKIN_PATH: &str = "/api/checkin/spin";
+const DEFAULT_BALANCE_PATH: &str = "/api/checkin/status";
+const DEFAULT_BASE_URL: &str = "https://up.x666.me";
+
+fn join_url(base_url: &str, path: &str) -> String {
+    if path.starts_with("http://") || path.starts_with("https://") {
+        return path.to_string();
+    }
+    format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
+}
 
 fn normalize_message(value: Option<&serde_json::Value>) -> String {
     match value {
@@ -43,16 +55,21 @@ fn with_awarded_quota(message: String, text: &str) -> String {
     }
 }
 
-pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>, profile: &BrowserProfile) -> Result<(String, String, Option<String>)> {
-    let url = custom_url.unwrap_or(DEFAULT_CHECKIN_URL);
+pub async fn checkin(base_url: &str, cookie: &str, custom_url: Option<&str>, profile: &BrowserProfile) -> Result<(String, String, Option<String>)> {
+    let effective_base = if base_url.is_empty() { DEFAULT_BASE_URL } else { base_url };
+    let url = match custom_url {
+        Some(cu) if !cu.is_empty() => cu.to_string(),
+        _ => join_url(effective_base, DEFAULT_CHECKIN_PATH),
+    };
+    let referer = format!("{}/", effective_base.trim_end_matches('/'));
     let client = http_client();
 
     let req = super::super::apply_browser_headers(
-        client.post(url)
+        client.post(&url)
             .header("Cookie", cookie)
             .header("Accept", "*/*")
-            .header("Origin", REFERER_URL.trim_end_matches("/"))
-            .header("Referer", REFERER_URL)
+            .header("Origin", effective_base.trim_end_matches('/'))
+            .header("Referer", &referer)
             // x666 签到是同源 fetch 请求
             .header("Sec-Fetch-Site", "same-origin")
             .header("Sec-Fetch-Mode", "cors")
@@ -99,16 +116,18 @@ pub async fn checkin(_base_url: &str, cookie: &str, custom_url: Option<&str>, pr
     Ok(("failed".to_string(), format!("签到失败：{}", response_msg), Some(text)))
 }
 
-pub async fn fetch_balance(cookie: Option<&str>, profile: &BrowserProfile) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+pub async fn fetch_balance(base_url: Option<&str>, cookie: Option<&str>, profile: &BrowserProfile) -> std::result::Result<f64, Box<dyn std::error::Error>> {
     let cookie = cookie.ok_or("X666 余额查询必须填写 Cookie")?;
+    let effective_base = base_url.filter(|s| !s.is_empty()).unwrap_or(DEFAULT_BASE_URL);
+    let url = join_url(effective_base, DEFAULT_BALANCE_PATH);
+    let referer = format!("{}/", effective_base.trim_end_matches('/'));
     let client = http_client();
-    let url = "https://up.x666.me/api/checkin/status";
 
     let req = super::super::apply_browser_headers(
-        client.get(url)
+        client.get(&url)
             .header("Accept", "*/*")
             .header("Cookie", cookie)
-            .header("Referer", REFERER_URL)
+            .header("Referer", &referer)
             .header("Sec-Fetch-Site", "same-origin")
             .header("Sec-Fetch-Mode", "cors")
             .header("Sec-Fetch-Dest", "empty"),
