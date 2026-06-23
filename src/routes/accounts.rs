@@ -133,18 +133,29 @@ pub async fn list(
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Vec<Value>>> {
     let filter_user_id = params.get("userId");
+    let filter_site_type = params.get("siteType").map(|s| s.as_str());
+    let filter_enabled = params.get("enabled").and_then(|s| s.parse::<bool>().ok());
+    let filter_last_status = params.get("lastStatus").map(|s| s.as_str());
+    let filter_keyword = params.get("keyword").map(|s| s.as_str());
     let limit: i32 = params.get("limit").and_then(|s| s.parse().ok()).unwrap_or(500).min(1000);
     let offset: i32 = params.get("offset").and_then(|s| s.parse().ok()).unwrap_or(0).max(0);
 
-    let accounts = if user.role == "ADMIN" || user.role == "SUPER_ADMIN" {
-        if let Some(uid) = filter_user_id {
-            db::list_accounts_by_user_paginated(&state.db, uid, limit, offset).await?
-        } else {
-            db::list_accounts_paginated(&state.db, limit, offset).await?
-        }
+    let owner_id = if user.role == "ADMIN" || user.role == "SUPER_ADMIN" {
+        filter_user_id.map(|s| s.as_str())
     } else {
-        db::list_accounts_by_user_paginated(&state.db, &user.id, limit, offset).await?
+        Some(user.id.as_str())
     };
+
+    let accounts = db::list_accounts_filtered(
+        &state.db,
+        owner_id,
+        filter_site_type,
+        filter_enabled,
+        filter_last_status,
+        filter_keyword,
+        limit,
+        offset,
+    ).await?;
 
     // 轻量查询：只取 id + username，避免拉取 passwordHash 等无关字段
     let owner_map = db::list_user_id_name_map(&state.db).await?;

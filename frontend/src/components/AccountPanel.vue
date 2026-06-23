@@ -20,6 +20,35 @@
       </div>
     </div>
 
+    <!-- 筛选栏 -->
+    <div class="filter-bar">
+      <select v-model="filterSiteType" class="filter-select">
+        <option value="">全部类型</option>
+        <option value="new-api">new-api</option>
+        <option value="anyrouter">anyrouter</option>
+        <option value="x666">x666</option>
+      </select>
+      <select v-model="filterEnabled" class="filter-select">
+        <option value="">全部状态</option>
+        <option value="true">已启用</option>
+        <option value="false">已禁用</option>
+      </select>
+      <select v-model="filterLastStatus" class="filter-select">
+        <option value="">全部签到状态</option>
+        <option value="success">成功</option>
+        <option value="failed">失败</option>
+        <option value="never">未签到</option>
+      </select>
+      <input
+        v-model="filterKeyword"
+        type="text"
+        placeholder="搜索账户名称或地址..."
+        class="filter-input"
+      />
+      <button v-if="hasActiveFilter" class="clear-filter" @click="clearFilters">清除筛选</button>
+      <span class="filter-count">{{ accounts.length }} 个结果</span>
+    </div>
+
     <p v-if="loading" class="empty">加载中...</p>
 
     <div v-if="!loading" class="account-list">
@@ -105,6 +134,10 @@ const props = defineProps<{
 
 const { allUsers, usersLoading, loadUsers } = useUsers(() => props.isAdmin)
 const filterUserId = ref('')
+const filterSiteType = ref('')
+const filterEnabled = ref('')
+const filterLastStatus = ref('')
+const filterKeyword = ref('')
 
 // One API / New API 系列标准换算：500000 quota = 1 美元
 // 与 Next.js 版本 (QUOTA_PER_USD = 500000) 保持一致
@@ -123,6 +156,18 @@ const loading = ref(false)
 const showForm = ref(false)
 const editingId = ref('')
 const batchLoading = ref(false)
+
+// 筛选相关计算属性和方法
+const hasActiveFilter = computed(() => {
+  return !!(filterSiteType.value || filterEnabled.value || filterLastStatus.value || filterKeyword.value)
+})
+
+function clearFilters() {
+  filterSiteType.value = ''
+  filterEnabled.value = ''
+  filterLastStatus.value = ''
+  filterKeyword.value = ''
+}
 
 // 批量手动签到：复用分组，跳过今日已签由后端统一判定。
 async function batchCheckin(accountIds: string[]) {
@@ -211,9 +256,28 @@ async function loadAccounts() {
   loading.value = true
   try {
     let url = apiUrl('/accounts')
+    const params = new URLSearchParams()
+
     if (props.isAdmin && filterUserId.value) {
-      url += `?userId=${encodeURIComponent(filterUserId.value)}`
+      params.append('userId', filterUserId.value)
     }
+    if (filterSiteType.value) {
+      params.append('siteType', filterSiteType.value)
+    }
+    if (filterEnabled.value) {
+      params.append('enabled', filterEnabled.value)
+    }
+    if (filterLastStatus.value) {
+      params.append('lastStatus', filterLastStatus.value)
+    }
+    if (filterKeyword.value) {
+      params.append('keyword', filterKeyword.value)
+    }
+
+    if (params.toString()) {
+      url += `?${params.toString()}`
+    }
+
     const response = await request(url, { headers: authHeaders() })
     accounts.value = await response.json()
   } catch (error) {
@@ -308,6 +372,14 @@ onMounted(() => {
 })
 
 watch(filterUserId, () => loadAccounts())
+watch([filterSiteType, filterEnabled, filterLastStatus], () => loadAccounts())
+
+// 关键词搜索防抖
+let keywordDebounce: ReturnType<typeof setTimeout> | null = null
+watch(filterKeyword, () => {
+  if (keywordDebounce) clearTimeout(keywordDebounce)
+  keywordDebounce = setTimeout(() => loadAccounts(), 300)
+})
 </script>
 
 <style scoped>
@@ -315,6 +387,12 @@ watch(filterUserId, () => loadAccounts())
 .user-filter { background: #1a2937; color: #fff; border: 1px solid #374151; border-radius: 4px; padding: .4rem .6rem; font-size: .85rem; }
 .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: .75rem; }
 .header-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.filter-bar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; padding: 1rem; background: #1a1a1a; border-radius: 8px; margin-bottom: 1.5rem; }
+.filter-select { background: #0b1220; border: 1px solid #374151; border-radius: 4px; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; }
+.filter-input { background: #0b1220; border: 1px solid #374151; border-radius: 4px; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; min-width: 200px; }
+.clear-filter { background: #6b7280; border: none; border-radius: 4px; padding: 0.5rem 0.75rem; color: white; font-size: 0.8rem; cursor: pointer; }
+.clear-filter:hover { background: #9ca3af; }
+.filter-count { color: #9ca3af; font-size: 0.85rem; margin-left: auto; }
 .account-list { display: grid; gap: 1.5rem; }
 .account-group { display: grid; gap: 1rem; }
 .group-header { display: flex; align-items: center; gap: .6rem; padding-bottom: .25rem; border-bottom: 1px solid #2a2a2a; }

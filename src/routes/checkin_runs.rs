@@ -53,18 +53,31 @@ pub async fn list(
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Vec<CheckinRun>>> {
     let filter_user_id = params.get("userId");
+    let filter_status = params.get("status").map(|s| s.as_str());
+    let filter_triggered_by = params.get("triggeredBy").map(|s| s.as_str());
+    let filter_start_date = params.get("startDate").map(|s| s.as_str());
+    let filter_end_date = params.get("endDate").map(|s| s.as_str());
+    let filter_account_id = params.get("accountId").map(|s| s.as_str());
     let limit: i32 = params.get("limit").and_then(|s| s.parse().ok()).unwrap_or(100).min(500);
     let offset: i32 = params.get("offset").and_then(|s| s.parse().ok()).unwrap_or(0).max(0);
 
-    let runs = if user.role == "ADMIN" || user.role == "SUPER_ADMIN" {
-        if let Some(uid) = filter_user_id {
-            db::list_runs(&state.db, limit, offset, Some(uid)).await?
-        } else {
-            db::list_runs(&state.db, limit, offset, None).await?
-        }
+    let owner_id = if user.role == "ADMIN" || user.role == "SUPER_ADMIN" {
+        filter_user_id.map(|s| s.as_str())
     } else {
-        db::list_runs(&state.db, limit, offset, Some(&user.id)).await?
+        Some(user.id.as_str())
     };
+
+    let runs = db::list_runs_filtered(
+        &state.db,
+        owner_id,
+        filter_account_id,
+        filter_status,
+        filter_triggered_by,
+        filter_start_date,
+        filter_end_date,
+        limit,
+        offset,
+    ).await?;
     Ok(Json(runs))
 }
 

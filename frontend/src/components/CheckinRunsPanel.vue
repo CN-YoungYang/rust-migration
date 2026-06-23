@@ -22,6 +22,54 @@
       </div>
     </div>
 
+    <!-- 筛选栏 -->
+    <div class="filter-bar">
+      <div class="status-filter">
+        <button
+          v-for="status in statusOptions"
+          :key="status.value"
+          :class="['status-btn', { active: filterStatus === status.value }]"
+          @click="filterStatus = status.value"
+        >
+          {{ status.label }}
+          <span v-if="statusCounts[status.value]" class="count">
+            {{ statusCounts[status.value] }}
+          </span>
+        </button>
+      </div>
+      <select v-model="filterTriggeredBy" class="filter-select">
+        <option value="">全部触发方式</option>
+        <option value="manual">手动</option>
+        <option value="manual_batch">批量手动</option>
+        <option value="scheduled">定时</option>
+      </select>
+      <div class="date-range">
+        <input
+          v-model="filterStartDate"
+          type="datetime-local"
+          class="filter-input"
+          placeholder="开始时间"
+        />
+        <span class="date-separator">至</span>
+        <input
+          v-model="filterEndDate"
+          type="datetime-local"
+          class="filter-input"
+          placeholder="结束时间"
+        />
+      </div>
+      <select v-model="filterAccountId" class="filter-select">
+        <option value="">全部账户</option>
+        <optgroup v-for="group in groupedAccounts" :key="group.key" :label="group.label">
+          <option v-for="account in group.items" :key="account.id" :value="account.id">
+            {{ account.name }}
+          </option>
+        </optgroup>
+      </select>
+      <button v-if="hasActiveFilter" class="clear-filter" @click="clearFilters">清除筛选</button>
+      <span class="filter-count">{{ runs.length }} 条记录</span>
+    </div>
+
 
     <div class="runs-list">
       <section v-for="group in groupedRuns" :key="group.key" class="run-group">
@@ -94,6 +142,41 @@ const hasMore = ref(true)
 const PAGE_SIZE = 100
 const maxAttemptsPerDay = ref(3)
 
+// 筛选相关
+const filterStatus = ref('')
+const filterTriggeredBy = ref('')
+const filterStartDate = ref('')
+const filterEndDate = ref('')
+const filterAccountId = ref('')
+
+const statusOptions = [
+  { value: '', label: '全部' },
+  { value: 'success', label: '成功' },
+  { value: 'failed', label: '失败' },
+  { value: 'already_checked', label: '已签' },
+  { value: 'pending', label: '进行中' }
+]
+
+const statusCounts = computed(() => {
+  const counts: Record<string, number> = {}
+  for (const run of runs.value) {
+    counts[run.status] = (counts[run.status] || 0) + 1
+  }
+  return counts
+})
+
+const hasActiveFilter = computed(() => {
+  return !!(filterStatus.value || filterTriggeredBy.value || filterStartDate.value || filterEndDate.value || filterAccountId.value)
+})
+
+function clearFilters() {
+  filterStatus.value = ''
+  filterTriggeredBy.value = ''
+  filterStartDate.value = ''
+  filterEndDate.value = ''
+  filterAccountId.value = ''
+}
+
 // 按账户归属用户分组下拉框选项
 const groupedAccounts = computed<AccountGroup[]>(() => {
   const groups = new Map<string, AccountGroup>()
@@ -161,10 +244,33 @@ const fetchRuns = async (append = false) => {
   runsLoading.value = true
   try {
     const offset = append ? runsOffset.value : 0
-    let url = apiUrl(`/checkin-runs?limit=${PAGE_SIZE}&offset=${offset}`)
+    let url = apiUrl('/checkin-runs')
+    const params = new URLSearchParams()
+
+    params.append('limit', PAGE_SIZE.toString())
+    params.append('offset', offset.toString())
+
     if (props.isAdmin && filterUserId.value) {
-      url += `&userId=${encodeURIComponent(filterUserId.value)}`
+      params.append('userId', filterUserId.value)
     }
+    if (filterStatus.value) {
+      params.append('status', filterStatus.value)
+    }
+    if (filterTriggeredBy.value) {
+      params.append('triggeredBy', filterTriggeredBy.value)
+    }
+    if (filterStartDate.value) {
+      params.append('startDate', new Date(filterStartDate.value).toISOString())
+    }
+    if (filterEndDate.value) {
+      params.append('endDate', new Date(filterEndDate.value).toISOString())
+    }
+    if (filterAccountId.value) {
+      params.append('accountId', filterAccountId.value)
+    }
+
+    url += `?${params.toString()}`
+
     const response = await request(url, { headers: authHeaders() })
     const data = await response.json()
     if (append) {
@@ -271,7 +377,12 @@ onMounted(async () => {
 
 watch(filterUserId, () => {
   selectedAccountId.value = ''
+  filterAccountId.value = ''
   fetchAccounts()
+  fetchRuns()
+})
+
+watch([filterStatus, filterTriggeredBy, filterStartDate, filterEndDate, filterAccountId], () => {
   fetchRuns()
 })
 </script>
@@ -284,6 +395,19 @@ watch(filterUserId, () => {
 h2 { color: #fff; }
 select, input { background: #111827; color: #fff; border: 1px solid #374151; border-radius: 4px; padding: .5rem; }
 .keep-input { width: 90px; }
+.filter-bar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; padding: 1rem; background: #1a1a1a; border-radius: 8px; margin-bottom: 1.5rem; }
+.filter-select { background: #0b1220; border: 1px solid #374151; border-radius: 4px; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; }
+.filter-input { background: #0b1220; border: 1px solid #374151; border-radius: 4px; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; min-width: 180px; }
+.date-range { display: flex; align-items: center; gap: 0.5rem; }
+.date-separator { color: #9ca3af; }
+.status-filter { display: flex; gap: 0.5rem; }
+.status-btn { background: #374151; border: 1px solid #4b5563; border-radius: 4px; padding: 0.4rem 0.8rem; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; color: white; }
+.status-btn:hover { background: #4b5563; }
+.status-btn.active { background: #0070f3; border-color: #0070f3; }
+.status-btn .count { background: rgba(255, 255, 255, 0.2); border-radius: 999px; padding: 0.1rem 0.4rem; margin-left: 0.3rem; font-size: 0.7rem; }
+.clear-filter { background: #6b7280; border: none; border-radius: 4px; padding: 0.5rem 0.75rem; color: white; font-size: 0.8rem; cursor: pointer; }
+.clear-filter:hover { background: #9ca3af; }
+.filter-count { color: #9ca3af; font-size: 0.85rem; margin-left: auto; }
 .runs-list { display: grid; gap: 1.5rem; }
 .run-group { display: grid; gap: 0.75rem; }
 .group-header { display: flex; align-items: center; gap: 0.6rem; padding-bottom: 0.25rem; border-bottom: 1px solid #2a2a2a; }

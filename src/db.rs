@@ -85,26 +85,65 @@ pub async fn create_user(db: &SqlitePool, username: &str, password_hash: &str, r
 
 // CheckinAccount operations
 
-/// 分页查询账户（供前端列表使用）
-pub async fn list_accounts_paginated(db: &SqlitePool, limit: i32, offset: i32) -> Result<Vec<CheckinAccount>> {
-    let sql = format!("SELECT {} FROM CheckinAccount ORDER BY createdAt DESC LIMIT ? OFFSET ?", ACCOUNT_LIST_COLUMNS);
-    let accounts = sqlx::query_as::<_, CheckinAccount>(&sql)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(db)
-        .await?;
-    Ok(accounts)
-}
+/// 带筛选条件的分页查询账户
+pub async fn list_accounts_filtered(
+    db: &SqlitePool,
+    owner_id: Option<&str>,
+    site_type: Option<&str>,
+    enabled: Option<bool>,
+    last_status: Option<&str>,
+    keyword: Option<&str>,
+    limit: i32,
+    offset: i32,
+) -> Result<Vec<CheckinAccount>> {
+    let mut sql = format!("SELECT {} FROM CheckinAccount WHERE 1=1", ACCOUNT_LIST_COLUMNS);
 
-/// 分页查询指定用户的账户
-pub async fn list_accounts_by_user_paginated(db: &SqlitePool, user_id: &str, limit: i32, offset: i32) -> Result<Vec<CheckinAccount>> {
-    let sql = format!("SELECT {} FROM CheckinAccount WHERE ownerId = ? ORDER BY createdAt DESC LIMIT ? OFFSET ?", ACCOUNT_LIST_COLUMNS);
-    let accounts = sqlx::query_as::<_, CheckinAccount>(&sql)
-        .bind(user_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(db)
-        .await?;
+    if owner_id.is_some() {
+        sql.push_str(" AND ownerId = ?");
+    }
+    if site_type.is_some() {
+        sql.push_str(" AND siteType = ?");
+    }
+    if enabled.is_some() {
+        sql.push_str(" AND enabled = ?");
+    }
+    if let Some(status) = last_status {
+        if status == "never" {
+            sql.push_str(" AND lastStatus IS NULL");
+        } else {
+            sql.push_str(" AND lastStatus = ?");
+        }
+    }
+    if keyword.is_some() {
+        sql.push_str(" AND (name LIKE ? OR baseUrl LIKE ?)");
+    }
+
+    sql.push_str(" ORDER BY createdAt DESC LIMIT ? OFFSET ?");
+
+    let mut query = sqlx::query_as::<_, CheckinAccount>(&sql);
+
+    if let Some(oid) = owner_id {
+        query = query.bind(oid);
+    }
+    if let Some(st) = site_type {
+        query = query.bind(st);
+    }
+    if let Some(e) = enabled {
+        query = query.bind(e);
+    }
+    if let Some(status) = last_status {
+        if status != "never" {
+            query = query.bind(status);
+        }
+    }
+    if let Some(kw) = keyword {
+        let pattern = format!("%{}%", kw);
+        query = query.bind(pattern.clone()).bind(pattern);
+    }
+
+    query = query.bind(limit).bind(offset);
+
+    let accounts = query.fetch_all(db).await?;
     Ok(accounts)
 }
 
@@ -184,26 +223,6 @@ pub async fn create_account(
     Ok(account)
 }
 
-pub async fn update_account_status(
-    db: &SqlitePool,
-    id: &str,
-    status: &str,
-    message: Option<&str>,
-) -> Result<()> {
-    let now = Utc::now();
-    sqlx::query(
-        "UPDATE CheckinAccount SET lastStatus = ?, lastMessage = ?, lastRunAt = ?, updatedAt = ? WHERE id = ?"
-    )
-    .bind(status)
-    .bind(message)
-    .bind(now)
-    .bind(now)
-    .bind(id)
-    .execute(db)
-    .await?;
-    Ok(())
-}
-
 pub async fn delete_account(db: &SqlitePool, id: &str) -> Result<()> {
     sqlx::query("DELETE FROM CheckinAccount WHERE id = ?")
         .bind(id)
@@ -213,26 +232,65 @@ pub async fn delete_account(db: &SqlitePool, id: &str) -> Result<()> {
 }
 
 // CheckinRun operations
-pub async fn list_runs(db: &SqlitePool, limit: i32, offset: i32, owner_id: Option<&str>) -> Result<Vec<CheckinRun>> {
-    let runs = if let Some(oid) = owner_id {
-        let sql = format!(
-            "SELECT {} FROM CheckinRun r JOIN CheckinAccount a ON r.accountId = a.id WHERE a.ownerId = ? ORDER BY r.createdAt DESC LIMIT ? OFFSET ?",
+
+/// 带筛选条件的分页查询签到记录
+pub async fn list_runs_filtered(
+    db: &SqlitePool,
+    owner_id: Option<&str>,
+    account_id: Option<&str>,
+    status: Option<&str>,
+    triggered_by: Option<&str>,
+    start_date: Option<&str>,
+    end_date: Option<&str>,
+    limit: i32,
+    offset: i32,
+) -> Result<Vec<CheckinRun>> {
+    // 当需要按 owner_id 筛选时，JOIN CheckinAccount 表
+    let need_join = owner_id.is_some();
+    let prefix = if need_join { "r." } else { "" };
+
+    let mut sql = if need_join {
+        format!(
+            "SELECT {} FROM CheckinRun r JOIN CheckinAccount a ON r.accountId = a.id WHERE 1=1",
             RUN_LIST_COLUMNS.replace("id,", "r.id,").replace("accountId,", "r.accountId,").replace("createdAt", "r.createdAt")
-        );
-        sqlx::query_as::<_, CheckinRun>(&sql)
-            .bind(oid)
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(db)
-            .await?
+        )
     } else {
-        let sql = format!("SELECT {} FROM CheckinRun ORDER BY createdAt DESC LIMIT ? OFFSET ?", RUN_LIST_COLUMNS);
-        sqlx::query_as::<_, CheckinRun>(&sql)
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(db)
-            .await?
+        format!("SELECT {} FROM CheckinRun WHERE 1=1", RUN_LIST_COLUMNS)
     };
+
+    // 动态构建 WHERE 条件
+    if owner_id.is_some() {
+        sql.push_str(" AND a.ownerId = ?");
+    }
+    if account_id.is_some() {
+        sql.push_str(&format!(" AND {}accountId = ?", prefix));
+    }
+    if status.is_some() {
+        sql.push_str(&format!(" AND {}status = ?", prefix));
+    }
+    if triggered_by.is_some() {
+        sql.push_str(&format!(" AND {}triggeredBy = ?", prefix));
+    }
+    if start_date.is_some() {
+        sql.push_str(&format!(" AND {}createdAt >= ?", prefix));
+    }
+    if end_date.is_some() {
+        sql.push_str(&format!(" AND {}createdAt <= ?", prefix));
+    }
+
+    sql.push_str(&format!(" ORDER BY {}createdAt DESC LIMIT ? OFFSET ?", prefix));
+
+    // 按顺序绑定参数
+    let mut query = sqlx::query_as::<_, CheckinRun>(&sql);
+    if let Some(oid) = owner_id { query = query.bind(oid); }
+    if let Some(aid) = account_id { query = query.bind(aid); }
+    if let Some(s) = status { query = query.bind(s); }
+    if let Some(tb) = triggered_by { query = query.bind(tb); }
+    if let Some(sd) = start_date { query = query.bind(sd); }
+    if let Some(ed) = end_date { query = query.bind(ed); }
+    query = query.bind(limit).bind(offset);
+
+    let runs = query.fetch_all(db).await?;
     Ok(runs)
 }
 
@@ -339,6 +397,24 @@ pub async fn ensure_setting_columns(db: &SqlitePool) -> Result<()> {
             return Err(e.into());
         }
     }
+
+    // 筛选功能所需的索引
+    let indexes = [
+        "CREATE INDEX IF NOT EXISTS idx_checkin_account_site_type ON CheckinAccount(siteType)",
+        "CREATE INDEX IF NOT EXISTS idx_checkin_account_last_status ON CheckinAccount(lastStatus)",
+        "CREATE INDEX IF NOT EXISTS idx_checkin_run_triggered_by ON CheckinRun(triggeredBy)",
+        "CREATE INDEX IF NOT EXISTS idx_checkin_run_status_created ON CheckinRun(status, createdAt)",
+    ];
+    for idx_sql in indexes {
+        if let Err(e) = sqlx::query(idx_sql).execute(db).await {
+            let msg = e.to_string();
+            // 忽略已存在的索引错误
+            if !msg.contains("already exists") {
+                tracing::warn!("创建索引失败: {} - {}", idx_sql, e);
+            }
+        }
+    }
+
     Ok(())
 }
 
