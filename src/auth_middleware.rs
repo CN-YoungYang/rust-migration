@@ -38,7 +38,7 @@ pub fn create_session(user_id: &str) -> String {
     let expires_at = SystemTime::now() + session_ttl();
     let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    if sessions.len().is_multiple_of(10) {
+    if sessions.len() % 10 == 0 {
         cleanup_expired_sessions(&mut sessions);
     }
 
