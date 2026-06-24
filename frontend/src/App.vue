@@ -1,5 +1,10 @@
 ﻿<template>
   <div id="app">
+    <!-- 离线提示条 -->
+    <div v-if="!isOnline" class="offline-banner">
+      ⚠️ 网络连接已断开，请检查网络设置
+    </div>
+
     <nav v-if="isLoggedIn" class="navbar">
       <h1>AI Hub</h1>
       <div class="nav-links">
@@ -61,6 +66,7 @@ const loginForm = ref({ username: '', password: '' })
 const error = ref('')
 const serverOk = ref(true)
 const serverTime = ref('')
+const isOnline = ref(navigator.onLine)
 let serverTimeOffset = 0 // 服务器时间与本地时间的差值（毫秒）
 let timeTimer: ReturnType<typeof setInterval> | null = null
 
@@ -160,20 +166,42 @@ onMounted(() => {
   fetchCurrentUser()
   checkHealth()
   fetchServerTime()
-  // 健康检查：每 60 秒
-  healthTimer = setInterval(checkHealth, 60000)
-  // 服务器时间：每秒本地计算，无需请求
-  timeTimer = setInterval(updateDisplayTime, 1000)
+  // 健康检查：每 5 分钟（降低频率，减少不必要的请求）
+  healthTimer = setInterval(checkHealth, 300000)
+  // 服务器时间：每 10 秒更新一次显示（降低 CPU 占用）
+  timeTimer = setInterval(updateDisplayTime, 10000)
+
+  // 离线检测
+  window.addEventListener('online', () => {
+    isOnline.value = true
+    checkHealth() // 恢复在线时立即检查健康状态
+  })
+  window.addEventListener('offline', () => {
+    isOnline.value = false
+  })
 })
 
 onUnmounted(() => {
   if (healthTimer) clearInterval(healthTimer)
   if (timeTimer) clearInterval(timeTimer)
+  window.removeEventListener('online', () => { isOnline.value = true })
+  window.removeEventListener('offline', () => { isOnline.value = false })
 })
 </script>
 
 <style>
 #app { min-height: 100vh; }
+.offline-banner {
+  background: #f59e0b;
+  color: #000;
+  text-align: center;
+  padding: 0.75rem;
+  font-weight: 500;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
 .navbar { background: #1a1a1a; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
 .navbar h1 { font-size: 1.5rem; }
 .nav-links { display: flex; gap: 1rem; }

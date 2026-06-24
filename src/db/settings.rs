@@ -75,7 +75,9 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
     }
 
     let settings = sqlx::query_as::<_, CheckinSetting>(
-        "SELECT * FROM CheckinSetting WHERE id = 'global'"
+        "SELECT id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, \
+         batchDelayMin, batchDelayMax, cleanupKeepLatest, updatedAt \
+         FROM CheckinSetting WHERE id = 'global'"
     )
     .fetch_optional(db)
     .await?;

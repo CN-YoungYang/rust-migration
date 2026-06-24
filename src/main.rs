@@ -67,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState { db: db.clone() });
 
     start_scheduler(db.clone()).await;
+    auth_middleware::start_session_cleanup_task();
 
     // Public routes
     let public_routes = Router::new()

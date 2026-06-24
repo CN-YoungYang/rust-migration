@@ -77,10 +77,14 @@ pub async fn list_enabled_accounts(db: &SqlitePool) -> Result<Vec<CheckinAccount
     Ok(accounts)
 }
 
-/// Find account by ID
+/// Find account by ID (includes encrypted fields for check-in operations)
 pub async fn find_account_by_id(db: &SqlitePool, id: &str) -> Result<Option<CheckinAccount>> {
     let account = sqlx::query_as::<_, CheckinAccount>(
-        "SELECT * FROM CheckinAccount WHERE id = ?"
+        "SELECT id, name, siteType, baseUrl, userId, ownerId, authType, \
+         accessTokenEnc, cookieEnc, customCheckinUrl, enabled, retryEnabled, note, \
+         lastBalance, lastBalanceAt, lastStatus, lastMessage, lastRunAt, \
+         createdAt, updatedAt \
+         FROM CheckinAccount WHERE id = ?"
     )
     .bind(id)
     .fetch_optional(db)
@@ -94,7 +98,14 @@ pub async fn find_accounts_by_ids(db: &SqlitePool, ids: &[String]) -> Result<std
         return Ok(std::collections::HashMap::new());
     }
     let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    let sql = format!("SELECT * FROM CheckinAccount WHERE id IN ({})", placeholders);
+    let sql = format!(
+        "SELECT id, name, siteType, baseUrl, userId, ownerId, authType, \
+         accessTokenEnc, cookieEnc, customCheckinUrl, enabled, retryEnabled, note, \
+         lastBalance, lastBalanceAt, lastStatus, lastMessage, lastRunAt, \
+         createdAt, updatedAt \
+         FROM CheckinAccount WHERE id IN ({})",
+        placeholders
+    );
     let mut query = sqlx::query_as::<_, CheckinAccount>(&sql);
     for id in ids {
         query = query.bind(id);

@@ -16,9 +16,13 @@
             </option>
           </optgroup>
         </select>
-        <button @click="executeCheckin" class="btn-execute" :disabled="!selectedAccountId">执行签到</button>
+        <button @click="executeCheckin" class="btn-execute" :disabled="!selectedAccountId || executing">
+          {{ executing ? '执行中...' : '执行签到' }}
+        </button>
         <input v-model.number="keepLatest" type="number" min="0" max="10000" class="keep-input" title="保留最新记录数（0=清除全部）" />
-        <button @click="cleanupRuns" class="btn-cleanup">清理记录</button>
+        <button @click="cleanupRuns" class="btn-cleanup" :disabled="cleaning">
+          {{ cleaning ? '清理中...' : '清理记录' }}
+        </button>
       </div>
     </div>
 
@@ -139,6 +143,8 @@ const keepLatest = ref(100)
 const runsLoading = ref(false)
 const runsOffset = ref(0)
 const hasMore = ref(true)
+const executing = ref(false)
+const cleaning = ref(false)
 const PAGE_SIZE = 100
 const maxAttemptsPerDay = ref(3)
 
@@ -301,7 +307,7 @@ const fetchSettings = async () => {
 }
 
 const executeCheckin = async () => {
-  if (!selectedAccountId.value) return
+  if (!selectedAccountId.value || executing.value) return
   // 检查是否达到每日上限，达到则弹窗确认
   const account = accounts.value.find((a) => a.id === selectedAccountId.value)
   if (account && (account.todayRuns ?? 0) >= maxAttemptsPerDay.value) {
@@ -310,6 +316,7 @@ const executeCheckin = async () => {
     )
     if (!confirmed) return
   }
+  executing.value = true
   try {
     await request(apiUrl('/checkin-runs'), {
       method: 'POST',
@@ -320,14 +327,18 @@ const executeCheckin = async () => {
     await fetchRuns()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '执行签到失败', 'error')
+  } finally {
+    executing.value = false
   }
 }
 
 const cleanupRuns = async () => {
+  if (cleaning.value) return
   const msg = keepLatest.value === 0
     ? '确定清除全部签到记录吗？此操作不可撤销！'
     : `确定清理记录并保留最新 ${keepLatest.value} 条吗？`
   if (!(await confirmAction(msg))) return
+  cleaning.value = true
   try {
     await request(apiUrl('/checkin-runs/cleanup'), {
       method: 'POST',
@@ -338,6 +349,8 @@ const cleanupRuns = async () => {
     await fetchRuns()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '清理记录失败', 'error')
+  } finally {
+    cleaning.value = false
   }
 }
 

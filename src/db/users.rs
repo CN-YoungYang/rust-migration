@@ -3,10 +3,11 @@ use crate::models::AppUser;
 use crate::error::Result;
 use chrono::Utc;
 
-/// Find user by username
+/// Find user by username (includes password hash for authentication)
 pub async fn find_user_by_username(db: &SqlitePool, username: &str) -> Result<Option<AppUser>> {
     let user = sqlx::query_as::<_, AppUser>(
-        "SELECT * FROM AppUser WHERE username = ?"
+        "SELECT id, username, passwordHash, role, enabled, note, createdAt, updatedAt \
+         FROM AppUser WHERE username = ?"
     )
     .bind(username)
     .fetch_optional(db)
@@ -14,10 +15,11 @@ pub async fn find_user_by_username(db: &SqlitePool, username: &str) -> Result<Op
     Ok(user)
 }
 
-/// Find user by ID
+/// Find user by ID (includes password hash for update operations)
 pub async fn find_user_by_id(db: &SqlitePool, id: &str) -> Result<Option<AppUser>> {
     let user = sqlx::query_as::<_, AppUser>(
-        "SELECT * FROM AppUser WHERE id = ?"
+        "SELECT id, username, passwordHash, role, enabled, note, createdAt, updatedAt \
+         FROM AppUser WHERE id = ?"
     )
     .bind(id)
     .fetch_optional(db)
@@ -25,10 +27,11 @@ pub async fn find_user_by_id(db: &SqlitePool, id: &str) -> Result<Option<AppUser
     Ok(user)
 }
 
-/// List all users
+/// List all users (excludes password hash for security)
 pub async fn list_users(db: &SqlitePool) -> Result<Vec<AppUser>> {
     let users = sqlx::query_as::<_, AppUser>(
-        "SELECT * FROM AppUser ORDER BY createdAt DESC"
+        "SELECT id, username, '' as passwordHash, role, enabled, note, createdAt, updatedAt \
+         FROM AppUser ORDER BY createdAt DESC"
     )
     .fetch_all(db)
     .await?;

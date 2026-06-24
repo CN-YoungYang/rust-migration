@@ -61,7 +61,7 @@
             :disabled="batchLoading"
             @click="batchCheckin(group.items.map((a) => a.id))"
           >
-            该组签到
+            {{ batchLoading ? '执行中...' : '该组签到' }}
           </button>
         </div>
         <article v-for="account in group.items" :key="account.id" class="account-card">

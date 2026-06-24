@@ -38,6 +38,9 @@ pub fn create_session(user_id: &str) -> String {
     let expires_at = SystemTime::now() + session_ttl();
     let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
+    // Periodic cleanup every 10 sessions
+    // Note: Using `% 10 == 0` for Rust 1.86 compatibility (is_multiple_of is nightly-only)
+    #[allow(clippy::manual_is_multiple_of)]
     if sessions.len() % 10 == 0 {
         cleanup_expired_sessions(&mut sessions);
     }
@@ -78,6 +81,29 @@ fn cleanup_expired_sessions(sessions: &mut HashMap<String, SessionEntry>) {
             sessions.remove(&token);
         }
     }
+}
+
+/// Public function for background cleanup task
+pub fn cleanup_all_expired_sessions() {
+    let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let before = sessions.len();
+    cleanup_expired_sessions(&mut sessions);
+    let after = sessions.len();
+    if before > after {
+        tracing::debug!("Session cleanup: removed {} expired sessions ({} -> {})", before - after, before, after);
+    }
+}
+
+/// Start background session cleanup task (runs every 5 minutes)
+pub fn start_session_cleanup_task() {
+    tokio::spawn(async {
+        let mut interval = tokio::time::interval(Duration::from_secs(300)); // 5 minutes
+        loop {
+            interval.tick().await;
+            cleanup_all_expired_sessions();
+        }
+    });
+    tracing::info!("Session cleanup task started (every 5 minutes)");
 }
 
 pub async fn auth_middleware(
