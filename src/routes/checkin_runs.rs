@@ -69,14 +69,16 @@ pub async fn list(
 
     let runs = db::list_runs_filtered(
         &state.db,
-        owner_id,
-        filter_account_id,
-        filter_status,
-        filter_triggered_by,
-        filter_start_date,
-        filter_end_date,
-        limit,
-        offset,
+        &db::RunFilter {
+            owner_id: owner_id.map(|s| s.to_string()),
+            account_id: filter_account_id.map(|s| s.to_string()),
+            status: filter_status.map(|s| s.to_string()),
+            triggered_by: filter_triggered_by.map(|s| s.to_string()),
+            start_date: filter_start_date.map(|s| s.to_string()),
+            end_date: filter_end_date.map(|s| s.to_string()),
+            limit,
+            offset,
+        },
     ).await?;
     Ok(Json(runs))
 }

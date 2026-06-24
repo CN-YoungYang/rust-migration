@@ -1,0 +1,199 @@
+use sqlx::SqlitePool;
+use crate::models::CheckinRun;
+use crate::error::Result;
+use chrono::{Utc, Local, TimeZone};
+use super::types::RunFilter;
+
+/// Column list for run queries (excludes rawResponse to reduce I/O)
+const RUN_LIST_COLUMNS: &str = "\
+    id, accountId, status, message, durationMs, triggeredBy, \
+    NULL as rawResponse, createdAt";
+
+/// List check-in runs with filters and pagination
+pub async fn list_runs_filtered(
+    db: &SqlitePool,
+    filter: &RunFilter,
+) -> Result<Vec<CheckinRun>> {
+    // When filtering by owner_id, JOIN CheckinAccount table
+    let need_join = filter.owner_id.is_some();
+    let prefix = if need_join { "r." } else { "" };
+
+    let mut sql = if need_join {
+        format!(
+            "SELECT {} FROM CheckinRun r JOIN CheckinAccount a ON r.accountId = a.id WHERE 1=1",
+            RUN_LIST_COLUMNS.replace("id,", "r.id,").replace("accountId,", "r.accountId,").replace("createdAt", "r.createdAt")
+        )
+    } else {
+        format!("SELECT {} FROM CheckinRun WHERE 1=1", RUN_LIST_COLUMNS)
+    };
+
+    // Build WHERE conditions dynamically
+    if filter.owner_id.is_some() {
+        sql.push_str(" AND a.ownerId = ?");
+    }
+    if filter.account_id.is_some() {
+        sql.push_str(&format!(" AND {}accountId = ?", prefix));
+    }
+    if filter.status.is_some() {
+        sql.push_str(&format!(" AND {}status = ?", prefix));
+    }
+    if filter.triggered_by.is_some() {
+        sql.push_str(&format!(" AND {}triggeredBy = ?", prefix));
+    }
+    if filter.start_date.is_some() {
+        sql.push_str(&format!(" AND {}createdAt >= ?", prefix));
+    }
+    if filter.end_date.is_some() {
+        sql.push_str(&format!(" AND {}createdAt <= ?", prefix));
+    }
+
+    sql.push_str(&format!(" ORDER BY {}createdAt DESC LIMIT ? OFFSET ?", prefix));
+
+    // Bind parameters in order
+    let mut query = sqlx::query_as::<_, CheckinRun>(&sql);
+    if let Some(ref oid) = filter.owner_id { query = query.bind(oid); }
+    if let Some(ref aid) = filter.account_id { query = query.bind(aid); }
+    if let Some(ref s) = filter.status { query = query.bind(s); }
+    if let Some(ref tb) = filter.triggered_by { query = query.bind(tb); }
+    if let Some(ref sd) = filter.start_date { query = query.bind(sd); }
+    if let Some(ref ed) = filter.end_date { query = query.bind(ed); }
+    query = query.bind(filter.limit).bind(filter.offset);
+
+    let runs = query.fetch_all(db).await?;
+    Ok(runs)
+}
+
+/// Create a check-in run record
+pub async fn create_run(
+    db: &SqlitePool,
+    account_id: &str,
+    status: &str,
+    message: Option<&str>,
+    duration_ms: Option<i64>,
+    triggered_by: &str,
+    raw_response: Option<&str>,
+) -> Result<CheckinRun> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = Utc::now();
+
+    let run = sqlx::query_as::<_, CheckinRun>(
+        "INSERT INTO CheckinRun (id, accountId, status, message, durationMs, triggeredBy, rawResponse, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *"
+    )
+    .bind(&id)
+    .bind(account_id)
+    .bind(status)
+    .bind(message)
+    .bind(duration_ms)
+    .bind(triggered_by)
+    .bind(raw_response)
+    .bind(now)
+    .fetch_one(db)
+    .await?;
+
+    Ok(run)
+}
+
+/// Atomic operation: update account status and create run record in same transaction.
+/// Prevents data inconsistency when update_account_status succeeds but create_run fails.
+pub async fn create_run_with_status_update(
+    db: &SqlitePool,
+    account_id: &str,
+    status: &str,
+    message: Option<&str>,
+    duration_ms: Option<i64>,
+    triggered_by: &str,
+    raw_response: Option<&str>,
+) -> Result<CheckinRun> {
+    let mut tx = db.begin().await?;
+    let now = Utc::now();
+
+    // 1. Update account status
+    sqlx::query(
+        "UPDATE CheckinAccount SET lastStatus = ?, lastMessage = ?, lastRunAt = ?, updatedAt = ? WHERE id = ?"
+    )
+    .bind(status)
+    .bind(message)
+    .bind(now)
+    .bind(now)
+    .bind(account_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // 2. Create run record
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let run = sqlx::query_as::<_, CheckinRun>(
+        "INSERT INTO CheckinRun (id, accountId, status, message, durationMs, triggeredBy, rawResponse, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *"
+    )
+    .bind(&run_id)
+    .bind(account_id)
+    .bind(status)
+    .bind(message)
+    .bind(duration_ms)
+    .bind(triggered_by)
+    .bind(raw_response)
+    .bind(now)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(run)
+}
+
+/// Cleanup old check-in runs, keeping only the latest N records
+pub async fn cleanup_checkin_runs(db: &SqlitePool, keep_latest: usize) -> Result<u64> {
+    if keep_latest == 0 {
+        let result = sqlx::query("DELETE FROM CheckinRun").execute(db).await?;
+        return Ok(result.rows_affected());
+    }
+
+    let result = sqlx::query(
+        "DELETE FROM CheckinRun WHERE id NOT IN (SELECT id FROM CheckinRun ORDER BY createdAt DESC LIMIT ?)"
+    )
+    .bind(keep_latest as i64)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Batch query today's run count per account, returns accountId -> count mapping.
+/// More efficient than per-account COUNT (single SQL replaces N queries).
+pub async fn count_runs_today_batch(db: &SqlitePool) -> Result<std::collections::HashMap<String, i32>> {
+    let local_midnight = Local::now().date_naive().and_hms_opt(0, 0, 0).expect("midnight is always valid");
+    // DST-safe: on spring-forward, midnight may not exist, use earliest() to fallback to 23:00 previous day
+    // This may count a few records from yesterday at most, but won't panic or miss today's records
+    let today_start_utc = Local.from_local_datetime(&local_midnight)
+        .earliest()
+        .unwrap_or_else(|| Local::now().date_naive().and_hms_opt(0, 0, 0).unwrap().and_local_timezone(Local).unwrap())
+        .to_utc();
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT accountId, COUNT(*) FROM CheckinRun WHERE createdAt >= ? GROUP BY accountId"
+    )
+    .bind(today_start_utc)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|(id, cnt)| (id, cnt as i32)).collect())
+}
+
+/// Cleanup check-in runs for a specific user's accounts
+pub async fn cleanup_checkin_runs_by_user(db: &SqlitePool, user_id: &str, keep_latest: usize) -> Result<u64> {
+    let owned = "SELECT id FROM CheckinAccount WHERE ownerId = ?";
+    if keep_latest == 0 {
+        let result = sqlx::query(&format!(
+            "DELETE FROM CheckinRun WHERE accountId IN ({})", owned
+        ))
+        .bind(user_id)
+        .execute(db)
+        .await?;
+        return Ok(result.rows_affected());
+    }
+
+    let result = sqlx::query(&format!(
+        "DELETE FROM CheckinRun WHERE accountId IN ({owned}) AND id NOT IN (SELECT id FROM CheckinRun WHERE accountId IN ({owned}) ORDER BY createdAt DESC LIMIT ?)"
+    ))
+    .bind(user_id)
+    .bind(user_id)
+    .bind(keep_latest as i64)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected())
+}

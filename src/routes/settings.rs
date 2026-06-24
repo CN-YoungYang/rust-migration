@@ -5,7 +5,7 @@ use axum::{
 use std::sync::Arc;
 use crate::{
     AppState,
-    models::{AppUser, CheckinSetting, UpdateSettingsRequest},
+    models::{AppUser, CheckinSetting},
     error::{Result, AppError},
     db,
 };
@@ -29,7 +29,7 @@ pub async fn get(
 pub async fn update(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AppUser>,
-    Json(payload): Json<UpdateSettingsRequest>,
+    Json(payload): Json<db::UpdateSettingsRequest>,
 ) -> Result<Json<CheckinSetting>> {
     require_admin(&user)?;
     if let Some(ref start) = payload.window_start {
@@ -67,14 +67,7 @@ pub async fn update(
 
     let settings = db::update_settings(
         &state.db,
-        payload.enabled,
-        payload.window_start.as_deref(),
-        payload.window_end.as_deref(),
-        payload.retry_enabled,
-        payload.max_attempts_per_day,
-        payload.batch_delay_min,
-        payload.batch_delay_max,
-        payload.cleanup_keep_latest,
+        &payload,
     ).await?;
 
     Ok(Json(settings))

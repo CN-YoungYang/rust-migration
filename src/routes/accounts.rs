@@ -148,13 +148,15 @@ pub async fn list(
 
     let accounts = db::list_accounts_filtered(
         &state.db,
-        owner_id,
-        filter_site_type,
-        filter_enabled,
-        filter_last_status,
-        filter_keyword,
-        limit,
-        offset,
+        &db::AccountFilter {
+            owner_id: owner_id.map(|s| s.to_string()),
+            site_type: filter_site_type.map(|s| s.to_string()),
+            enabled: filter_enabled,
+            last_status: filter_last_status.map(|s| s.to_string()),
+            keyword: filter_keyword.map(|s| s.to_string()),
+            limit,
+            offset,
+        },
     ).await?;
 
     // 轻量查询：只取 id + username，避免拉取 passwordHash 等无关字段
@@ -246,18 +248,20 @@ pub async fn create(
 
     let acc = db::create_account(
         &state.db,
-        &payload.name,
-        &payload.site_type,
-        &payload.base_url,
-        payload.user_id.as_deref(),
-        &auth_type,
-        access_token_enc.as_deref(),
-        cookie_enc.as_deref(),
-        payload.custom_checkin_url.as_deref(),
-        payload.enabled.unwrap_or(true),
-        payload.retry_enabled.unwrap_or(true),
-        &user.id,
-        payload.note.as_deref(),
+        &db::CreateAccountRequest {
+            name: payload.name.clone(),
+            site_type: payload.site_type.clone(),
+            base_url: payload.base_url.clone(),
+            user_id: payload.user_id.clone(),
+            auth_type: auth_type.to_string(),
+            access_token_enc,
+            cookie_enc,
+            custom_checkin_url: payload.custom_checkin_url.clone(),
+            enabled: payload.enabled.unwrap_or(true),
+            retry_enabled: payload.retry_enabled.unwrap_or(true),
+            owner_id: user.id.clone(),
+            note: payload.note.clone(),
+        },
     ).await?;
 
     // The new account is owned by the current user, so we can reuse their username directly.
@@ -339,15 +343,17 @@ pub async fn update(
     let updated = db::update_account(
         &state.db,
         &id,
-        payload.name.as_deref(),
-        payload.base_url.as_deref(),
-        payload.user_id.as_ref().map(|o| o.as_deref()),
-        access_token_enc.as_ref().map(|o| o.as_deref()),
-        cookie_enc.as_ref().map(|o| o.as_deref()),
-        payload.custom_checkin_url.as_ref().map(|o| o.as_deref()),
-        payload.enabled,
-        payload.retry_enabled,
-        payload.note.as_ref().map(|o| o.as_deref()),
+        &db::UpdateAccountRequest {
+            name: payload.name.clone(),
+            base_url: payload.base_url.clone(),
+            user_id: payload.user_id.clone(),
+            access_token_enc,
+            cookie_enc,
+            custom_checkin_url: payload.custom_checkin_url.clone(),
+            enabled: payload.enabled,
+            retry_enabled: payload.retry_enabled,
+            note: payload.note.clone(),
+        },
     ).await?;
 
     // update_account 已返回更新后的账户，无需再次查询

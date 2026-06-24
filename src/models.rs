@@ -187,25 +187,6 @@ pub struct LoginResponse {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdateSettingsRequest {
-    pub enabled: Option<bool>,
-    #[serde(rename = "windowStart")]
-    pub window_start: Option<String>,
-    #[serde(rename = "windowEnd")]
-    pub window_end: Option<String>,
-    #[serde(rename = "retryEnabled")]
-    pub retry_enabled: Option<bool>,
-    #[serde(rename = "maxAttemptsPerDay")]
-    pub max_attempts_per_day: Option<i32>,
-    #[serde(rename = "batchDelayMin")]
-    pub batch_delay_min: Option<i32>,
-    #[serde(rename = "batchDelayMax")]
-    pub batch_delay_max: Option<i32>,
-    #[serde(rename = "cleanupKeepLatest")]
-    pub cleanup_keep_latest: Option<i32>,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct UpdateUserRequest {
     pub username: Option<String>,
     pub password: Option<String>,
