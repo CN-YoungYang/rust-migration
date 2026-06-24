@@ -43,7 +43,7 @@ pub async fn update(
         }
     }
     if let Some(max) = payload.max_attempts_per_day {
-        if max < 1 || max > 100 {
+        if !(1..=100).contains(&max) {
             return Err(AppError::Validation("每天最大尝试次数必须在 1~100 之间".into()));
         }
     }
@@ -60,7 +60,7 @@ pub async fn update(
         return Err(AppError::Validation("batchDelayMin 和 batchDelayMax 必须同时提供".into()));
     }
     if let Some(keep) = payload.cleanup_keep_latest {
-        if keep < 0 || keep > 10000 {
+        if !(0..=10000).contains(&keep) {
             return Err(AppError::Validation("cleanupKeepLatest 必须在 0~10000 之间（0 表示清除全部）".into()));
         }
     }

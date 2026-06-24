@@ -194,13 +194,13 @@ pub async fn checkin(
     let client = http_client();
 
     let (mut status, mut text, mut content_type) =
-        post_checkin(&client, &url, base_url, user_id, cookie, profile).await?;
+        post_checkin(client, &url, base_url, user_id, cookie, profile).await?;
 
     if is_challenge_page(&text, content_type.as_deref()) {
         match solve_acw_sc_v2(&text) {
             Some(acw_sc_v2) => {
                 let merged = merge_cookie(cookie, "acw_sc__v2", &acw_sc_v2);
-                let (s, t, ct) = post_checkin(&client, &url, base_url, user_id, Some(&merged), profile).await?;
+                let (s, t, ct) = post_checkin(client, &url, base_url, user_id, Some(&merged), profile).await?;
                 status = s;
                 text = t;
                 content_type = ct;

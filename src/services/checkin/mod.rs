@@ -82,6 +82,7 @@ pub fn random_browser_profile() -> &'static BrowserProfile {
 /// - User-Agent（覆盖 client 单例默认 UA）
 /// - sec-ch-ua / sec-ch-ua-mobile / sec-ch-ua-platform（Chromium 客户端提示）
 /// - Accept-Language（缺失是最常见的 bot 特征之一）
+///
 /// 注意：Sec-Fetch-* 和 Referer 因请求上下文而异，由调用方按需补。
 pub fn apply_browser_headers(
     req: reqwest::RequestBuilder,

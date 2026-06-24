@@ -140,7 +140,7 @@ pub async fn execute_batch(
             .to_string();
 
         // 跳过今日已签/已禁用/不允许重试
-        if let Some(reason) = skip_reason_for_batch(&account, &settings, today_local) {
+        if let Some(reason) = skip_reason_for_batch(account, &settings, today_local) {
             items.push(BatchResultItem {
                 account_id: account_id.clone(),
                 account_name: account_name.clone(),
@@ -242,7 +242,7 @@ pub async fn cleanup_runs(
     Json(payload): Json<serde_json::Value>,
 ) -> Result<Json<Value>> {
     let keep_latest_raw = payload["keepLatest"].as_i64().unwrap_or(100);
-    if keep_latest_raw < 0 || keep_latest_raw > 10000 {
+    if !(0..=10000).contains(&keep_latest_raw) {
         return Err(crate::error::AppError::Validation(
             format!("keepLatest 必须在 0~10000 之间（0 表示清除全部），收到 {}", keep_latest_raw)
         ));
