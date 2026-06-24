@@ -14,7 +14,12 @@
         <button @click="currentView = 'users'" :class="{ active: currentView === 'users' }" v-if="isAdmin">用户管理</button>
         <button @click="logout" class="btn-logout">退出</button>
       </div>
-      <div class="server-status" :title="serverTime || '服务器时间'">
+      <div
+        class="server-status"
+        :title="serverTime || '服务器时间'"
+        @mouseenter="startHoverTimer"
+        @mouseleave="stopHoverTimer"
+      >
         <span class="status-dot" :class="serverOk ? 'online' : 'offline'"></span>
         <span class="status-text">{{ serverOk ? '在线' : '离线' }}</span>
       </div>
@@ -68,7 +73,7 @@ const serverOk = ref(true)
 const serverTime = ref('')
 const isOnline = ref(navigator.onLine)
 let serverTimeOffset = 0 // 服务器时间与本地时间的差值（毫秒）
-let timeTimer: ReturnType<typeof setInterval> | null = null
+let hoverTimer: ReturnType<typeof setInterval> | null = null
 
 const isAdmin = computed(() => {
   return currentUser.value?.role === 'ADMIN' || currentUser.value?.role === 'SUPER_ADMIN'
@@ -162,14 +167,29 @@ const fetchServerTime = async () => {
   }
 }
 
+const startHoverTimer = () => {
+  // 鼠标悬停时启动 1 秒定时器，流畅显示服务器时间
+  if (hoverTimer) return
+  updateDisplayTime() // 立即更新一次
+  hoverTimer = setInterval(updateDisplayTime, 1000)
+}
+
+const stopHoverTimer = () => {
+  // 鼠标移开时停止定时器
+  if (hoverTimer) {
+    clearInterval(hoverTimer)
+    hoverTimer = null
+  }
+}
+
 onMounted(() => {
   fetchCurrentUser()
   checkHealth()
   fetchServerTime()
   // 健康检查：每 5 分钟（降低频率，减少不必要的请求）
   healthTimer = setInterval(checkHealth, 300000)
-  // 服务器时间：每 10 秒更新一次显示（降低 CPU 占用）
-  timeTimer = setInterval(updateDisplayTime, 10000)
+  // 每 5 分钟重新同步一次服务器时间，防止本地时钟漂移
+  setInterval(fetchServerTime, 300000)
 
   // 离线检测
   window.addEventListener('online', () => {
@@ -183,7 +203,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (healthTimer) clearInterval(healthTimer)
-  if (timeTimer) clearInterval(timeTimer)
+  if (hoverTimer) clearInterval(hoverTimer)
   window.removeEventListener('online', () => { isOnline.value = true })
   window.removeEventListener('offline', () => { isOnline.value = false })
 })
