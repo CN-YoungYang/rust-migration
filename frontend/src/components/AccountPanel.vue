@@ -8,6 +8,8 @@
           <option v-if="usersLoading" disabled>加载中...</option>
           <option v-for="u in allUsers" :key="u.id" :value="u.id">{{ u.username }}</option>
         </select>
+        <button class="secondary" @click="exportAccounts" :disabled="loading">导出 CSV</button>
+        <button class="secondary" @click="openImportDialog">导入 CSV</button>
         <button
           v-if="accounts.length > 0"
           class="primary"
@@ -35,9 +37,10 @@
       </select>
       <select v-model="filterLastStatus" class="filter-select">
         <option value="">全部签到状态</option>
+        <option value="not_today">今日未签到</option>
         <option value="success">成功</option>
         <option value="failed">失败</option>
-        <option value="never">未签到</option>
+        <option value="never">从未签到</option>
       </select>
       <input
         v-model="filterKeyword"
@@ -117,12 +120,58 @@
         </div>
       </form>
     </div>
+
+    <!-- 导入对话框 -->
+    <div v-if="showImportDialog" class="modal" @click.self="closeImportDialog">
+      <div class="modal-content import-dialog">
+        <h3>批量导入账户</h3>
+        <p class="muted">支持 CSV 格式，需包含 header 行</p>
+
+        <div class="import-instructions">
+          <h4>CSV 格式说明</h4>
+          <p>必填字段：name, siteType, baseUrl, authType</p>
+          <p>可选字段：userId, accessToken, cookie, customCheckinUrl, enabled, retryEnabled, note</p>
+          <details>
+            <summary>查看示例</summary>
+            <pre>name,siteType,baseUrl,authType,accessToken,cookie,enabled
+测试账户,new-api,https://api.example.com,access_token,sk-xxx,,true</pre>
+          </details>
+        </div>
+
+        <input
+          type="file"
+          accept=".csv"
+          @change="handleFileSelect"
+          class="file-input"
+        />
+
+        <div v-if="importResult" class="import-result">
+          <p class="success" v-if="importResult.success > 0">✅ 成功导入 {{ importResult.success }} 个账户</p>
+          <p class="error" v-if="importResult.failed > 0">❌ 失败 {{ importResult.failed }} 个</p>
+          <div v-if="importResult.errors.length > 0" class="error-list">
+            <details>
+              <summary>查看错误详情</summary>
+              <ul>
+                <li v-for="(err, idx) in importResult.errors" :key="idx">{{ err }}</li>
+              </ul>
+            </details>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" @click="closeImportDialog">关闭</button>
+          <button type="button" class="primary" @click="executeImport" :disabled="!selectedFile || importing">
+            {{ importing ? '导入中...' : '开始导入' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { apiUrl, authHeaders, request } from '../utils/api'
+import { apiUrl, authHeaders, request, responseData } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
 import type { CurrentUser, Account, AccountGroup } from '../types'
 import { useUsers } from '../composables/useUsers'
@@ -181,12 +230,12 @@ async function batchCheckin(accountIds: string[]) {
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ accountIds }),
     })
-    const result = await response.json() as {
+    const result = await responseData<{
       total: number
       succeeded: number
       skipped: number
       failed: number
-    }
+    }>(response)
     showToast(
       `批量签到完成：成功 ${result.succeeded}，跳过 ${result.skipped}，失败 ${result.failed}`,
       result.failed > 0 ? 'error' : 'success',
@@ -279,7 +328,7 @@ async function loadAccounts() {
     }
 
     const response = await request(url, { headers: authHeaders() })
-    accounts.value = await response.json()
+    accounts.value = await responseData<Account[]>(response)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '加载账户失败', 'error')
   } finally {
@@ -366,6 +415,103 @@ async function refreshBalance(id: string) {
   }
 }
 
+// 导入导出功能
+const showImportDialog = ref(false)
+const selectedFile = ref<File | null>(null)
+const importing = ref(false)
+const importResult = ref<{
+  success: number
+  failed: number
+  errors: string[]
+} | null>(null)
+
+function openImportDialog() {
+  showImportDialog.value = true
+  importResult.value = null
+  selectedFile.value = null
+}
+
+function closeImportDialog() {
+  showImportDialog.value = false
+  importResult.value = null
+  selectedFile.value = null
+}
+
+function handleFileSelect(event: Event) {
+  const target = event.target as HTMLInputElement
+  if (target.files && target.files.length > 0) {
+    selectedFile.value = target.files[0]
+    importResult.value = null
+  }
+}
+
+async function executeImport() {
+  if (!selectedFile.value) return
+
+  importing.value = true
+  try {
+    const reader = new FileReader()
+    reader.onload = async (e) => {
+      const csvContent = e.target?.result as string
+      const response = await request(apiUrl('/accounts/import'), {
+        method: 'POST',
+        headers: {
+          ...authHeaders(),
+          'Content-Type': 'text/csv',
+        },
+        body: csvContent,
+      })
+
+      importResult.value = await responseData<{
+        success: number
+        failed: number
+        errors: string[]
+      }>(response)
+
+      if (importResult.value && importResult.value.success > 0) {
+        showToast(`成功导入 ${importResult.value.success} 个账户`, 'success')
+        await loadAccounts()
+      }
+
+      if (importResult.value && importResult.value.failed > 0) {
+        showToast(`${importResult.value.failed} 个账户导入失败`, 'error')
+      }
+    }
+
+    reader.onerror = () => {
+      showToast('读取文件失败', 'error')
+    }
+
+    reader.readAsText(selectedFile.value)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '导入失败', 'error')
+  } finally {
+    importing.value = false
+  }
+}
+
+async function exportAccounts() {
+  try {
+    const response = await request(apiUrl('/accounts/export'), {
+      headers: authHeaders(),
+    })
+
+    const blob = await response.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `ai-hub-accounts-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+
+    showToast('导出成功', 'success')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '导出失败', 'error')
+  }
+}
+
 onMounted(() => {
   loadAccounts()
   loadUsers()
@@ -417,4 +563,25 @@ label { display: grid; gap: .35rem; color: #d1d5db; }
 label.inline { display: flex; align-items: center; gap: .5rem; }
 input, select, textarea { background: #0b1220; border: 1px solid #374151; border-radius: 4px; color: white; padding: .55rem; }
 .modal-actions { display: flex; gap: .75rem; justify-content: flex-end; margin-top: .5rem; }
+
+/* 导入对话框样式 */
+.import-dialog { max-width: 600px; }
+.import-instructions { background: #1f2937; border: 1px solid #374151; border-radius: 6px; padding: 1rem; margin: 1rem 0; }
+.import-instructions h4 { margin: 0 0 0.5rem 0; color: #f3f4f6; font-size: 0.95rem; }
+.import-instructions p { margin: 0.25rem 0; font-size: 0.85rem; color: #9ca3af; }
+.import-instructions details { margin-top: 0.5rem; }
+.import-instructions summary { cursor: pointer; color: #60a5fa; font-size: 0.85rem; }
+.import-instructions pre { background: #0b1220; padding: 0.75rem; border-radius: 4px; overflow-x: auto; margin-top: 0.5rem; font-size: 0.8rem; }
+.file-input { padding: 0.5rem; background: #1f2937; border: 1px dashed #4b5563; border-radius: 4px; cursor: pointer; }
+.file-input::-webkit-file-upload-button { background: #374151; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; margin-right: 1rem; }
+.import-result { background: #1f2937; border-radius: 6px; padding: 1rem; margin: 1rem 0; }
+.import-result .success { color: #10b981; margin: 0.25rem 0; }
+.import-result .error { color: #ef4444; margin: 0.25rem 0; }
+.error-list { margin-top: 0.5rem; }
+.error-list details { cursor: pointer; }
+.error-list summary { color: #f97316; font-size: 0.9rem; }
+.error-list ul { margin: 0.5rem 0 0 0; padding-left: 1.5rem; max-height: 200px; overflow-y: auto; }
+.error-list li { color: #fca5a5; font-size: 0.85rem; margin: 0.25rem 0; }
+button.secondary { background: #4b5563; }
+button.secondary:hover { background: #6b7280; }
 </style>

@@ -1,16 +1,16 @@
+use super::providers::{anyrouter, new_api, x666};
+use super::BrowserProfile;
+use crate::{
+    crypto::decrypt,
+    db,
+    error::{AppError, Result},
+    models::{CheckinAccount, CheckinRun, CheckinSetting},
+};
+use chrono::Local;
 use sqlx::SqlitePool;
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
-use chrono::Local;
-use crate::{
-    models::{CheckinAccount, CheckinRun, CheckinSetting},
-    error::{Result, AppError},
-    crypto::decrypt,
-    db,
-};
-use super::BrowserProfile;
-use super::providers::{new_api, anyrouter, x666};
 
 // ── 防并发签到：同一账户同时只能有一个签到任务在执行 ──────────────────────
 // 定时签到、手动单个签到、手动批量签到共用此锁，避免同一账户被重复签到。
@@ -27,18 +27,24 @@ struct InFlightGuard {
 impl InFlightGuard {
     /// 尝试获取指定账户的签到锁。返回 `None` 表示该账户正在签到中。
     fn try_acquire(account_id: &str) -> Option<Self> {
-        let mut set = in_flight_accounts().lock().unwrap_or_else(|e| e.into_inner());
+        let mut set = in_flight_accounts()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if set.contains(account_id) {
             return None;
         }
         set.insert(account_id.to_string());
-        Some(InFlightGuard { account_id: account_id.to_string() })
+        Some(InFlightGuard {
+            account_id: account_id.to_string(),
+        })
     }
 }
 
 impl Drop for InFlightGuard {
     fn drop(&mut self) {
-        let mut set = in_flight_accounts().lock().unwrap_or_else(|e| e.into_inner());
+        let mut set = in_flight_accounts()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         set.remove(&self.account_id);
     }
 }
@@ -90,7 +96,14 @@ pub async fn execute_checkin(
     let _guard = match InFlightGuard::try_acquire(account_id) {
         Some(g) => g,
         None => {
-            return create_failed_run(db, account_id, "该账户正在签到中，请稍后再试", triggered_by, start).await;
+            return create_failed_run(
+                db,
+                account_id,
+                "该账户正在签到中，请稍后再试",
+                triggered_by,
+                start,
+            )
+            .await;
         }
     };
 
@@ -118,7 +131,10 @@ pub async fn execute_checkin(
         "new-api" => execute_new_api_checkin(&account, profile).await,
         "anyrouter" => execute_anyrouter_checkin(&account, profile).await,
         "x666" => execute_x666_checkin(&account, profile).await,
-        _ => Err(AppError::Validation(format!("不支持的站点类型: {}", account.site_type))),
+        _ => Err(AppError::Validation(format!(
+            "不支持的站点类型: {}",
+            account.site_type
+        ))),
     };
 
     let duration_ms = start.elapsed().as_millis().min(i64::MAX as u128) as i64;
@@ -127,9 +143,13 @@ pub async fn execute_checkin(
         Ok((status, message, raw_response)) => {
             // 签到成功或今日已签时刷新余额（参考 Next.js runner.ts）
             // 余额刷新失败不影响签到结果，仅在消息中追加提示
-            let final_message = if status.as_str() == "success" || status.as_str() == "already_checked" {
+            let mut notification_balance = account.last_balance;
+            let final_message = if status.as_str() == "success"
+                || status.as_str() == "already_checked"
+            {
                 match fetch_account_balance(&account, profile).await {
                     Ok(quota) => {
+                        notification_balance = Some(quota);
                         if let Err(e) = db::update_account_balance(db, account_id, quota).await {
                             tracing::warn!(account_id = %account_id, error = %e, "签到后余额写库失败");
                         }
@@ -146,27 +166,50 @@ pub async fn execute_checkin(
             };
 
             // 原子操作：状态更新 + 记录创建放在同一个事务中，避免部分失败
-            db::create_run_with_status_update(
-                db, account_id, &status, Some(&final_message),
-                Some(duration_ms), triggered_by, raw_response.as_deref(),
-            ).await
+            let run = db::create_run_with_status_update(
+                db,
+                account_id,
+                &status,
+                Some(&final_message),
+                Some(duration_ms),
+                triggered_by,
+                raw_response.as_deref(),
+            )
+            .await?;
+            handle_notifications(db, &account, &status, &final_message, notification_balance).await;
+            Ok(run)
         }
         Err(e) => {
             let msg = e.to_string();
-            db::create_run_with_status_update(
-                db, account_id, "failed", Some(&msg),
-                Some(duration_ms), triggered_by, None,
-            ).await
+            let run = db::create_run_with_status_update(
+                db,
+                account_id,
+                "failed",
+                Some(&msg),
+                Some(duration_ms),
+                triggered_by,
+                None,
+            )
+            .await?;
+            handle_notifications(db, &account, "failed", &msg, account.last_balance).await;
+            Ok(run)
         }
     }
 }
 
-async fn execute_new_api_checkin(account: &CheckinAccount, profile: &BrowserProfile) -> Result<(String, String, Option<String>)> {
+async fn execute_new_api_checkin(
+    account: &CheckinAccount,
+    profile: &BrowserProfile,
+) -> Result<(String, String, Option<String>)> {
     // access_token 与 cookie 均可选，按实际配置传递（参考 Next.js runProvider）
-    let access_token = account.access_token_enc.as_ref()
+    let access_token = account
+        .access_token_enc
+        .as_ref()
         .map(|t| decrypt(t))
         .transpose()?;
-    let cookie = account.cookie_enc.as_ref()
+    let cookie = account
+        .cookie_enc
+        .as_ref()
         .map(|c| decrypt(c))
         .transpose()?;
 
@@ -180,7 +223,10 @@ async fn execute_new_api_checkin(account: &CheckinAccount, profile: &BrowserProf
     .await
 }
 
-async fn execute_anyrouter_checkin(account: &CheckinAccount, profile: &BrowserProfile) -> Result<(String, String, Option<String>)> {
+async fn execute_anyrouter_checkin(
+    account: &CheckinAccount,
+    profile: &BrowserProfile,
+) -> Result<(String, String, Option<String>)> {
     let cookie = if let Some(enc) = &account.cookie_enc {
         Some(decrypt(enc)?)
     } else {
@@ -197,24 +243,38 @@ async fn execute_anyrouter_checkin(account: &CheckinAccount, profile: &BrowserPr
     .await
 }
 
-async fn execute_x666_checkin(account: &CheckinAccount, profile: &BrowserProfile) -> Result<(String, String, Option<String>)> {
+async fn execute_x666_checkin(
+    account: &CheckinAccount,
+    profile: &BrowserProfile,
+) -> Result<(String, String, Option<String>)> {
     let cookie = if let Some(enc) = &account.cookie_enc {
         decrypt(enc)?
     } else {
         return Err(AppError::Validation("必须填写 cookie".into()));
     };
 
-    x666::checkin(&account.base_url, &cookie, account.custom_checkin_url.as_deref(), profile).await
+    x666::checkin(
+        &account.base_url,
+        &cookie,
+        account.custom_checkin_url.as_deref(),
+        profile,
+    )
+    .await
 }
 
 /// 查询账户余额（quota），供签到成功后刷新使用（参考 Next.js runner.ts fetchAccountBalance）。
 /// - x666: 仅 cookie
 /// - arrouter: userId + cookie（不传 access_token）
 /// - new-api 及其他: userId + access_token + cookie
-pub async fn fetch_account_balance(account: &CheckinAccount, profile: &BrowserProfile) -> Result<f64> {
+pub async fn fetch_account_balance(
+    account: &CheckinAccount,
+    profile: &BrowserProfile,
+) -> Result<f64> {
     match account.site_type.as_str() {
         "x666" => {
-            let enc = account.cookie_enc.as_ref()
+            let enc = account
+                .cookie_enc
+                .as_ref()
                 .ok_or_else(|| AppError::Validation("未配置 cookie".into()))?;
             let cookie = decrypt(enc)?;
             x666::fetch_balance(Some(&account.base_url), Some(&cookie), profile)
@@ -222,7 +282,9 @@ pub async fn fetch_account_balance(account: &CheckinAccount, profile: &BrowserPr
                 .map_err(|e| AppError::Internal(e.to_string()))
         }
         "anyrouter" => {
-            let cookie = account.cookie_enc.as_ref()
+            let cookie = account
+                .cookie_enc
+                .as_ref()
                 .map(|c| decrypt(c))
                 .transpose()?;
             // anyrouter 余额查询不带 access_token，仅 cookie（与 Next.js 对齐）
@@ -238,10 +300,14 @@ pub async fn fetch_account_balance(account: &CheckinAccount, profile: &BrowserPr
         }
         _ => {
             // new-api 及其他类型
-            let access_token = account.access_token_enc.as_ref()
+            let access_token = account
+                .access_token_enc
+                .as_ref()
                 .map(|t| decrypt(t))
                 .transpose()?;
-            let cookie = account.cookie_enc.as_ref()
+            let cookie = account
+                .cookie_enc
+                .as_ref()
                 .map(|c| decrypt(c))
                 .transpose()?;
             new_api::fetch_balance(
@@ -265,5 +331,95 @@ async fn create_failed_run(
     start: Instant,
 ) -> Result<CheckinRun> {
     let duration_ms = start.elapsed().as_millis().min(i64::MAX as u128) as i64;
-    db::create_run(db, account_id, "failed", Some(message), Some(duration_ms), triggered_by, None).await
+    db::create_run(
+        db,
+        account_id,
+        "failed",
+        Some(message),
+        Some(duration_ms),
+        triggered_by,
+        None,
+    )
+    .await
+}
+
+async fn handle_notifications(
+    db: &SqlitePool,
+    account: &CheckinAccount,
+    status: &str,
+    message: &str,
+    balance: Option<f64>,
+) {
+    let Some(owner_id) = account.owner_id.as_deref() else {
+        return;
+    };
+
+    let consecutive_failures = if status == "failed" {
+        match db::increment_failure_counter(db, &account.id).await {
+            Ok(count) => count,
+            Err(e) => {
+                tracing::warn!(account_id = %account.id, error = %e, "更新失败计数失败");
+                return;
+            }
+        }
+    } else {
+        if let Err(e) = db::reset_failure_counter(db, &account.id).await {
+            tracing::warn!(account_id = %account.id, error = %e, "重置失败计数失败");
+        }
+        0
+    };
+
+    let configs = match db::list_notifications(db, owner_id).await {
+        Ok(configs) => configs,
+        Err(e) => {
+            tracing::warn!(account_id = %account.id, owner_id = %owner_id, error = %e, "读取通知配置失败");
+            return;
+        }
+    };
+
+    if configs.is_empty() {
+        return;
+    }
+
+    let payload = crate::services::notification::NotificationPayload {
+        account_name: account.name.clone(),
+        site_type: account.site_type.clone(),
+        base_url: account.base_url.clone(),
+        status: status.to_string(),
+        message: message.to_string(),
+        balance,
+        consecutive_failures,
+    };
+
+    let mut sent_any = false;
+    for config in configs {
+        if !crate::services::notification::should_notify(&config, &payload) {
+            continue;
+        }
+
+        match crate::services::notification::send_notification(&config, &payload).await {
+            Ok(()) => {
+                sent_any = true;
+                tracing::info!(
+                    account_id = %account.id,
+                    notify_type = %config.notify_type,
+                    "签到通知已发送"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    account_id = %account.id,
+                    notify_type = %config.notify_type,
+                    error = %e,
+                    "签到通知发送失败"
+                );
+            }
+        }
+    }
+
+    if sent_any {
+        if let Err(e) = db::update_last_notified(db, &account.id).await {
+            tracing::warn!(account_id = %account.id, error = %e, "更新通知时间失败");
+        }
+    }
 }

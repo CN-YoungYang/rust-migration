@@ -10,6 +10,8 @@
       <div class="nav-links">
         <button @click="currentView = 'accounts'" :class="{ active: currentView === 'accounts' }">账户管理</button>
         <button @click="currentView = 'runs'" :class="{ active: currentView === 'runs' }">签到记录</button>
+        <button @click="currentView = 'statistics'" :class="{ active: currentView === 'statistics' }">数据统计</button>
+        <button @click="currentView = 'notifications'" :class="{ active: currentView === 'notifications' }">通知设置</button>
         <button @click="currentView = 'settings'" :class="{ active: currentView === 'settings' }" v-if="isAdmin">全局设置</button>
         <button @click="currentView = 'users'" :class="{ active: currentView === 'users' }" v-if="isAdmin">用户管理</button>
         <button @click="logout" class="btn-logout">退出</button>
@@ -43,6 +45,8 @@
       <div v-else>
         <AccountPanel v-if="currentView === 'accounts'" :current-user="currentUser" :is-admin="isAdmin" />
         <CheckinRunsPanel v-else-if="currentView === 'runs'" :current-user="currentUser" :is-admin="isAdmin" />
+        <StatisticsPanel v-else-if="currentView === 'statistics'" />
+        <NotificationPanel v-else-if="currentView === 'notifications'" />
         <SettingsPanel v-else-if="currentView === 'settings' && isAdmin" />
         <AdminUserPanel v-else-if="currentView === 'users'" :current-user="currentUser" />
       </div>
@@ -54,9 +58,11 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import AccountPanel from './components/AccountPanel.vue'
 import CheckinRunsPanel from './components/CheckinRunsPanel.vue'
+import StatisticsPanel from './components/StatisticsPanel.vue'
+import NotificationPanel from './components/NotificationPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import AdminUserPanel from './components/AdminUserPanel.vue'
-import { apiUrl, getToken, request } from './utils/api'
+import { apiUrl, request, responseData } from './utils/api'
 interface AppUser {
   id: string
   username: string
@@ -74,6 +80,7 @@ const serverTime = ref('')
 const isOnline = ref(navigator.onLine)
 let serverTimeOffset = 0 // 服务器时间与本地时间的差值（毫秒）
 let hoverTimer: ReturnType<typeof setInterval> | null = null
+let serverTimeSyncTimer: ReturnType<typeof setInterval> | null = null
 
 const isAdmin = computed(() => {
   return currentUser.value?.role === 'ADMIN' || currentUser.value?.role === 'SUPER_ADMIN'
@@ -87,8 +94,7 @@ const login = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(loginForm.value)
     })
-    const data = await res.json()
-    localStorage.setItem('token', data.token)
+    await res.json()
     await fetchCurrentUser()
     isLoggedIn.value = true
   } catch (e) {
@@ -97,36 +103,23 @@ const login = async () => {
 }
 
 const fetchCurrentUser = async () => {
-  const token = getToken()
-  if (!token) return
-
   try {
-    const res = await request(apiUrl('/auth/me'), {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    const data = await res.json()
+    const res = await request(apiUrl('/auth/me'))
+    const data = await responseData<{ user: AppUser | null }>(res)
     currentUser.value = data.user
     isLoggedIn.value = !!data.user
   } catch {
-    localStorage.removeItem('token')
     isLoggedIn.value = false
     currentUser.value = null
   }
 }
 
 const logout = async () => {
-  const token = getToken()
-  if (token) {
-    try {
-      await request(apiUrl('/auth/logout'), {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-    } catch {
-      // 本地退出优先，不阻塞用户操作
-    }
+  try {
+    await request(apiUrl('/auth/logout'), { method: 'POST' })
+  } catch {
+    // 本地退出优先，不阻塞用户操作
   }
-  localStorage.removeItem('token')
   isLoggedIn.value = false
   currentUser.value = null
   currentView.value = 'accounts'
@@ -154,7 +147,7 @@ const fetchServerTime = async () => {
     const localBefore = Date.now()
     const res = await fetch(apiUrl('/server-time'), { signal: AbortSignal.timeout(5000) })
     if (res.ok) {
-      const data = await res.json()
+      const data = await responseData<{ serverTime: string }>(res)
       const serverMs = new Date(data.serverTime).getTime()
       const localAfter = Date.now()
       // 补偿网络延迟：取请求前后本地时间的中点
@@ -182,6 +175,15 @@ const stopHoverTimer = () => {
   }
 }
 
+const handleOnline = () => {
+  isOnline.value = true
+  checkHealth()
+}
+
+const handleOffline = () => {
+  isOnline.value = false
+}
+
 onMounted(() => {
   fetchCurrentUser()
   checkHealth()
@@ -189,23 +191,19 @@ onMounted(() => {
   // 健康检查：每 5 分钟（降低频率，减少不必要的请求）
   healthTimer = setInterval(checkHealth, 300000)
   // 每 5 分钟重新同步一次服务器时间，防止本地时钟漂移
-  setInterval(fetchServerTime, 300000)
+  serverTimeSyncTimer = setInterval(fetchServerTime, 300000)
 
   // 离线检测
-  window.addEventListener('online', () => {
-    isOnline.value = true
-    checkHealth() // 恢复在线时立即检查健康状态
-  })
-  window.addEventListener('offline', () => {
-    isOnline.value = false
-  })
+  window.addEventListener('online', handleOnline)
+  window.addEventListener('offline', handleOffline)
 })
 
 onUnmounted(() => {
   if (healthTimer) clearInterval(healthTimer)
   if (hoverTimer) clearInterval(hoverTimer)
-  window.removeEventListener('online', () => { isOnline.value = true })
-  window.removeEventListener('offline', () => { isOnline.value = false })
+  if (serverTimeSyncTimer) clearInterval(serverTimeSyncTimer)
+  window.removeEventListener('online', handleOnline)
+  window.removeEventListener('offline', handleOffline)
 })
 </script>
 

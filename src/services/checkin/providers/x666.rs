@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
+use super::super::{http_client, BrowserProfile};
+use super::{format_awarded_quota, is_already_checked_message, read_number};
 use crate::error::Result;
-use super::super::{BrowserProfile, http_client};
-use super::{format_awarded_quota, read_number, is_already_checked_message};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct X666Response {
@@ -55,8 +55,17 @@ fn with_awarded_quota(message: String, text: &str) -> String {
     }
 }
 
-pub async fn checkin(base_url: &str, cookie: &str, custom_url: Option<&str>, profile: &BrowserProfile) -> Result<(String, String, Option<String>)> {
-    let effective_base = if base_url.is_empty() { DEFAULT_BASE_URL } else { base_url };
+pub async fn checkin(
+    base_url: &str,
+    cookie: &str,
+    custom_url: Option<&str>,
+    profile: &BrowserProfile,
+) -> Result<(String, String, Option<String>)> {
+    let effective_base = if base_url.is_empty() {
+        DEFAULT_BASE_URL
+    } else {
+        base_url
+    };
     let url = match custom_url {
         Some(cu) if !cu.is_empty() => cu.to_string(),
         _ => join_url(effective_base, DEFAULT_CHECKIN_PATH),
@@ -65,7 +74,8 @@ pub async fn checkin(base_url: &str, cookie: &str, custom_url: Option<&str>, pro
     let client = http_client();
 
     let req = super::super::apply_browser_headers(
-        client.post(&url)
+        client
+            .post(&url)
             .header("Cookie", cookie)
             .header("Accept", "*/*")
             .header("Origin", effective_base.trim_end_matches('/'))
@@ -84,14 +94,14 @@ pub async fn checkin(base_url: &str, cookie: &str, custom_url: Option<&str>, pro
 
     // 尝试解析 JSON，失败时创建包含原始文本的 payload
     let payload: Option<X666Response> = serde_json::from_str(&text).ok();
-    
+
     // 如果 JSON 解析失败但有文本内容，将文本作为 message 处理
     let response_msg = if let Some(ref p) = payload {
         let msg = normalize_message(p.message.as_ref().or(p.error.as_ref()));
-        if msg.is_empty() { 
-            text.clone() 
-        } else { 
-            msg 
+        if msg.is_empty() {
+            text.clone()
+        } else {
+            msg
         }
     } else {
         text.clone()
@@ -99,32 +109,55 @@ pub async fn checkin(base_url: &str, cookie: &str, custom_url: Option<&str>, pro
 
     // 先检查是否已签到（不管状态码）
     if is_already_checked_message(&response_msg) {
-        return Ok(("already_checked".to_string(), with_awarded_quota(response_msg, &text), Some(text)));
+        return Ok((
+            "already_checked".to_string(),
+            with_awarded_quota(response_msg, &text),
+            Some(text),
+        ));
     }
 
     // 检查 HTTP 状态码
     if !status_code.is_success() {
-        return Ok(("failed".to_string(), format!("签到请求失败：HTTP {}", status_code), Some(text)));
+        return Ok((
+            "failed".to_string(),
+            format!("签到请求失败：HTTP {}", status_code),
+            Some(text),
+        ));
     }
 
     // 检查 success 字段
     if payload.as_ref().and_then(|p| p.success).unwrap_or(false) {
-        return Ok(("success".to_string(), with_awarded_quota(response_msg, &text), Some(text)));
+        return Ok((
+            "success".to_string(),
+            with_awarded_quota(response_msg, &text),
+            Some(text),
+        ));
     }
 
     // 默认失败
-    Ok(("failed".to_string(), format!("签到失败：{}", response_msg), Some(text)))
+    Ok((
+        "failed".to_string(),
+        format!("签到失败：{}", response_msg),
+        Some(text),
+    ))
 }
 
-pub async fn fetch_balance(base_url: Option<&str>, cookie: Option<&str>, profile: &BrowserProfile) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+pub async fn fetch_balance(
+    base_url: Option<&str>,
+    cookie: Option<&str>,
+    profile: &BrowserProfile,
+) -> std::result::Result<f64, Box<dyn std::error::Error>> {
     let cookie = cookie.ok_or("X666 余额查询必须填写 Cookie")?;
-    let effective_base = base_url.filter(|s| !s.is_empty()).unwrap_or(DEFAULT_BASE_URL);
+    let effective_base = base_url
+        .filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_BASE_URL);
     let url = join_url(effective_base, DEFAULT_BALANCE_PATH);
     let referer = format!("{}/", effective_base.trim_end_matches('/'));
     let client = http_client();
 
     let req = super::super::apply_browser_headers(
-        client.get(&url)
+        client
+            .get(&url)
             .header("Accept", "*/*")
             .header("Cookie", cookie)
             .header("Referer", &referer)
@@ -142,28 +175,35 @@ pub async fn fetch_balance(base_url: Option<&str>, cookie: Option<&str>, profile
     let payload: Option<serde_json::Value> = serde_json::from_str(&text).ok();
 
     if !status.is_success() {
-        tracing::error!("X666 balance fetch failed: HTTP {}, body: {}", status, &text);
-        let message = payload.as_ref()
+        tracing::error!(
+            "X666 balance fetch failed: HTTP {}, body: {}",
+            status,
+            &text
+        );
+        let message = payload
+            .as_ref()
             .and_then(|v| v.get("message").and_then(|m| m.as_str()))
             .unwrap_or("余额请求失败");
         return Err(format!("HTTP {}: {}", status, message).into());
     }
 
     // 尝试多种路径提取余额
-    let quota = payload.as_ref()
-        .and_then(|v| {
-            // 尝试 current_quota
-            read_number(v.get("current_quota"))
-                // 尝试 quota
-                .or_else(|| read_number(v.get("quota")))
-                // 尝试 data.current_quota
-                .or_else(|| v.get("data").and_then(|d| read_number(d.get("current_quota"))))
-                // 尝试 data.quota
-                .or_else(|| v.get("data").and_then(|d| read_number(d.get("quota"))))
-                // 尝试其他字段
-                .or_else(|| read_number(v.get("balance")))
-                .or_else(|| read_number(v.get("credit")))
-        });
+    let quota = payload.as_ref().and_then(|v| {
+        // 尝试 current_quota
+        read_number(v.get("current_quota"))
+            // 尝试 quota
+            .or_else(|| read_number(v.get("quota")))
+            // 尝试 data.current_quota
+            .or_else(|| {
+                v.get("data")
+                    .and_then(|d| read_number(d.get("current_quota")))
+            })
+            // 尝试 data.quota
+            .or_else(|| v.get("data").and_then(|d| read_number(d.get("quota"))))
+            // 尝试其他字段
+            .or_else(|| read_number(v.get("balance")))
+            .or_else(|| read_number(v.get("credit")))
+    });
 
     if let Some(q) = quota {
         Ok(q)

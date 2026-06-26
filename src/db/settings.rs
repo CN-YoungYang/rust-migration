@@ -1,13 +1,14 @@
-use sqlx::SqlitePool;
-use crate::models::CheckinSetting;
+use super::types::UpdateSettingsRequest;
 use crate::error::Result;
+use crate::models::CheckinSetting;
 use chrono::Utc;
+use sqlx::SqlitePool;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
-use super::types::UpdateSettingsRequest;
 
 /// Settings memory cache: avoids querying DB on every request (single-row table, rarely changes)
-static SETTINGS_CACHE: std::sync::OnceLock<RwLock<Option<(CheckinSetting, Instant)>>> = std::sync::OnceLock::new();
+static SETTINGS_CACHE: std::sync::OnceLock<RwLock<Option<(CheckinSetting, Instant)>>> =
+    std::sync::OnceLock::new();
 const SETTINGS_CACHE_TTL: Duration = Duration::from_secs(30);
 
 fn settings_cache() -> &'static RwLock<Option<(CheckinSetting, Instant)>> {
@@ -19,7 +20,10 @@ fn settings_cache() -> &'static RwLock<Option<(CheckinSetting, Instant)>> {
 /// so we try + ignore "duplicate column" errors.
 pub async fn ensure_setting_columns(db: &SqlitePool) -> Result<()> {
     for col in ["batchDelayMin", "batchDelayMax"] {
-        let sql = format!("ALTER TABLE CheckinSetting ADD COLUMN {} INTEGER NOT NULL DEFAULT 0", col);
+        let sql = format!(
+            "ALTER TABLE CheckinSetting ADD COLUMN {} INTEGER NOT NULL DEFAULT 0",
+            col
+        );
         if let Err(e) = sqlx::query(&sql).execute(db).await {
             let msg = e.to_string();
             if !msg.contains("duplicate column") {
@@ -28,14 +32,22 @@ pub async fn ensure_setting_columns(db: &SqlitePool) -> Result<()> {
         }
     }
     // cleanupKeepLatest column (scheduled cleanup retention count, introduced in v2.3.3)
-    if let Err(e) = sqlx::query("ALTER TABLE CheckinSetting ADD COLUMN cleanupKeepLatest INTEGER NOT NULL DEFAULT 500").execute(db).await {
+    if let Err(e) = sqlx::query(
+        "ALTER TABLE CheckinSetting ADD COLUMN cleanupKeepLatest INTEGER NOT NULL DEFAULT 500",
+    )
+    .execute(db)
+    .await
+    {
         let msg = e.to_string();
         if !msg.contains("duplicate column") {
             return Err(e.into());
         }
     }
     // CheckinAccount.note column (introduced in v2.3.2)
-    if let Err(e) = sqlx::query("ALTER TABLE CheckinAccount ADD COLUMN note TEXT").execute(db).await {
+    if let Err(e) = sqlx::query("ALTER TABLE CheckinAccount ADD COLUMN note TEXT")
+        .execute(db)
+        .await
+    {
         let msg = e.to_string();
         if !msg.contains("duplicate column") {
             return Err(e.into());
@@ -77,7 +89,7 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
     let settings = sqlx::query_as::<_, CheckinSetting>(
         "SELECT id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, \
          batchDelayMin, batchDelayMax, cleanupKeepLatest, updatedAt \
-         FROM CheckinSetting WHERE id = 'global'"
+         FROM CheckinSetting WHERE id = 'global'",
     )
     .fetch_optional(db)
     .await?;
@@ -166,7 +178,9 @@ pub async fn update_settings(
 
     // Update cache
     {
-        let mut cache = settings_cache().write().unwrap();
+        let mut cache = settings_cache()
+            .write()
+            .map_err(|_| crate::error::AppError::Internal("设置缓存锁已损坏".into()))?;
         *cache = Some((settings.clone(), Instant::now()));
     }
 

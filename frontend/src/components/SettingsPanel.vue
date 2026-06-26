@@ -64,7 +64,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { apiUrl, authHeaders, request } from '../utils/api'
+import { apiUrl, authHeaders, request, responseData } from '../utils/api'
 import { showToast } from '../utils/toast'
 
 interface Settings {
@@ -95,7 +95,7 @@ const fetchSettings = async () => {
     const response = await request(apiUrl('/settings'), {
       headers: authHeaders()
     })
-    settings.value = await response.json()
+    settings.value = await responseData<Settings>(response)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '加载设置失败', 'error')
   }
@@ -109,7 +109,7 @@ const saveSettings = async () => {
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(settings.value)
     })
-    settings.value = await response.json()
+    settings.value = await responseData<Settings>(response)
     showToast('设置已保存', 'success')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '保存设置失败', 'error')

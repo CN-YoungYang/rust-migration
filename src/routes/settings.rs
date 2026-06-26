@@ -1,14 +1,14 @@
+use crate::{
+    db,
+    error::{AppError, Result},
+    models::AppUser,
+    AppState,
+};
 use axum::{
-    extract::{State, Extension},
+    extract::{Extension, State},
     Json,
 };
 use std::sync::Arc;
-use crate::{
-    AppState,
-    models::{AppUser, CheckinSetting},
-    error::{Result, AppError},
-    db,
-};
 
 fn require_admin(user: &AppUser) -> Result<()> {
     if user.role != "ADMIN" && user.role != "SUPER_ADMIN" {
@@ -20,31 +20,37 @@ fn require_admin(user: &AppUser) -> Result<()> {
 pub async fn get(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AppUser>,
-) -> Result<Json<CheckinSetting>> {
+) -> Result<Json<serde_json::Value>> {
     require_admin(&user)?;
     let settings = db::get_settings(&state.db).await?;
-    Ok(Json(settings))
+    Ok(crate::routes::data(settings))
 }
 
 pub async fn update(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AppUser>,
     Json(payload): Json<db::UpdateSettingsRequest>,
-) -> Result<Json<CheckinSetting>> {
+) -> Result<Json<serde_json::Value>> {
     require_admin(&user)?;
     if let Some(ref start) = payload.window_start {
         if start.parse::<chrono::NaiveTime>().is_err() {
-            return Err(AppError::Validation("签到窗口开始时间格式应为 HH:MM".into()));
+            return Err(AppError::Validation(
+                "签到窗口开始时间格式应为 HH:MM".into(),
+            ));
         }
     }
     if let Some(ref end) = payload.window_end {
         if end.parse::<chrono::NaiveTime>().is_err() {
-            return Err(AppError::Validation("签到窗口结束时间格式应为 HH:MM".into()));
+            return Err(AppError::Validation(
+                "签到窗口结束时间格式应为 HH:MM".into(),
+            ));
         }
     }
     if let Some(max) = payload.max_attempts_per_day {
         if !(1..=100).contains(&max) {
-            return Err(AppError::Validation("每天最大尝试次数必须在 1~100 之间".into()));
+            return Err(AppError::Validation(
+                "每天最大尝试次数必须在 1~100 之间".into(),
+            ));
         }
     }
 
@@ -57,18 +63,19 @@ pub async fn update(
             ));
         }
     } else if payload.batch_delay_min.is_some() || payload.batch_delay_max.is_some() {
-        return Err(AppError::Validation("batchDelayMin 和 batchDelayMax 必须同时提供".into()));
+        return Err(AppError::Validation(
+            "batchDelayMin 和 batchDelayMax 必须同时提供".into(),
+        ));
     }
     if let Some(keep) = payload.cleanup_keep_latest {
         if !(0..=10000).contains(&keep) {
-            return Err(AppError::Validation("cleanupKeepLatest 必须在 0~10000 之间（0 表示清除全部）".into()));
+            return Err(AppError::Validation(
+                "cleanupKeepLatest 必须在 0~10000 之间（0 表示清除全部）".into(),
+            ));
         }
     }
 
-    let settings = db::update_settings(
-        &state.db,
-        &payload,
-    ).await?;
+    let settings = db::update_settings(&state.db, &payload).await?;
 
-    Ok(Json(settings))
+    Ok(crate::routes::data(settings))
 }

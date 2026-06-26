@@ -1,17 +1,17 @@
+use crate::{
+    db,
+    error::{AppError, Result},
+    models::AppUser,
+    services::checkin::runner::{execute_checkin, skip_reason_for_batch},
+    AppState,
+};
 use axum::{
-    extract::{State, Extension},
+    extract::{Extension, State},
     Json,
 };
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use crate::{
-    AppState,
-    models::{AppUser, CheckinRun},
-    error::{Result, AppError},
-    db,
-    services::checkin::runner::{execute_checkin, skip_reason_for_batch},
-};
+use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 pub struct ExecuteCheckinRequest {
@@ -51,15 +51,23 @@ pub async fn list(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<crate::models::AppUser>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
-) -> Result<Json<Vec<CheckinRun>>> {
+) -> Result<Json<Value>> {
     let filter_user_id = params.get("userId");
     let filter_status = params.get("status").map(|s| s.as_str());
     let filter_triggered_by = params.get("triggeredBy").map(|s| s.as_str());
     let filter_start_date = params.get("startDate").map(|s| s.as_str());
     let filter_end_date = params.get("endDate").map(|s| s.as_str());
     let filter_account_id = params.get("accountId").map(|s| s.as_str());
-    let limit: i32 = params.get("limit").and_then(|s| s.parse().ok()).unwrap_or(100).min(500);
-    let offset: i32 = params.get("offset").and_then(|s| s.parse().ok()).unwrap_or(0).max(0);
+    let limit: i32 = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(100)
+        .min(500);
+    let offset: i32 = params
+        .get("offset")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+        .max(0);
 
     let owner_id = if user.role == "ADMIN" || user.role == "SUPER_ADMIN" {
         filter_user_id.map(|s| s.as_str())
@@ -79,29 +87,36 @@ pub async fn list(
             limit,
             offset,
         },
-    ).await?;
-    Ok(Json(runs))
+    )
+    .await?;
+    Ok(crate::routes::data(runs))
 }
 
 pub async fn execute(
-    State(state): State<Arc<AppState>>, Extension(user): Extension<crate::models::AppUser>,
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<crate::models::AppUser>,
     Json(payload): Json<ExecuteCheckinRequest>,
-) -> Result<Json<CheckinRun>> {
-    let account = db::find_account_by_id(&state.db, &payload.account_id).await?.ok_or(crate::error::AppError::NotFound)?;
-    if user.role != "ADMIN" && user.role != "SUPER_ADMIN" && account.owner_id.as_ref() != Some(&user.id) {
+) -> Result<Json<Value>> {
+    let account = db::find_account_by_id(&state.db, &payload.account_id)
+        .await?
+        .ok_or(crate::error::AppError::NotFound)?;
+    if user.role != "ADMIN"
+        && user.role != "SUPER_ADMIN"
+        && account.owner_id.as_ref() != Some(&user.id)
+    {
         return Err(crate::error::AppError::Forbidden);
     }
 
     // 手动签到不受每日上限限制，前端会在达到上限时弹窗确认
     let run = execute_checkin(&state.db, &payload.account_id, "manual", None).await?;
-    Ok(Json(run))
+    Ok(crate::routes::data(run))
 }
 
 pub async fn execute_batch(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AppUser>,
     Json(payload): Json<BatchCheckinRequest>,
-) -> Result<Json<BatchCheckinResponse>> {
+) -> Result<Json<Value>> {
     if payload.account_ids.is_empty() {
         return Err(AppError::Validation("accountIds 不能为空".into()));
     }
@@ -111,7 +126,9 @@ pub async fn execute_batch(
     let is_admin = user.role == "ADMIN" || user.role == "SUPER_ADMIN";
 
     // 批量查询今日各账户签到次数，避免逐账户 COUNT
-    let mut today_counts = db::count_runs_today_batch(&state.db).await.unwrap_or_default();
+    let mut today_counts = db::count_runs_today_for_accounts(&state.db, &payload.account_ids)
+        .await
+        .unwrap_or_default();
 
     // 轻量查询：只取 id + username，避免拉取 passwordHash
     let user_name_map = db::list_user_id_name_map(&state.db).await?;
@@ -125,7 +142,8 @@ pub async fn execute_batch(
     // 阶段一：校验 + 跳过判断（串行）
     // 权限：任一账户无归属权即整体拒绝，避免部分执行带来的混淆。
     for account_id in &payload.account_ids {
-        let account = account_map.get(account_id.as_str())
+        let account = account_map
+            .get(account_id.as_str())
             .ok_or(AppError::NotFound)?;
 
         // 归属权校验（与单次签到一致）
@@ -223,13 +241,21 @@ pub async fn execute_batch(
         .enumerate()
         .map(|(i, id)| (id.as_str(), i))
         .collect();
-    items.sort_by_key(|it| order.get(it.account_id.as_str()).copied().unwrap_or(usize::MAX));
+    items.sort_by_key(|it| {
+        order
+            .get(it.account_id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
 
-    let succeeded = items.iter().filter(|it| it.status == "success" || it.status == "already_checked").count();
+    let succeeded = items
+        .iter()
+        .filter(|it| it.status == "success" || it.status == "already_checked")
+        .count();
     let skipped = items.iter().filter(|it| it.status == "skipped").count();
     let failed = items.iter().filter(|it| it.status == "failed").count();
 
-    Ok(Json(BatchCheckinResponse {
+    Ok(crate::routes::data(BatchCheckinResponse {
         total: items.len(),
         succeeded,
         skipped,
@@ -245,19 +271,20 @@ pub async fn cleanup_runs(
 ) -> Result<Json<Value>> {
     let keep_latest_raw = payload["keepLatest"].as_i64().unwrap_or(100);
     if !(0..=10000).contains(&keep_latest_raw) {
-        return Err(crate::error::AppError::Validation(
-            format!("keepLatest 必须在 0~10000 之间（0 表示清除全部），收到 {}", keep_latest_raw)
-        ));
+        return Err(crate::error::AppError::Validation(format!(
+            "keepLatest 必须在 0~10000 之间（0 表示清除全部），收到 {}",
+            keep_latest_raw
+        )));
     }
     let keep_latest = keep_latest_raw as usize;
-    
+
     let deleted_count = if user.role == "ADMIN" || user.role == "SUPER_ADMIN" {
         db::cleanup_checkin_runs(&state.db, keep_latest).await?
     } else {
         db::cleanup_checkin_runs_by_user(&state.db, &user.id, keep_latest).await?
     };
-    
-    Ok(Json(json!({
+
+    Ok(crate::routes::data(json!({
         "deletedCount": deleted_count,
         "keepLatest": keep_latest
     })))

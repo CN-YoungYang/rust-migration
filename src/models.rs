@@ -1,6 +1,6 @@
-﻿use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct AppUser {
@@ -180,12 +180,6 @@ pub struct LoginRequest {
     pub password: String,
 }
 
-#[derive(Debug, Serialize)]
-pub struct LoginResponse {
-    pub token: String,
-    pub user: AppUser,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct UpdateUserRequest {
     pub username: Option<String>,
@@ -194,3 +188,9 @@ pub struct UpdateUserRequest {
     pub enabled: Option<bool>,
     pub note: Option<String>,
 }
+
+// 通知相关模型
+pub mod notification;
+pub use notification::{
+    CreateNotificationRequest, FailureCounter, NotificationConfig, UpdateNotificationRequest,
+};

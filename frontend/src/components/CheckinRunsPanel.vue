@@ -105,7 +105,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { apiUrl, authHeaders, request } from '../utils/api'
+import { apiUrl, authHeaders, request, responseData } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
 import type { CurrentUser, Account, AccountGroup } from '../types'
 import { useUsers } from '../composables/useUsers'
@@ -233,7 +233,7 @@ const fetchAccounts = async () => {
       url += `?userId=${encodeURIComponent(filterUserId.value)}`
     }
     const response = await request(url, { headers: authHeaders() })
-    accounts.value = await response.json()
+    accounts.value = await responseData<Account[]>(response)
     // 如果当前选中的账户不在新列表中，清除选择
     if (selectedAccountId.value && !accounts.value.find((a) => a.id === selectedAccountId.value)) {
       selectedAccountId.value = ''
@@ -278,7 +278,7 @@ const fetchRuns = async (append = false) => {
     url += `?${params.toString()}`
 
     const response = await request(url, { headers: authHeaders() })
-    const data = await response.json()
+    const data = await responseData<CheckinRun[]>(response)
     if (append) {
       runs.value.push(...data)
     } else {
@@ -299,7 +299,7 @@ const loadMoreRuns = () => fetchRuns(true)
 const fetchSettings = async () => {
   try {
     const res = await request(apiUrl('/settings'), { headers: authHeaders() })
-    const data = await res.json()
+    const data = await responseData<{ maxAttemptsPerDay?: number }>(res)
     maxAttemptsPerDay.value = data.maxAttemptsPerDay ?? 3
   } catch {
     // 使用默认值

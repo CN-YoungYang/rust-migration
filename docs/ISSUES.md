@@ -1,139 +1,53 @@
-﻿# 自查报告 - Rust + Axum 重构
+# 自查报告 - Rust + Axum 重构
 
-## 发现的问题
+## 当前结论
 
-### 1. ✅ 已修复: base64 API 过时
+Rust 版本当前没有源码级阻塞问题。后端通过 `cargo clippy -- -D warnings` 和 `cargo test`，前端通过 `npm run build`。
 
-**问题**: base64 crate 0.22 的 API 已更新
-- 旧 API: `base64::encode()` / `base64::decode()`
-- 新 API: `base64::engine::general_purpose::STANDARD.encode()`
+## 已修复问题
 
-**修复**: ✅ 已更新 `src/crypto.rs`
+### 1. base64 API 过时
 
-### 2. ✅ 已修复: sqlx::migrate!() 宏问题
+已更新为 `base64::engine::general_purpose::STANDARD.encode()` / `decode()`。
 
-**问题**: `sqlx::migrate!()` 需要特定的目录结构
+### 2. sqlx::migrate!() 宏目录约束
 
-**修复**: ✅ 改为手动执行 SQL 文件 (`include_str!`)
+已改为通过 `include_str!("../migrations/20260611_init.sql")` 执行嵌入式 migration。
 
-### 3. ⚠️ 部分修复: 数据库字段命名不一致
+### 3. 数据库字段命名兼容
 
-**问题**: Prisma 在 SQLite 中使用 camelCase,但我最初使用了 snake_case
+已统一为与历史 Prisma SQLite 数据兼容的 camelCase 字段，并拆分到 `src/db/` 模块。
 
-**影响**: 
-- 数据库不兼容
-- 无法从 Next.js 版本直接迁移数据
+### 4. 认证与权限
 
-**已修复**:
-- ✅ SQL migration 文件 (camelCase 字段名)
-- ✅ Rust models (serde + sqlx rename 属性)
+登录、登出、`/api/auth/me`、会话清理、管理员中间件、用户角色隔离已实现。
 
-**待修复**:
-- ⚠️ `src/db.rs` 中的所有 SQL 查询语句需要更新字段名
+### 5. 曾标记待补的接口
 
-## 待修复的文件
+以下接口已实现：
 
-### src/db.rs - 所有 SQL 查询
+- `PUT /api/accounts/:id`
+- `PUT /api/admin/users/:id`
+- `DELETE /api/admin/users/:id`
 
-需要将以下 snake_case 字段改为 camelCase:
+### 6. 通知功能
 
+通知配置 API、前端通知设置、Webhook、Telegram、基础 SMTP 邮件发送、失败计数、低余额通知和签到 runner 触发已接入。
+
+## 剩余非阻塞建议
+
+- 为 Axum 路由和数据库层补充更多集成测试。
+- 为真实站点 Provider 增加可控的冒烟测试或 mock 测试。
+- 如生产环境需要 STARTTLS/SMTPS 邮件兼容性，引入专用 SMTP 邮件库。
+- 部署前执行 Docker 构建验证和真实环境健康检查。
+
+## 验证命令
+
+```bash
+cd rust-migration
+cargo fmt
+cargo clippy -- -D warnings
+cargo test
+cd frontend
+npm run build
 ```
-password_hash     -> passwordHash
-access_token_enc  -> accessTokenEnc
-cookie_enc        -> cookieEnc
-site_type         -> siteType
-base_url          -> baseUrl
-user_id           -> userId
-auth_type         -> authType
-custom_checkin_url -> customCheckinUrl
-retry_enabled     -> retryEnabled
-last_balance      -> lastBalance
-last_balance_at   -> lastBalanceAt
-last_status       -> lastStatus
-last_message      -> lastMessage
-last_run_at       -> lastRunAt
-created_at        -> createdAt
-updated_at        -> updatedAt
-account_id        -> accountId
-duration_ms       -> durationMs
-triggered_by      -> triggeredBy
-raw_response      -> rawResponse
-window_start      -> windowStart
-window_end        -> windowEnd
-max_attempts_per_day -> maxAttemptsPerDay
-```
-
-**影响范围**: 约 20+ SQL 查询语句
-
-## 其他潜在问题
-
-### 1. 日期时间处理
-
-- SQLite 存储 TEXT 格式的日期
-- Rust 使用 `chrono::DateTime<Utc>`
-- SQLx 自动转换，但需要确保格式一致
-
-### 2. Boolean vs Integer
-
-- SQLite 没有原生 Boolean 类型
-- Prisma 使用 INTEGER (0/1)
-- SQLx 自动转换 bool <-> i32
-
-### 3. 认证系统未完成
-
-- `auth::me` 接口返回 null
-- 没有 JWT token 验证
-- 需要添加 session/token 管理
-
-### 4. 部分 API 未完全实现
-
-- `accounts::update` - TODO
-- `admin::update_user` - TODO
-- `admin::delete_user` - TODO
-
-## 修复优先级
-
-### P0 (必须修复)
-
-1. ✅ base64 API
-2. ✅ sqlx migrate
-3. ⚠️ **更新 db.rs 中的所有 SQL 查询** - 关键!
-
-### P1 (建议修复)
-
-4. 实现缺失的 update 接口
-5. 添加 JWT 认证
-
-### P2 (可选)
-
-6. 添加单元测试
-7. 添加错误日志详情
-
-## 当前状态
-
-⚠️ **不可用**: 需要修复 db.rs 中的 SQL 查询才能运行
-
-**估计修复时间**: 15-20 分钟
-
-**修复后可实现**:
-- ✅ 数据库兼容
-- ✅ 直接使用 Next.js 的 SQLite 文件
-- ✅ 所有 API 正常工作
-
-## 下一步行动
-
-1. 修复 db.rs 中的所有 SQL 查询
-2. 测试编译 (cargo check)
-3. 测试运行 (cargo run)
-4. 验证 API 功能
-5. 测试与 Next.js 数据库的兼容性
-
-## 总结
-
-**项目整体结构**: ✅ 优秀  
-**代码质量**: ✅ 良好  
-**功能完整性**: ✅ 95% 完成  
-**可运行性**: ⚠️ 需要修复 SQL 查询  
-**文档质量**: ✅ 详尽  
-
-**评价**: 项目基础扮实，只需小修即可投入使用。

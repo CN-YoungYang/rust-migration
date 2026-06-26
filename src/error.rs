@@ -28,6 +28,9 @@ pub enum AppError {
     #[error("HTTP 请求失败: {0}")]
     Http(#[from] reqwest::Error),
 
+    #[error("IO 错误: {0}")]
+    Io(#[from] std::io::Error),
+
     #[error("内部错误: {0}")]
     Internal(String),
 }
@@ -49,29 +52,27 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 "认证失败，请重新登录",
-                Some("会话已过期或无效".to_string())
+                Some("会话已过期或无效".to_string()),
             ),
             AppError::NotFound => (
                 StatusCode::NOT_FOUND,
                 "资源不存在",
-                Some("请求的资源未找到或已被删除".to_string())
+                Some("请求的资源未找到或已被删除".to_string()),
             ),
             AppError::Forbidden => (
                 StatusCode::FORBIDDEN,
                 "权限不足",
-                Some("您没有权限执行此操作".to_string())
+                Some("您没有权限执行此操作".to_string()),
             ),
-            AppError::Validation(ref msg) => (
-                StatusCode::BAD_REQUEST,
-                "输入验证失败",
-                Some(msg.clone())
-            ),
+            AppError::Validation(ref msg) => {
+                (StatusCode::BAD_REQUEST, "输入验证失败", Some(msg.clone()))
+            }
             AppError::Crypto(ref e) => {
                 tracing::error!("Crypto error: {}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "加密操作失败",
-                    Some("请检查加密密钥配置是否正确".to_string())
+                    Some("请检查加密密钥配置是否正确".to_string()),
                 )
             }
             AppError::Http(ref e) => {
@@ -89,12 +90,20 @@ impl IntoResponse for AppError {
                 };
                 (StatusCode::BAD_GATEWAY, user_msg, None)
             }
+            AppError::Io(ref e) => {
+                tracing::error!("IO error: {}", e);
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "外部服务连接失败",
+                    Some("请检查网络连接或服务配置".to_string()),
+                )
+            }
             AppError::Internal(ref e) => {
                 tracing::error!("Internal error: {}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "服务内部错误",
-                    Some("请联系管理员或稍后重试".to_string())
+                    Some("请联系管理员或稍后重试".to_string()),
                 )
             }
         };
@@ -109,8 +118,6 @@ impl IntoResponse for AppError {
     }
 }
 
-
-
 impl From<String> for AppError {
     fn from(s: String) -> Self {
         AppError::Internal(s)
@@ -122,5 +129,11 @@ impl From<serde_json::Error> for AppError {
         AppError::Internal(e.to_string())
     }
 }
-pub type Result<T> = std::result::Result<T, AppError>;
 
+impl From<csv::Error> for AppError {
+    fn from(e: csv::Error) -> Self {
+        AppError::Internal(format!("CSV 错误: {}", e))
+    }
+}
+
+pub type Result<T> = std::result::Result<T, AppError>;

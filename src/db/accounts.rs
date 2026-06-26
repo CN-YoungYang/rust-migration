@@ -1,8 +1,8 @@
-use sqlx::SqlitePool;
-use crate::models::CheckinAccount;
-use crate::error::Result;
-use chrono::Utc;
 use super::types::{AccountFilter, CreateAccountRequest, UpdateAccountRequest};
+use crate::error::Result;
+use crate::models::CheckinAccount;
+use chrono::Utc;
+use sqlx::SqlitePool;
 
 /// Column list for account queries (excludes encrypted fields to reduce I/O)
 const ACCOUNT_LIST_COLUMNS: &str = "\
@@ -17,7 +17,10 @@ pub async fn list_accounts_filtered(
     db: &SqlitePool,
     filter: &AccountFilter,
 ) -> Result<Vec<CheckinAccount>> {
-    let mut sql = format!("SELECT {} FROM CheckinAccount WHERE 1=1", ACCOUNT_LIST_COLUMNS);
+    let mut sql = format!(
+        "SELECT {} FROM CheckinAccount WHERE 1=1",
+        ACCOUNT_LIST_COLUMNS
+    );
 
     if filter.owner_id.is_some() {
         sql.push_str(" AND ownerId = ?");
@@ -31,6 +34,9 @@ pub async fn list_accounts_filtered(
     if let Some(ref status) = filter.last_status {
         if status == "never" {
             sql.push_str(" AND lastStatus IS NULL");
+        } else if status == "not_today" {
+            // 今日未签到：lastRunAt 为 NULL 或不在今天（本地时区）
+            sql.push_str(" AND (lastRunAt IS NULL OR DATE(lastRunAt, 'localtime') < DATE('now', 'localtime'))");
         } else {
             sql.push_str(" AND lastStatus = ?");
         }
@@ -53,7 +59,7 @@ pub async fn list_accounts_filtered(
         query = query.bind(e);
     }
     if let Some(ref status) = filter.last_status {
-        if status != "never" {
+        if status != "never" && status != "not_today" {
             query = query.bind(status);
         }
     }
@@ -70,7 +76,10 @@ pub async fn list_accounts_filtered(
 
 /// List only enabled accounts (for scheduler, uses idx_checkin_account_enabled index)
 pub async fn list_enabled_accounts(db: &SqlitePool) -> Result<Vec<CheckinAccount>> {
-    let sql = format!("SELECT {} FROM CheckinAccount WHERE enabled = 1 ORDER BY createdAt DESC", ACCOUNT_LIST_COLUMNS);
+    let sql = format!(
+        "SELECT {} FROM CheckinAccount WHERE enabled = 1 ORDER BY createdAt DESC",
+        ACCOUNT_LIST_COLUMNS
+    );
     let accounts = sqlx::query_as::<_, CheckinAccount>(&sql)
         .fetch_all(db)
         .await?;
@@ -84,7 +93,7 @@ pub async fn find_account_by_id(db: &SqlitePool, id: &str) -> Result<Option<Chec
          accessTokenEnc, cookieEnc, customCheckinUrl, enabled, retryEnabled, note, \
          lastBalance, lastBalanceAt, lastStatus, lastMessage, lastRunAt, \
          createdAt, updatedAt \
-         FROM CheckinAccount WHERE id = ?"
+         FROM CheckinAccount WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(db)
@@ -93,7 +102,10 @@ pub async fn find_account_by_id(db: &SqlitePool, id: &str) -> Result<Option<Chec
 }
 
 /// Batch query accounts, returns id -> account mapping (replaces N+1 find_account_by_id)
-pub async fn find_accounts_by_ids(db: &SqlitePool, ids: &[String]) -> Result<std::collections::HashMap<String, CheckinAccount>> {
+pub async fn find_accounts_by_ids(
+    db: &SqlitePool,
+    ids: &[String],
+) -> Result<std::collections::HashMap<String, CheckinAccount>> {
     if ids.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
@@ -115,10 +127,7 @@ pub async fn find_accounts_by_ids(db: &SqlitePool, ids: &[String]) -> Result<std
 }
 
 /// Create a new account
-pub async fn create_account(
-    db: &SqlitePool,
-    req: &CreateAccountRequest,
-) -> Result<CheckinAccount> {
+pub async fn create_account(db: &SqlitePool, req: &CreateAccountRequest) -> Result<CheckinAccount> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now();
 
@@ -153,21 +162,24 @@ pub async fn update_account(
     req: &UpdateAccountRequest,
 ) -> Result<CheckinAccount> {
     let now = Utc::now();
-    let current = find_account_by_id(db, id).await?.ok_or(crate::error::AppError::NotFound)?;
+    let current = find_account_by_id(db, id)
+        .await?
+        .ok_or(crate::error::AppError::NotFound)?;
 
     // Three-state handling: None=keep original, Some(None)=clear to NULL, Some(Some(v))=set new value
     let resolve = |cur: &Option<String>, new: Option<Option<String>>| -> Option<Option<String>> {
         match new {
-            None => cur.as_ref().map(|s| Some(s.clone())),            // Keep original
-            Some(None) => Some(None),                                  // Clear to NULL
-            Some(Some(v)) => Some(Some(v)),                           // Set new value
+            None => cur.as_ref().map(|s| Some(s.clone())), // Keep original
+            Some(None) => Some(None),                      // Clear to NULL
+            Some(Some(v)) => Some(Some(v)),                // Set new value
         }
     };
 
     let new_user_id = resolve(&current.user_id, req.user_id.clone());
     let new_access_token_enc = resolve(&current.access_token_enc, req.access_token_enc.clone());
     let new_cookie_enc = resolve(&current.cookie_enc, req.cookie_enc.clone());
-    let new_custom_checkin_url = resolve(&current.custom_checkin_url, req.custom_checkin_url.clone());
+    let new_custom_checkin_url =
+        resolve(&current.custom_checkin_url, req.custom_checkin_url.clone());
     let new_note = resolve(&current.note, req.note.clone());
 
     let account = sqlx::query_as::<_, CheckinAccount>(
@@ -193,14 +205,12 @@ pub async fn update_account(
 /// Update account balance
 pub async fn update_account_balance(db: &SqlitePool, id: &str, balance: f64) -> Result<()> {
     let now = Utc::now();
-    sqlx::query(
-        "UPDATE CheckinAccount SET lastBalance = ?, lastBalanceAt = ? WHERE id = ?"
-    )
-    .bind(balance)
-    .bind(now)
-    .bind(id)
-    .execute(db)
-    .await?;
+    sqlx::query("UPDATE CheckinAccount SET lastBalance = ?, lastBalanceAt = ? WHERE id = ?")
+        .bind(balance)
+        .bind(now)
+        .bind(id)
+        .execute(db)
+        .await?;
     Ok(())
 }
 

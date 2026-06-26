@@ -1,18 +1,17 @@
+use crate::{
+    crypto::hash_password,
+    db,
+    error::Result,
+    models::{AppUser, UpdateUserRequest},
+    AppState,
+};
 use axum::{
     extract::{Path, State},
-    Extension,
-    Json,
+    Extension, Json,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use crate::{
-    models::{AppUser, UpdateUserRequest},
-    db,
-    crypto::hash_password,
-    AppState,
-    error::Result,
-};
 
 // Check if current user can manage target user
 fn check_admin_permission(current_user: &AppUser, target_user: &AppUser) -> Result<()> {
@@ -23,7 +22,7 @@ fn check_admin_permission(current_user: &AppUser, target_user: &AppUser) -> Resu
         }
         return Ok(());
     }
-    
+
     // ADMIN can only manage USERs
     if current_user.role == "ADMIN" {
         if target_user.role == "USER" {
@@ -31,7 +30,7 @@ fn check_admin_permission(current_user: &AppUser, target_user: &AppUser) -> Resu
         }
         return Err(crate::error::AppError::Forbidden);
     }
-    
+
     Err(crate::error::AppError::Forbidden)
 }
 
@@ -54,44 +53,50 @@ pub async fn list_users(
     State(state): State<Arc<AppState>>,
     Extension(current_user): Extension<AppUser>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
-) -> Result<Json<Vec<AppUser>>> {
+) -> Result<Json<Value>> {
     let mut users = db::list_users(&state.db).await?;
     // ?scope=all 用于筛选下拉框：返回全部用户（密码哈希已 skip_serializing，安全）
     // 默认行为：ADMIN 只能看到 USER 角色
     if current_user.role == "ADMIN" && params.get("scope").map(|s| s.as_str()) != Some("all") {
         users.retain(|user| user.role == "USER");
     }
-    Ok(Json(users))
+    Ok(crate::routes::data(users))
 }
 
 pub async fn get_user(
     State(state): State<Arc<AppState>>,
     Extension(current_user): Extension<AppUser>,
     Path(id): Path<String>,
-) -> Result<Json<AppUser>> {
-    let user = db::find_user_by_id(&state.db, &id).await?
+) -> Result<Json<Value>> {
+    let user = db::find_user_by_id(&state.db, &id)
+        .await?
         .ok_or(crate::error::AppError::NotFound)?;
     if user.id != current_user.id {
         check_admin_permission(&current_user, &user)?;
     }
-    Ok(Json(user))
+    Ok(crate::routes::data(user))
 }
 
 pub async fn create_user(
     State(state): State<Arc<AppState>>,
     Extension(current_user): Extension<AppUser>,
     Json(payload): Json<CreateUserRequest>,
-) -> Result<Json<AppUser>> {
+) -> Result<Json<Value>> {
     check_role_assignment(&current_user, payload.role.as_deref())?;
 
     if payload.username.trim().is_empty() {
         return Err(crate::error::AppError::Validation("用户名不能为空".into()));
     }
     if payload.password.len() < 8 {
-        return Err(crate::error::AppError::Validation("密码至少需要 8 位".into()));
+        return Err(crate::error::AppError::Validation(
+            "密码至少需要 8 位".into(),
+        ));
     }
 
-    if db::find_user_by_username(&state.db, &payload.username).await?.is_some() {
+    if db::find_user_by_username(&state.db, &payload.username)
+        .await?
+        .is_some()
+    {
         return Err(crate::error::AppError::Validation("用户名已存在".into()));
     }
 
@@ -103,8 +108,9 @@ pub async fn create_user(
         payload.role.as_deref().unwrap_or("USER"),
         payload.enabled.unwrap_or(true),
         payload.note.as_deref(),
-    ).await?;
-    Ok(Json(user))
+    )
+    .await?;
+    Ok(crate::routes::data(user))
 }
 
 pub async fn update_user(
@@ -112,26 +118,29 @@ pub async fn update_user(
     Extension(current_user): Extension<AppUser>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateUserRequest>,
-) -> Result<Json<AppUser>> {
-    let existing = db::find_user_by_id(&state.db, &id).await?
+) -> Result<Json<Value>> {
+    let existing = db::find_user_by_id(&state.db, &id)
+        .await?
         .ok_or(crate::error::AppError::NotFound)?;
-    
+
     check_admin_permission(&current_user, &existing)?;
     check_role_assignment(&current_user, payload.role.as_deref())?;
-    
+
     if existing.role == "SUPER_ADMIN" && payload.role.as_deref() != Some("SUPER_ADMIN") {
         return Err(crate::error::AppError::Forbidden);
     }
-    
+
     let password_hash = if let Some(pwd) = &payload.password {
         if pwd.len() < 8 {
-            return Err(crate::error::AppError::Validation("密码至少需要 8 位".into()));
+            return Err(crate::error::AppError::Validation(
+                "密码至少需要 8 位".into(),
+            ));
         }
         Some(hash_password(pwd)?)
     } else {
         None
     };
-    
+
     db::update_user(
         &state.db,
         &id,
@@ -140,12 +149,13 @@ pub async fn update_user(
         payload.role.as_deref(),
         payload.enabled,
         payload.note.as_deref(),
-    ).await?;
-    
+    )
+    .await?;
+
     let user = db::find_user_by_id(&state.db, &id)
         .await?
         .ok_or(crate::error::AppError::NotFound)?;
-    Ok(Json(user))
+    Ok(crate::routes::data(user))
 }
 
 pub async fn delete_user(
@@ -153,17 +163,18 @@ pub async fn delete_user(
     Extension(current_user): Extension<AppUser>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>> {
-    let user = db::find_user_by_id(&state.db, &id).await?
+    let user = db::find_user_by_id(&state.db, &id)
+        .await?
         .ok_or(crate::error::AppError::NotFound)?;
-    
+
     check_admin_permission(&current_user, &user)?;
-    
+
     if user.role == "SUPER_ADMIN" {
         return Err(crate::error::AppError::Forbidden);
     }
-    
+
     db::delete_user(&state.db, &id).await?;
-    Ok(Json(json!({ "success": true })))
+    Ok(crate::routes::data(json!({ "success": true })))
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,13 +1,13 @@
-use sqlx::SqlitePool;
-use crate::models::AppUser;
 use crate::error::Result;
+use crate::models::AppUser;
 use chrono::Utc;
+use sqlx::SqlitePool;
 
 /// Find user by username (includes password hash for authentication)
 pub async fn find_user_by_username(db: &SqlitePool, username: &str) -> Result<Option<AppUser>> {
     let user = sqlx::query_as::<_, AppUser>(
         "SELECT id, username, passwordHash, role, enabled, note, createdAt, updatedAt \
-         FROM AppUser WHERE username = ?"
+         FROM AppUser WHERE username = ?",
     )
     .bind(username)
     .fetch_optional(db)
@@ -19,7 +19,7 @@ pub async fn find_user_by_username(db: &SqlitePool, username: &str) -> Result<Op
 pub async fn find_user_by_id(db: &SqlitePool, id: &str) -> Result<Option<AppUser>> {
     let user = sqlx::query_as::<_, AppUser>(
         "SELECT id, username, passwordHash, role, enabled, note, createdAt, updatedAt \
-         FROM AppUser WHERE id = ?"
+         FROM AppUser WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(db)
@@ -31,7 +31,7 @@ pub async fn find_user_by_id(db: &SqlitePool, id: &str) -> Result<Option<AppUser
 pub async fn list_users(db: &SqlitePool) -> Result<Vec<AppUser>> {
     let users = sqlx::query_as::<_, AppUser>(
         "SELECT id, username, '' as passwordHash, role, enabled, note, createdAt, updatedAt \
-         FROM AppUser ORDER BY createdAt DESC"
+         FROM AppUser ORDER BY createdAt DESC",
     )
     .fetch_all(db)
     .await?;
@@ -39,7 +39,9 @@ pub async fn list_users(db: &SqlitePool) -> Result<Vec<AppUser>> {
 }
 
 /// Lightweight query: returns id -> username mapping, avoiding pulling passwordHash and other sensitive fields
-pub async fn list_user_id_name_map(db: &SqlitePool) -> Result<std::collections::HashMap<String, String>> {
+pub async fn list_user_id_name_map(
+    db: &SqlitePool,
+) -> Result<std::collections::HashMap<String, String>> {
     let rows: Vec<(String, String)> = sqlx::query_as("SELECT id, username FROM AppUser")
         .fetch_all(db)
         .await?;
@@ -86,7 +88,9 @@ pub async fn update_user(
     note: Option<&str>,
 ) -> Result<()> {
     let now = Utc::now();
-    let current = find_user_by_id(db, id).await?.ok_or(crate::error::AppError::NotFound)?;
+    let current = find_user_by_id(db, id)
+        .await?
+        .ok_or(crate::error::AppError::NotFound)?;
 
     sqlx::query(
         "UPDATE AppUser SET username = ?, passwordHash = ?, role = ?, enabled = ?, note = ?, updatedAt = ? WHERE id = ?"
@@ -106,6 +110,11 @@ pub async fn update_user(
 /// Delete user with cascade (accounts and runs)
 pub async fn delete_user(db: &SqlitePool, id: &str) -> Result<()> {
     let mut tx = db.begin().await?;
+
+    sqlx::query("DELETE FROM AppSession WHERE userId = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
 
     // Cascade: delete runs for accounts owned by this user
     sqlx::query(

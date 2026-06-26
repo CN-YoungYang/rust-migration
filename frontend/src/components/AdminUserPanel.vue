@@ -96,7 +96,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { apiUrl, authHeaders, request } from '../utils/api'
+import { apiUrl, authHeaders, request, responseData } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
 import type { CurrentUser } from '../types'
 
@@ -136,7 +136,7 @@ const fetchUsers = async () => {
     const res = await request(apiUrl('/admin/users'), {
       headers: authHeaders()
     })
-    users.value = await res.json()
+    users.value = await responseData<User[]>(res)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '加载用户失败', 'error')
   } finally {

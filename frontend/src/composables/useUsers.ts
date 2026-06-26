@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { apiUrl, authHeaders, request } from '../utils/api'
+import { apiUrl, authHeaders, request, responseData } from '../utils/api'
 import { showToast } from '../utils/toast'
 
 export function useUsers(isAdminCheck?: () => boolean) {
@@ -11,8 +11,7 @@ export function useUsers(isAdminCheck?: () => boolean) {
     usersLoading.value = true
     try {
       const res = await request(apiUrl('/admin/users?scope=all'), { headers: authHeaders() })
-      const data = await res.json()
-      allUsers.value = data.users ?? data ?? []
+      allUsers.value = await responseData<{ id: string; username: string }[]>(res)
     } catch {
       showToast('加载用户列表失败', 'error')
     } finally {

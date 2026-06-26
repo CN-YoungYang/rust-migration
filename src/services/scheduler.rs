@@ -1,12 +1,12 @@
-use sqlx::SqlitePool;
-use tokio_cron_scheduler::{JobScheduler, Job};
-use chrono::{Local, NaiveTime};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use crate::{
     db,
     services::checkin::runner::{execute_checkin, skip_reason_for_batch},
 };
+use chrono::{Local, NaiveTime};
+use sqlx::SqlitePool;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio_cron_scheduler::{Job, JobScheduler};
 
 pub async fn start_scheduler(db: SqlitePool) {
     tokio::spawn(async move {
@@ -26,8 +26,8 @@ async fn run_scheduler(db: SqlitePool) -> anyhow::Result<()> {
     // Checkin job every 5 minutes
     let db_clone = db.clone();
     let lock_clone = checkin_lock.clone();
-    scheduler.add(
-        Job::new_async("0 */5 * * * *", move |_uuid, _l| {
+    scheduler
+        .add(Job::new_async("0 */5 * * * *", move |_uuid, _l| {
             let db = db_clone.clone();
             let lock = lock_clone.clone();
             Box::pin(async move {
@@ -35,7 +35,7 @@ async fn run_scheduler(db: SqlitePool) -> anyhow::Result<()> {
                 let _guard = match lock.try_lock() {
                     Ok(guard) => guard,
                     Err(_) => {
-                        tracing::warn!("上一轮定时签到尚未完成，跳过本轮以避免重复触发");
+                        tracing::warn!("上一轮定时签到仍在执行，跳过本轮以避免重复触发");
                         return;
                     }
                 };
@@ -43,19 +43,19 @@ async fn run_scheduler(db: SqlitePool) -> anyhow::Result<()> {
                     tracing::error!("Scheduled checkin error: {}", e);
                 }
             })
-        })?
-    ).await?;
+        })?)
+        .await?;
 
     // Run cleanup every 10 minutes
     let db_clone = db.clone();
-    scheduler.add(
-        Job::new_async("0 */10 * * * *", move |_uuid, _l| {
+    scheduler
+        .add(Job::new_async("0 */10 * * * *", move |_uuid, _l| {
             let db = db_clone.clone();
             Box::pin(async move {
                 cleanup_old_runs(&db).await;
             })
-        })?
-    ).await?;
+        })?)
+        .await?;
 
     scheduler.start().await?;
     tracing::info!("Scheduler started");
@@ -121,7 +121,9 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
         if today_runs >= settings.max_attempts_per_day.max(1) {
             tracing::debug!(
                 "Skipping account {}: {}/{} attempts today",
-                account.id, today_runs, settings.max_attempts_per_day
+                account.id,
+                today_runs,
+                settings.max_attempts_per_day
             );
             continue;
         }
@@ -132,7 +134,11 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
                 settings.batch_delay_min,
                 settings.batch_delay_max,
             ) {
-                tracing::debug!("Scheduled checkin: account {} waiting {}s", account.id, secs);
+                tracing::debug!(
+                    "Scheduled checkin: account {} waiting {}s",
+                    account.id,
+                    secs
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
             }
         }

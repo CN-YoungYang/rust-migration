@@ -2,7 +2,7 @@
 use serde_json::{json, Value};
 
 pub async fn health() -> Json<Value> {
-    Json(json!({
+    crate::routes::data(json!({
         "status": "ok",
         "timestamp": chrono::Utc::now().to_rfc3339()
     }))

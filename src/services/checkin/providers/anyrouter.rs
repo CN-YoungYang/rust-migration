@@ -1,6 +1,6 @@
+use super::super::{http_client, BrowserProfile};
+use super::{read_error_message, read_number};
 use crate::error::Result;
-use super::super::{BrowserProfile, http_client};
-use super::{read_number, read_error_message};
 
 const DEFAULT_CHECKIN_PATH: &str = "/api/user/sign_in";
 const ANYROUTER_CHALLENGE_MESSAGE: &str = "签到失败：yrouter 返回反爬挑战页，当前 Cookie 可能已失效。请在浏览器重新登录 yrouter，复制最新 Cookie 后更新账号。";
@@ -95,9 +95,7 @@ fn solve_acw_sc_v2(response_text: &str) -> Option<String> {
 
     let hex: String = reordered.iter().collect();
     if hex.len() != arg1.len() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        tracing::warn!(
-            "acw_sc__v2 求解失败：重排后出现非 hex 字符（WAF 算法可能已升级）"
-        );
+        tracing::warn!("acw_sc__v2 求解失败：重排后出现非 hex 字符（WAF 算法可能已升级）");
         return None;
     }
 
@@ -200,7 +198,8 @@ pub async fn checkin(
         match solve_acw_sc_v2(&text) {
             Some(acw_sc_v2) => {
                 let merged = merge_cookie(cookie, "acw_sc__v2", &acw_sc_v2);
-                let (s, t, ct) = post_checkin(client, &url, base_url, user_id, Some(&merged), profile).await?;
+                let (s, t, ct) =
+                    post_checkin(client, &url, base_url, user_id, Some(&merged), profile).await?;
                 status = s;
                 text = t;
                 content_type = ct;
@@ -219,7 +218,6 @@ pub async fn checkin(
             Some(text),
         ));
     }
-
 
     // 尝试解析 JSON，如果失败则将原始文本作为 message
     let payload: Option<serde_json::Value> = serde_json::from_str(&text).ok();
@@ -373,7 +371,7 @@ pub async fn fetch_balance(
     if is_challenge_page(&text, content_type.as_deref()) {
         if let Some(acw_sc_v2) = solve_acw_sc_v2(&text) {
             let merged = merge_cookie(cookie, "acw_sc__v2", &acw_sc_v2);
-            
+
             let mut retry_req = super::super::apply_browser_headers(
                 client
                     .get(&url)
@@ -428,22 +426,30 @@ pub async fn fetch_balance(
     parse_balance_response(&text, status)
 }
 
-fn parse_balance_response(text: &str, status: reqwest::StatusCode) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+fn parse_balance_response(
+    text: &str,
+    status: reqwest::StatusCode,
+) -> std::result::Result<f64, Box<dyn std::error::Error>> {
     let payload: Option<serde_json::Value> = serde_json::from_str(text).ok();
 
     if !status.is_success() {
-        tracing::error!("AnyRouter balance fetch failed: HTTP {}, body: {}", status, text);
+        tracing::error!(
+            "AnyRouter balance fetch failed: HTTP {}, body: {}",
+            status,
+            text
+        );
         return Err(read_error_message(payload.as_ref())
-            .unwrap_or_else(|| format!("余额请求失败：HTTP {}", status)).into());
+            .unwrap_or_else(|| format!("余额请求失败：HTTP {}", status))
+            .into());
     }
 
     // 尝试多种路径提取余额
-    let quota = payload.as_ref()
-        .and_then(|v| {
-            // 尝试直接读取 quota
-            read_number(v.get("quota"))
-                // 尝试 data 字段（可能是对象或数字）
-                .or_else(|| v.get("data").and_then(|d| {
+    let quota = payload.as_ref().and_then(|v| {
+        // 尝试直接读取 quota
+        read_number(v.get("quota"))
+            // 尝试 data 字段（可能是对象或数字）
+            .or_else(|| {
+                v.get("data").and_then(|d| {
                     if d.is_object() {
                         // data 是对象，尝试 data.quota
                         read_number(d.get("quota"))
@@ -451,12 +457,13 @@ fn parse_balance_response(text: &str, status: reqwest::StatusCode) -> std::resul
                         // data 是数字
                         read_number(Some(d))
                     }
-                }))
-                // 尝试其他常见字段名
-                .or_else(|| read_number(v.get("balance")))
-                .or_else(|| read_number(v.get("credit")))
-                .or_else(|| read_number(v.get("amount")))
-        });
+                })
+            })
+            // 尝试其他常见字段名
+            .or_else(|| read_number(v.get("balance")))
+            .or_else(|| read_number(v.get("credit")))
+            .or_else(|| read_number(v.get("amount")))
+    });
 
     if let Some(q) = quota {
         Ok(q)

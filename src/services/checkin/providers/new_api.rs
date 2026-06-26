@@ -1,6 +1,8 @@
+use super::super::{http_client, BrowserProfile};
+use super::{
+    classify_checkin_status, format_awarded_quota, read_error_message, read_number, CheckinResponse,
+};
 use crate::error::Result;
-use super::super::{BrowserProfile, http_client};
-use super::{CheckinResponse, classify_checkin_status, format_awarded_quota, read_number, read_error_message};
 
 /// 读取本次签到获得的额度（参考 Next.js readAwardedQuota）
 /// 依次尝试 data.quota_awarded / data.quotaAwarded / data.quota
@@ -19,8 +21,13 @@ fn read_checked_in_flag(data: Option<&serde_json::Value>) -> bool {
         Some(d) => d,
         None => return false,
     };
-    data.get("checked_in").and_then(|v| v.as_bool()).unwrap_or(false)
-        || data.get("checkedIn").and_then(|v| v.as_bool()).unwrap_or(false)
+    data.get("checked_in")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        || data
+            .get("checkedIn")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
 }
 
 pub async fn checkin(
@@ -34,7 +41,8 @@ pub async fn checkin(
     let client = http_client();
 
     let mut req = super::super::apply_browser_headers(
-        client.post(&url)
+        client
+            .post(&url)
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .header("Pragma", "no-cache")
@@ -69,17 +77,22 @@ pub async fn checkin(
     let text = response.text().await?;
 
     if !status_code.is_success() {
-        return Ok(("failed".to_string(), format!("签到请求失败：HTTP {}", status_code), Some(text)));
+        return Ok((
+            "failed".to_string(),
+            format!("签到请求失败：HTTP {}", status_code),
+            Some(text),
+        ));
     }
 
-    let parsed: CheckinResponse = serde_json::from_str(&text)
-        .unwrap_or(CheckinResponse {
-            success: false,
-            message: Some("响应解析失败".into()),
-            data: None,
-        });
+    let parsed: CheckinResponse = serde_json::from_str(&text).unwrap_or(CheckinResponse {
+        success: false,
+        message: Some("响应解析失败".into()),
+        data: None,
+    });
 
-        let message = parsed.message.unwrap_or_else(|| "站点未返回消息".to_string());
+    let message = parsed
+        .message
+        .unwrap_or_else(|| "站点未返回消息".to_string());
 
     // 状态判定：已签关键词 > checked_in 标志 > success（与 Next.js 顺序对齐）
     let status = {
@@ -100,12 +113,19 @@ pub async fn checkin(
     Ok((status.to_string(), final_message, Some(text)))
 }
 
-pub async fn fetch_balance(base_url: &str, user_id: Option<&str>, access_token: Option<&str>, cookie: Option<&str>, profile: &BrowserProfile) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+pub async fn fetch_balance(
+    base_url: &str,
+    user_id: Option<&str>,
+    access_token: Option<&str>,
+    cookie: Option<&str>,
+    profile: &BrowserProfile,
+) -> std::result::Result<f64, Box<dyn std::error::Error>> {
     let client = http_client();
     let url = format!("{}/api/user/self", base_url.trim_end_matches('/'));
 
     let mut req = super::super::apply_browser_headers(
-        client.get(&url)
+        client
+            .get(&url)
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .header("Pragma", "no-cache")
@@ -144,16 +164,17 @@ pub async fn fetch_balance(base_url: &str, user_id: Option<&str>, access_token: 
     if !status.is_success() {
         tracing::error!("Balance fetch failed: HTTP {}, body: {}", status, &text);
         return Err(read_error_message(payload.as_ref())
-            .unwrap_or_else(|| format!("余额请求失败：HTTP {}", status)).into());
+            .unwrap_or_else(|| format!("余额请求失败：HTTP {}", status))
+            .into());
     }
 
     // 尝试多种路径提取余额
-    let quota = payload.as_ref()
-        .and_then(|v| {
-            // 尝试直接读取 quota
-            read_number(v.get("quota"))
-                // 尝试 data 字段（可能是对象或数字）
-                .or_else(|| v.get("data").and_then(|d| {
+    let quota = payload.as_ref().and_then(|v| {
+        // 尝试直接读取 quota
+        read_number(v.get("quota"))
+            // 尝试 data 字段（可能是对象或数字）
+            .or_else(|| {
+                v.get("data").and_then(|d| {
                     if d.is_object() {
                         // data 是对象，尝试 data.quota
                         read_number(d.get("quota"))
@@ -161,12 +182,13 @@ pub async fn fetch_balance(base_url: &str, user_id: Option<&str>, access_token: 
                         // data 是数字
                         read_number(Some(d))
                     }
-                }))
-                // 尝试其他常见字段名
-                .or_else(|| read_number(v.get("balance")))
-                .or_else(|| read_number(v.get("credit")))
-                .or_else(|| read_number(v.get("amount")))
-        });
+                })
+            })
+            // 尝试其他常见字段名
+            .or_else(|| read_number(v.get("balance")))
+            .or_else(|| read_number(v.get("credit")))
+            .or_else(|| read_number(v.get("amount")))
+    });
 
     if let Some(q) = quota {
         Ok(q)
