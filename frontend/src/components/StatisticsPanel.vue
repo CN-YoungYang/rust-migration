@@ -2,12 +2,28 @@
   <section class="statistics-panel">
     <div class="panel-header">
       <h2>📊 数据统计</h2>
-      <div class="date-range">
-        <input v-model="startDate" type="date" class="date-input" />
-        <span>至</span>
-        <input v-model="endDate" type="date" class="date-input" />
-        <button class="primary" @click="loadStatistics">查询</button>
-        <button @click="setDefaultRange">最近30天</button>
+      <div class="toolbar">
+        <select
+          v-if="isAdmin"
+          v-model="selectedUserId"
+          class="user-filter"
+          :disabled="usersLoading || loading"
+        >
+          <option value="">全部用户</option>
+          <option v-if="usersLoading" disabled>加载中...</option>
+          <option v-for="u in allUsers" :key="u.id" :value="u.id">
+            {{ u.username }}{{ u.id === currentUser?.id ? '（我）' : '' }}
+          </option>
+        </select>
+        <div class="date-range">
+          <input v-model="startDate" type="date" class="date-input" :disabled="loading" />
+          <span class="date-separator">至</span>
+          <input v-model="endDate" type="date" class="date-input" :disabled="loading" />
+          <button class="primary" @click="loadStatistics" :disabled="loading">
+            {{ loading ? '查询中...' : '查询' }}
+          </button>
+          <button @click="applyDefaultRange" :disabled="loading">最近30天</button>
+        </div>
       </div>
     </div>
 
@@ -137,9 +153,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { apiUrl, authHeaders, request, responseData } from '../utils/api'
 import { showToast } from '../utils/toast'
+import type { CurrentUser } from '../types'
+import { useUsers } from '../composables/useUsers'
 
 interface Statistics {
   overview: {
@@ -174,10 +192,18 @@ interface Statistics {
   }>
 }
 
+const props = defineProps<{
+  currentUser: CurrentUser | null
+  isAdmin: boolean
+}>()
+
+const { allUsers, usersLoading, loadUsers } = useUsers(() => props.isAdmin)
 const loading = ref(false)
 const statistics = ref<Statistics | null>(null)
 const startDate = ref('')
 const endDate = ref('')
+const selectedUserId = ref('')
+let requestSeq = 0
 
 // 设置默认时间范围（最近30天）
 function setDefaultRange() {
@@ -187,6 +213,11 @@ function setDefaultRange() {
 
   endDate.value = formatDateInput(today)
   startDate.value = formatDateInput(thirtyDaysAgo)
+}
+
+function applyDefaultRange() {
+  setDefaultRange()
+  loadStatistics()
 }
 
 function formatDateInput(date: Date): string {
@@ -211,31 +242,56 @@ function getRateClass(rate: number): string {
 }
 
 async function loadStatistics() {
+  const seq = ++requestSeq
   loading.value = true
   try {
     const params = new URLSearchParams()
     if (startDate.value) params.append('startDate', startDate.value)
     if (endDate.value) params.append('endDate', endDate.value)
+    if (props.isAdmin && selectedUserId.value) params.append('userId', selectedUserId.value)
 
     const url = apiUrl(`/statistics?${params.toString()}`)
     const response = await request(url, { headers: authHeaders() })
-    statistics.value = await responseData<Statistics>(response)
+    const data = await responseData<Statistics>(response)
+    if (seq === requestSeq) {
+      statistics.value = data
+    }
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '加载统计数据失败', 'error')
+    if (seq === requestSeq) {
+      showToast(error instanceof Error ? error.message : '加载统计数据失败', 'error')
+    }
   } finally {
-    loading.value = false
+    if (seq === requestSeq) {
+      loading.value = false
+    }
   }
 }
 
 onMounted(() => {
   setDefaultRange()
+  if (props.isAdmin) {
+    loadUsers()
+  }
   loadStatistics()
+})
+
+watch(selectedUserId, () => {
+  loadStatistics()
+})
+
+watch(() => props.isAdmin, (isAdmin) => {
+  if (isAdmin) {
+    loadUsers()
+    return
+  }
+  selectedUserId.value = ''
 })
 </script>
 
 <style scoped>
 .statistics-panel {
   padding: 20px;
+  color: #f8fafc;
 }
 
 .panel-header {
@@ -247,17 +303,65 @@ onMounted(() => {
   gap: 16px;
 }
 
+.panel-header h2 {
+  color: #f8fafc;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .date-range {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-.date-input {
+.date-separator {
+  color: #d1d5db;
+}
+
+.date-input,
+.user-filter {
   padding: 8px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid #374151;
   border-radius: 4px;
+  background: #0b1220;
+  color: #fff;
   font-size: 14px;
+}
+
+.user-filter {
+  min-width: 160px;
+}
+
+button {
+  border: 0;
+  border-radius: 4px;
+  padding: 8px 12px;
+  background: #374151;
+  color: #fff;
+  cursor: pointer;
+}
+
+button.primary {
+  background: #0070f3;
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+button:disabled,
+.date-input:disabled,
+.user-filter:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .overview-grid {
@@ -309,6 +413,11 @@ onMounted(() => {
   border-radius: 8px;
   padding: 24px;
   margin-bottom: 24px;
+  color: #1e2227;
+}
+
+.table-section {
+  overflow-x: auto;
 }
 
 .chart-section h3, .table-section h3, .info-section h3 {
@@ -322,6 +431,7 @@ onMounted(() => {
   gap: 16px;
   margin-bottom: 16px;
   font-size: 14px;
+  color: #3f4650;
 }
 
 .legend-item {
@@ -400,7 +510,9 @@ onMounted(() => {
 
 .stats-table {
   width: 100%;
+  min-width: 720px;
   border-collapse: collapse;
+  color: #1e2227;
 }
 
 .stats-table th {
@@ -417,6 +529,7 @@ onMounted(() => {
   padding: 12px;
   border-bottom: 1px solid #f0f0f0;
   font-size: 14px;
+  color: #2f363e;
 }
 
 .stats-table tbody tr:hover {
@@ -424,12 +537,22 @@ onMounted(() => {
 }
 
 .success-text {
-  color: #4caf50;
+  color: #2e7d32;
   font-weight: 600;
 }
 
 .failed-text {
-  color: #f44336;
+  color: #c62828;
+  font-weight: 600;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #eef2ff;
+  color: #1f3a8a;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -449,6 +572,7 @@ onMounted(() => {
 .info-text {
   font-size: 16px;
   margin-bottom: 12px;
+  color: #2f363e;
 }
 
 .info-text strong {

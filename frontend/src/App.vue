@@ -45,7 +45,7 @@
       <div v-else>
         <AccountPanel v-if="currentView === 'accounts'" :current-user="currentUser" :is-admin="isAdmin" />
         <CheckinRunsPanel v-else-if="currentView === 'runs'" :current-user="currentUser" :is-admin="isAdmin" />
-        <StatisticsPanel v-else-if="currentView === 'statistics'" />
+        <StatisticsPanel v-else-if="currentView === 'statistics'" :current-user="currentUser" :is-admin="isAdmin" />
         <NotificationPanel v-else-if="currentView === 'notifications'" />
         <SettingsPanel v-else-if="currentView === 'settings' && isAdmin" />
         <AdminUserPanel v-else-if="currentView === 'users'" :current-user="currentUser" />

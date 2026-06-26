@@ -19,6 +19,9 @@ pub struct StatisticsQuery {
     /// 结束日期 (YYYY-MM-DD)，默认为今天
     #[serde(rename = "endDate")]
     end_date: Option<String>,
+    /// 管理员查看指定用户（AppUser.id）的统计数据
+    #[serde(rename = "userId")]
+    user_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -132,6 +135,26 @@ fn local_day_end(date: NaiveDate) -> Result<DateTime<Utc>> {
         .ok_or_else(|| AppError::Internal("无法解析本地日期结束时间".into()))
 }
 
+fn resolve_owner_filter(
+    user: &crate::models::AppUser,
+    is_admin: bool,
+    requested_user_id: Option<&str>,
+) -> Result<Option<String>> {
+    let requested_user_id = requested_user_id.map(str::trim).filter(|id| !id.is_empty());
+
+    if is_admin {
+        return Ok(requested_user_id.map(ToOwned::to_owned));
+    }
+
+    if let Some(owner_id) = requested_user_id {
+        if owner_id != user.id {
+            return Err(AppError::Forbidden);
+        }
+    }
+
+    Ok(Some(user.id.clone()))
+}
+
 /// GET /api/statistics - 获取统计数据
 pub async fn get_statistics(
     State(state): State<Arc<AppState>>,
@@ -165,21 +188,22 @@ pub async fn get_statistics(
 
     let start_datetime = local_day_start(start_date)?;
     let end_datetime = local_day_end(end_date)?;
+    let owner_id = resolve_owner_filter(&user, is_admin, query.user_id.as_deref())?;
+    let owner_id = owner_id.as_deref();
 
     // 计算概览数据
-    let overview =
-        calculate_overview(&state.db, &user, is_admin, start_datetime, end_datetime).await?;
+    let overview = calculate_overview(&state.db, owner_id, start_datetime, end_datetime).await?;
 
     // 计算每日趋势
     let daily_trend =
-        calculate_daily_trend(&state.db, &user, is_admin, start_datetime, end_datetime).await?;
+        calculate_daily_trend(&state.db, owner_id, start_datetime, end_datetime).await?;
 
     // 计算站点统计
     let site_stats =
-        calculate_site_stats(&state.db, &user, is_admin, start_datetime, end_datetime).await?;
+        calculate_site_stats(&state.db, owner_id, start_datetime, end_datetime).await?;
 
     // 计算余额趋势（最近30天）
-    let balance_trend = calculate_balance_trend(&state.db, &user, is_admin).await?;
+    let balance_trend = calculate_balance_trend(&state.db, owner_id).await?;
 
     Ok(crate::routes::data(StatisticsResponse {
         overview,
@@ -191,18 +215,21 @@ pub async fn get_statistics(
 
 async fn calculate_overview(
     db: &sqlx::SqlitePool,
-    user: &crate::models::AppUser,
-    is_admin: bool,
+    owner_id: Option<&str>,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
 ) -> Result<Overview> {
-    let owner_filter = if is_admin { "" } else { " AND ownerId = ?" };
+    let owner_filter = if owner_id.is_some() {
+        " AND ownerId = ?"
+    } else {
+        ""
+    };
 
     // 总账户数和已启用账户数
     let sql = format!("SELECT COUNT(*) as total, SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) as enabled FROM CheckinAccount WHERE 1=1{}", owner_filter);
     let mut query = sqlx::query_as::<_, (i64, Option<i64>)>(&sql);
-    if !is_admin {
-        query = query.bind(&user.id);
+    if let Some(owner_id) = owner_id {
+        query = query.bind(owner_id);
     }
     let (total_accounts, enabled_accounts) = query.fetch_one(db).await?;
     let enabled_accounts = enabled_accounts.unwrap_or(0);
@@ -217,11 +244,15 @@ async fn calculate_overview(
          FROM CheckinRun cr
          JOIN CheckinAccount ca ON cr.accountId = ca.id
          WHERE cr.createdAt >= ?{}",
-        if is_admin { "" } else { " AND ca.ownerId = ?" }
+        if owner_id.is_some() {
+            " AND ca.ownerId = ?"
+        } else {
+            ""
+        }
     );
     let mut query = sqlx::query_as::<_, (Option<i64>, Option<i64>)>(&sql).bind(today_start);
-    if !is_admin {
-        query = query.bind(&user.id);
+    if let Some(owner_id) = owner_id {
+        query = query.bind(owner_id);
     }
     let (today_success, today_failed) = query.fetch_one(db).await?;
 
@@ -231,13 +262,17 @@ async fn calculate_overview(
          FROM CheckinRun cr
          JOIN CheckinAccount ca ON cr.accountId = ca.id
          WHERE cr.createdAt >= ? AND cr.createdAt <= ?{}",
-        if is_admin { "" } else { " AND ca.ownerId = ?" }
+        if owner_id.is_some() {
+            " AND ca.ownerId = ?"
+        } else {
+            ""
+        }
     );
     let mut query = sqlx::query_as::<_, (i64, Option<i64>)>(&sql)
         .bind(start)
         .bind(end);
-    if !is_admin {
-        query = query.bind(&user.id);
+    if let Some(owner_id) = owner_id {
+        query = query.bind(owner_id);
     }
     let (total_runs, success_count) = query.fetch_one(db).await?;
     let success_rate = if total_runs > 0 {
@@ -252,8 +287,8 @@ async fn calculate_overview(
         owner_filter
     );
     let mut query = sqlx::query_as::<_, (Option<f64>,)>(&sql);
-    if !is_admin {
-        query = query.bind(&user.id);
+    if let Some(owner_id) = owner_id {
+        query = query.bind(owner_id);
     }
     let (total_quota,) = query.fetch_one(db).await?;
     let total_balance = total_quota.unwrap_or(0.0) / 500000.0;
@@ -271,8 +306,7 @@ async fn calculate_overview(
 
 async fn calculate_daily_trend(
     db: &sqlx::SqlitePool,
-    user: &crate::models::AppUser,
-    is_admin: bool,
+    owner_id: Option<&str>,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
 ) -> Result<Vec<DailyStats>> {
@@ -288,14 +322,18 @@ async fn calculate_daily_trend(
          WHERE cr.createdAt >= ? AND cr.createdAt <= ?{}
          GROUP BY DATE(cr.createdAt, 'localtime')
          ORDER BY date ASC",
-        if is_admin { "" } else { " AND ca.ownerId = ?" }
+        if owner_id.is_some() {
+            " AND ca.ownerId = ?"
+        } else {
+            ""
+        }
     );
 
     let mut query = sqlx::query_as::<_, (String, i64, i64, i64, i64)>(&sql)
         .bind(start)
         .bind(end);
-    if !is_admin {
-        query = query.bind(&user.id);
+    if let Some(owner_id) = owner_id {
+        query = query.bind(owner_id);
     }
 
     let rows = query.fetch_all(db).await?;
@@ -322,8 +360,7 @@ async fn calculate_daily_trend(
 
 async fn calculate_site_stats(
     db: &sqlx::SqlitePool,
-    user: &crate::models::AppUser,
-    is_admin: bool,
+    owner_id: Option<&str>,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
 ) -> Result<Vec<SiteStats>> {
@@ -341,15 +378,19 @@ async fn calculate_site_stats(
          WHERE 1=1{}
          GROUP BY ca.siteType
          ORDER BY accountCount DESC",
-        if is_admin { "" } else { " AND ca.ownerId = ?" }
+        if owner_id.is_some() {
+            " AND ca.ownerId = ?"
+        } else {
+            ""
+        }
     );
 
     let mut query =
         sqlx::query_as::<_, (String, i64, i64, Option<i64>, Option<i64>, Option<f64>)>(&sql)
             .bind(start)
             .bind(end);
-    if !is_admin {
-        query = query.bind(&user.id);
+    if let Some(owner_id) = owner_id {
+        query = query.bind(owner_id);
     }
 
     let rows = query.fetch_all(db).await?;
@@ -381,19 +422,22 @@ async fn calculate_site_stats(
 
 async fn calculate_balance_trend(
     db: &sqlx::SqlitePool,
-    user: &crate::models::AppUser,
-    is_admin: bool,
+    owner_id: Option<&str>,
 ) -> Result<Vec<BalanceTrend>> {
     // 由于没有历史余额记录，这里返回当前余额快照
     // 未来可以考虑在每次签到后记录余额变化到单独的表
-    let owner_filter = if is_admin { "" } else { " AND ownerId = ?" };
+    let owner_filter = if owner_id.is_some() {
+        " AND ownerId = ?"
+    } else {
+        ""
+    };
     let sql = format!(
         "SELECT SUM(COALESCE(lastBalance, 0)) FROM CheckinAccount WHERE enabled = 1{}",
         owner_filter
     );
     let mut query = sqlx::query_as::<_, (Option<f64>,)>(&sql);
-    if !is_admin {
-        query = query.bind(&user.id);
+    if let Some(owner_id) = owner_id {
+        query = query.bind(owner_id);
     }
     let (total_quota,) = query.fetch_one(db).await?;
     let balance = total_quota.unwrap_or(0.0) / 500000.0;
@@ -404,4 +448,58 @@ async fn calculate_balance_trend(
         date: today,
         balance,
     }])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_owner_filter;
+    use crate::{error::AppError, models::AppUser};
+    use chrono::Utc;
+
+    fn user(id: &str, role: &str) -> AppUser {
+        let now = Utc::now();
+        AppUser {
+            id: id.to_string(),
+            username: format!("{id}-name"),
+            password_hash: String::new(),
+            role: role.to_string(),
+            enabled: true,
+            note: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn admin_statistics_filter_can_target_any_user_or_all_users() {
+        let admin = user("admin-id", "ADMIN");
+
+        assert_eq!(resolve_owner_filter(&admin, true, None).unwrap(), None);
+        assert_eq!(
+            resolve_owner_filter(&admin, true, Some("target-id")).unwrap(),
+            Some("target-id".to_string())
+        );
+        assert_eq!(
+            resolve_owner_filter(&admin, true, Some("  ")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn regular_user_statistics_filter_is_limited_to_self() {
+        let regular = user("user-id", "USER");
+
+        assert_eq!(
+            resolve_owner_filter(&regular, false, None).unwrap(),
+            Some("user-id".to_string())
+        );
+        assert_eq!(
+            resolve_owner_filter(&regular, false, Some("user-id")).unwrap(),
+            Some("user-id".to_string())
+        );
+        assert!(matches!(
+            resolve_owner_filter(&regular, false, Some("other-id")),
+            Err(AppError::Forbidden)
+        ));
+    }
 }
