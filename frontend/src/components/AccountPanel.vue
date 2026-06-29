@@ -1,28 +1,32 @@
 <template>
   <section class="account-panel">
     <div class="panel-header">
-      <h2>签到账户管理</h2>
+      <div>
+        <h2>签到账户管理</h2>
+        <p class="panel-subtitle">
+          已启用 {{ listSummary.enabled }} 个，今日执行 {{ listSummary.todayRuns }} 次，失败 {{ listSummary.failed }} 个
+        </p>
+      </div>
       <div class="header-actions">
         <select v-if="isAdmin" v-model="filterUserId" class="user-filter">
           <option value="">全部用户</option>
           <option v-if="usersLoading" disabled>加载中...</option>
           <option v-for="u in allUsers" :key="u.id" :value="u.id">{{ u.username }}</option>
         </select>
-        <button class="secondary" @click="exportAccounts" :disabled="loading">导出 CSV</button>
-        <button class="secondary" @click="openImportDialog">导入 CSV</button>
+        <button class="secondary" @click="exportAccounts" :disabled="loading || actionBusy">导出 CSV</button>
+        <button class="secondary" @click="openImportDialog" :disabled="actionBusy">导入 CSV</button>
         <button
           v-if="accounts.length > 0"
           class="primary"
-          :disabled="batchLoading"
-          @click="batchCheckin(accounts.map((a) => a.id))"
+          :disabled="actionBusy"
+          @click="batchCheckin(accounts.map((a) => a.id), filterUserId ? '该用户账户' : '当前列表账户')"
         >
-          {{ batchLoading ? '签到中...' : (filterUserId ? '该用户签到' : '全部签到') }}
+          {{ batchLoading ? '签到中...' : (filterUserId ? '该用户签到' : '当前列表签到') }}
         </button>
-        <button class="primary" :disabled="batchLoading" @click="openCreate">新增账户</button>
+        <button class="primary" :disabled="actionBusy" @click="openCreate">新增账户</button>
       </div>
     </div>
 
-    <!-- 筛选栏 -->
     <div class="filter-bar">
       <select v-model="filterSiteType" class="filter-select">
         <option value="">全部类型</option>
@@ -40,16 +44,85 @@
         <option value="not_today">今日未签到</option>
         <option value="success">成功</option>
         <option value="failed">失败</option>
+        <option value="already_checked">今日已签</option>
         <option value="never">从未签到</option>
       </select>
       <input
         v-model="filterKeyword"
         type="text"
-        placeholder="搜索账户名称或地址..."
+        placeholder="搜索账户名称、地址或备注"
         class="filter-input"
       />
       <button v-if="hasActiveFilter" class="clear-filter" @click="clearFilters">清除筛选</button>
       <span class="filter-count">{{ accounts.length }} 个结果</span>
+    </div>
+
+    <div v-if="!loading && accounts.length > 0" class="bulk-toolbar">
+      <label class="select-all">
+        <input
+          type="checkbox"
+          :checked="allVisibleSelected"
+          :indeterminate.prop="someVisibleSelected"
+          @change="toggleSelectAllVisible"
+        />
+        选中本页
+      </label>
+      <span class="selection-count">已选 {{ selectedIds.length }} 个</span>
+      <button :disabled="selectedIds.length === 0 || actionBusy" @click="batchCheckin(selectedIds, '选中账户')">
+        签到选中
+      </button>
+      <button :disabled="selectedIds.length === 0 || actionBusy" @click="bulkRefreshBalance">
+        刷新余额
+      </button>
+      <button :disabled="selectedIds.length === 0 || actionBusy" @click="bulkSetEnabled(true)">
+        批量启用
+      </button>
+      <button :disabled="selectedIds.length === 0 || actionBusy" @click="bulkSetEnabled(false)">
+        批量禁用
+      </button>
+      <button v-if="selectedIds.length > 0" class="ghost" :disabled="actionBusy" @click="clearSelection">
+        清空选择
+      </button>
+    </div>
+
+    <div v-if="bulkProgress" class="progress-panel">
+      <div class="progress-meta">
+        <strong>{{ bulkProgress.label }}</strong>
+        <span>{{ bulkProgress.completed }} / {{ bulkProgress.total }}</span>
+      </div>
+      <div class="progress-track">
+        <span :style="{ width: progressPercent + '%' }"></span>
+      </div>
+      <p v-if="bulkProgress.current" class="muted">当前：{{ bulkProgress.current }}</p>
+    </div>
+
+    <div v-if="bulkErrors.length > 0" class="error-panel">
+      <div class="error-panel-header">
+        <strong>失败摘要</strong>
+        <button class="ghost" @click="bulkErrors = []">清除</button>
+      </div>
+      <ul>
+        <li v-for="err in bulkErrors" :key="err">{{ err }}</li>
+      </ul>
+    </div>
+
+    <div v-if="lastBatchResult" class="batch-result">
+      <div class="batch-result-header">
+        <div>
+          <strong>批量签到结果</strong>
+          <p class="muted">
+            共 {{ lastBatchResult.total }} 个，成功 {{ lastBatchResult.succeeded }} 个，跳过 {{ lastBatchResult.skipped }} 个，失败 {{ lastBatchResult.failed }} 个
+          </p>
+        </div>
+        <button class="ghost" @click="lastBatchResult = null">关闭</button>
+      </div>
+      <div class="batch-items">
+        <div v-for="item in lastBatchResult.items" :key="item.accountId" class="batch-item">
+          <span class="batch-name">{{ item.accountName }}</span>
+          <span class="status-pill" :class="batchStatusClass(item.status)">{{ batchStatusText(item.status) }}</span>
+          <span v-if="item.message" class="batch-message" :title="item.message">{{ item.message }}</span>
+        </div>
+      </div>
     </div>
 
     <p v-if="loading" class="empty">加载中...</p>
@@ -61,28 +134,64 @@
           <span class="muted">{{ group.items.length }} 个账户</span>
           <button
             class="batch-btn"
-            :disabled="batchLoading"
-            @click="batchCheckin(group.items.map((a) => a.id))"
+            :disabled="actionBusy"
+            @click="batchCheckin(group.items.map((a) => a.id), `${group.label} 分组`)"
           >
             {{ batchLoading ? '执行中...' : '该组签到' }}
           </button>
         </div>
-        <article v-for="account in group.items" :key="account.id" class="account-card">
-          <div>
+
+        <article
+          v-for="account in group.items"
+          :key="account.id"
+          class="account-card"
+          :class="{ selected: selectedAccountIds.has(account.id), disabled: !account.enabled }"
+        >
+          <label class="card-select" :title="selectedAccountIds.has(account.id) ? '取消选择' : '选择账户'">
+            <input
+              type="checkbox"
+              :checked="selectedAccountIds.has(account.id)"
+              @change="toggleAccountSelection(account.id, $event)"
+            />
+          </label>
+
+          <div class="account-main">
             <div class="title-row">
               <strong>{{ account.name }}</strong>
               <span class="badge">{{ account.siteType }}</span>
               <span v-if="!account.enabled" class="badge disabled">已禁用</span>
+              <span class="status-pill" :class="accountStatusClass(account.lastStatus)">
+                {{ accountStatusText(account.lastStatus) }}
+              </span>
+              <span v-if="accountCheckedToday(account)" class="status-pill today">
+                今日 {{ account.todayRuns ?? 0 }} 次
+              </span>
             </div>
-            <p class="muted">{{ account.baseUrl }}</p>
-            <p class="muted">认证：{{ account.authType }} ｜ 余额：{{ formatBalance(account.lastBalance) }}</p>
-            <p v-if="account.lastStatus" class="muted">最近状态：{{ account.lastStatus }} {{ account.lastMessage || '' }}</p>
-            <p v-if="account.note" class="note">📝 {{ account.note }}</p>
+
+            <div class="meta-grid">
+              <span><b>地址</b>{{ account.baseUrl || '-' }}</span>
+              <span><b>认证</b>{{ account.authType || '-' }}</span>
+              <span><b>余额</b>{{ formatBalance(account.lastBalance) }}</span>
+              <span><b>最近签到</b>{{ formatDateTime(account.lastRunAt) }}</span>
+              <span v-if="account.ownerName"><b>归属</b>{{ account.ownerName }}</span>
+              <span v-if="account.lastBalanceAt"><b>余额刷新</b>{{ formatDateTime(account.lastBalanceAt) }}</span>
+            </div>
+
+            <p v-if="account.lastMessage" class="message" :title="account.lastMessage">
+              {{ account.lastMessage }}
+            </p>
+            <p v-if="account.note" class="note">备注：{{ account.note }}</p>
           </div>
+
           <div class="actions">
-            <button @click="refreshBalance(account.id)">刷新余额</button>
-            <button @click="openEdit(account)">编辑</button>
-            <button class="danger" @click="deleteAccount(account.id)">删除</button>
+            <button @click="refreshBalance(account.id)" :disabled="isAccountBusy(account.id)">
+              {{ isAccountProcessing(account.id) ? '处理中...' : '刷新余额' }}
+            </button>
+            <button @click="toggleAccountEnabled(account)" :disabled="isAccountBusy(account.id)">
+              {{ account.enabled ? '禁用' : '启用' }}
+            </button>
+            <button @click="openEdit(account)" :disabled="actionBusy">编辑</button>
+            <button class="danger" @click="deleteAccount(account.id)" :disabled="actionBusy">删除</button>
           </div>
         </article>
       </section>
@@ -94,7 +203,7 @@
         <h3>{{ editingId ? '编辑账户' : '新增账户' }}</h3>
         <label>名称<input v-model="form.name" required /></label>
         <label>站点类型
-          <select v-model="form.siteType">
+          <select v-model="form.siteType" :disabled="Boolean(editingId)">
             <option value="new-api">new-api</option>
             <option value="anyrouter">anyrouter</option>
             <option value="x666">x666</option>
@@ -103,25 +212,26 @@
         <label>站点地址<input v-model="form.baseUrl" required /></label>
         <label>用户ID<input v-model="form.userId" /></label>
         <label>认证方式
-          <select v-model="form.authType">
+          <select v-model="form.authType" :disabled="Boolean(editingId)">
             <option value="access_token">access_token</option>
             <option value="cookie">cookie</option>
           </select>
         </label>
-        <label>Access Token<input v-model="form.accessToken" type="password" /></label>
+        <label>Access Token<input v-model="form.accessToken" type="password" autocomplete="new-password" /></label>
         <label>Cookie<textarea v-model="form.cookie" rows="3"></textarea></label>
         <label>自定义签到URL<input v-model="form.customCheckinUrl" /></label>
         <label class="inline"><input v-model="form.enabled" type="checkbox" /> 启用</label>
         <label class="inline"><input v-model="form.retryEnabled" type="checkbox" /> 允许重试</label>
         <label>备注<input v-model="form.note" placeholder="可选，方便识别账户" /></label>
         <div class="modal-actions">
-          <button class="primary" type="submit">保存</button>
-          <button type="button" @click="closeForm">取消</button>
+          <button class="primary" type="submit" :disabled="formSubmitting">
+            {{ formSubmitting ? '保存中...' : '保存' }}
+          </button>
+          <button type="button" @click="closeForm" :disabled="formSubmitting">取消</button>
         </div>
       </form>
     </div>
 
-    <!-- 导入对话框 -->
     <div v-if="showImportDialog" class="modal" @click.self="closeImportDialog">
       <div class="modal-content import-dialog">
         <h3>批量导入账户</h3>
@@ -146,8 +256,8 @@
         />
 
         <div v-if="importResult" class="import-result">
-          <p class="success" v-if="importResult.success > 0">✅ 成功导入 {{ importResult.success }} 个账户</p>
-          <p class="error" v-if="importResult.failed > 0">❌ 失败 {{ importResult.failed }} 个</p>
+          <p class="success" v-if="importResult.success > 0">成功导入 {{ importResult.success }} 个账户</p>
+          <p class="error" v-if="importResult.failed > 0">失败 {{ importResult.failed }} 个</p>
           <div v-if="importResult.errors.length > 0" class="error-list">
             <details>
               <summary>查看错误详情</summary>
@@ -159,7 +269,7 @@
         </div>
 
         <div class="modal-actions">
-          <button type="button" @click="closeImportDialog">关闭</button>
+          <button type="button" @click="closeImportDialog" :disabled="importing">关闭</button>
           <button type="button" class="primary" @click="executeImport" :disabled="!selectedFile || importing">
             {{ importing ? '导入中...' : '开始导入' }}
           </button>
@@ -170,11 +280,33 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { apiUrl, authHeaders, request, responseData } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
 import type { CurrentUser, Account, AccountGroup } from '../types'
 import { useUsers } from '../composables/useUsers'
+
+interface BatchResultItem {
+  accountId: string
+  accountName: string
+  status: string
+  message?: string | null
+}
+
+interface BatchCheckinResult {
+  items: BatchResultItem[]
+  total: number
+  succeeded: number
+  skipped: number
+  failed: number
+}
+
+interface BulkProgress {
+  label: string
+  completed: number
+  total: number
+  current?: string
+}
 
 const props = defineProps<{
   currentUser: CurrentUser | null
@@ -188,68 +320,58 @@ const filterEnabled = ref('')
 const filterLastStatus = ref('')
 const filterKeyword = ref('')
 
-// One API / New API 系列标准换算：500000 quota = 1 美元
-// 与 Next.js 版本 (QUOTA_PER_USD = 500000) 保持一致
 const QUOTA_PER_USD = 500000
-
-function formatBalance(value: number | string | null | undefined): string {
-  if (value === null || value === undefined || value === '') return '余额未刷新'
-  const quota = typeof value === 'string' ? parseFloat(value) : value
-  if (!isFinite(quota)) return '余额未刷新'
-  const usd = quota / QUOTA_PER_USD
-  return `${usd.toFixed(2)}`
-}
 
 const accounts = ref<Account[]>([])
 const loading = ref(false)
 const showForm = ref(false)
 const editingId = ref('')
 const batchLoading = ref(false)
+const bulkLoading = ref(false)
+const formSubmitting = ref(false)
+const busyAccountIds = ref<Set<string>>(new Set())
+const selectedAccountIds = ref<Set<string>>(new Set())
+const bulkProgress = ref<BulkProgress | null>(null)
+const bulkErrors = ref<string[]>([])
+const lastBatchResult = ref<BatchCheckinResult | null>(null)
+let accountRequestSeq = 0
 
-// 筛选相关计算属性和方法
+const actionBusy = computed(() => (
+  batchLoading.value
+  || bulkLoading.value
+  || formSubmitting.value
+  || busyAccountIds.value.size > 0
+))
+
+const visibleAccountIds = computed(() => accounts.value.map((account) => account.id))
+const selectedIds = computed(() => visibleAccountIds.value.filter((id) => selectedAccountIds.value.has(id)))
+const allVisibleSelected = computed(() => (
+  visibleAccountIds.value.length > 0
+  && visibleAccountIds.value.every((id) => selectedAccountIds.value.has(id))
+))
+const someVisibleSelected = computed(() => selectedIds.value.length > 0 && !allVisibleSelected.value)
+
+const listSummary = computed(() => {
+  let enabled = 0
+  let failed = 0
+  let todayRuns = 0
+  for (const account of accounts.value) {
+    if (account.enabled) enabled += 1
+    if (account.lastStatus === 'failed') failed += 1
+    todayRuns += account.todayRuns ?? 0
+  }
+  return { enabled, failed, todayRuns }
+})
+
+const progressPercent = computed(() => {
+  if (!bulkProgress.value || bulkProgress.value.total === 0) return 0
+  return Math.min(100, Math.round((bulkProgress.value.completed / bulkProgress.value.total) * 100))
+})
+
 const hasActiveFilter = computed(() => {
   return !!(filterSiteType.value || filterEnabled.value || filterLastStatus.value || filterKeyword.value)
 })
 
-function clearFilters() {
-  filterSiteType.value = ''
-  filterEnabled.value = ''
-  filterLastStatus.value = ''
-  filterKeyword.value = ''
-}
-
-// 批量手动签到：复用分组，跳过今日已签由后端统一判定。
-async function batchCheckin(accountIds: string[]) {
-  if (accountIds.length === 0 || batchLoading.value) return
-  const label = filterUserId.value ? '该用户的所有账户' : '全部账户'
-  if (!(await confirmAction(`确定要对 ${label}（${accountIds.length} 个）执行签到吗？`))) return
-  batchLoading.value = true
-  try {
-    const response = await request(apiUrl('/checkin-runs/batch'), {
-      method: 'POST',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accountIds }),
-    })
-    const result = await responseData<{
-      total: number
-      succeeded: number
-      skipped: number
-      failed: number
-    }>(response)
-    showToast(
-      `批量签到完成：成功 ${result.succeeded}，跳过 ${result.skipped}，失败 ${result.failed}`,
-      result.failed > 0 ? 'error' : 'success',
-    )
-    await loadAccounts()
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '批量签到失败', 'error')
-  } finally {
-    batchLoading.value = false
-  }
-}
-
-// 管理员能看到所有用户的账户，按归属用户分组以免混淆；
-// 当前用户自己的分组排在最前，其余按用户名排序。
 const groupedAccounts = computed<AccountGroup[]>(() => {
   const groups = new Map<string, AccountGroup>()
   for (const account of accounts.value) {
@@ -285,6 +407,125 @@ const form = reactive({
   note: '',
 })
 
+function formatBalance(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '未刷新'
+  const quota = typeof value === 'string' ? parseFloat(value) : value
+  if (!Number.isFinite(quota)) return '未刷新'
+  return `$${(quota / QUOTA_PER_USD).toFixed(2)}`
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '无记录'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '无记录'
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function accountStatusText(status: string | null | undefined): string {
+  const map: Record<string, string> = {
+    success: '成功',
+    failed: '失败',
+    already_checked: '今日已签',
+    pending: '进行中',
+  }
+  return status ? (map[status] || status) : '未签到'
+}
+
+function accountStatusClass(status: string | null | undefined): string {
+  if (!status) return 'neutral'
+  if (status === 'already_checked') return 'already'
+  return status
+}
+
+function batchStatusText(status: string): string {
+  const map: Record<string, string> = {
+    success: '成功',
+    failed: '失败',
+    skipped: '跳过',
+    already_checked: '今日已签',
+    pending: '进行中',
+  }
+  return map[status] || status
+}
+
+function batchStatusClass(status: string): string {
+  if (status === 'already_checked') return 'already'
+  if (status === 'skipped') return 'neutral'
+  return status
+}
+
+function accountCheckedToday(account: Account): boolean {
+  if ((account.todayRuns ?? 0) > 0) return true
+  if (!account.lastRunAt) return false
+  const runDate = new Date(account.lastRunAt)
+  if (Number.isNaN(runDate.getTime())) return false
+  const today = new Date()
+  return runDate.toDateString() === today.toDateString()
+}
+
+function clearFilters() {
+  filterSiteType.value = ''
+  filterEnabled.value = ''
+  filterLastStatus.value = ''
+  filterKeyword.value = ''
+}
+
+function pruneSelection() {
+  const visible = new Set(visibleAccountIds.value)
+  selectedAccountIds.value = new Set([...selectedAccountIds.value].filter((id) => visible.has(id)))
+}
+
+function toggleAccountSelection(id: string, event: Event) {
+  const checked = (event.target as HTMLInputElement).checked
+  const next = new Set(selectedAccountIds.value)
+  if (checked) {
+    next.add(id)
+  } else {
+    next.delete(id)
+  }
+  selectedAccountIds.value = next
+}
+
+function toggleSelectAllVisible(event: Event) {
+  const checked = (event.target as HTMLInputElement).checked
+  const next = new Set(selectedAccountIds.value)
+  for (const id of visibleAccountIds.value) {
+    if (checked) {
+      next.add(id)
+    } else {
+      next.delete(id)
+    }
+  }
+  selectedAccountIds.value = next
+}
+
+function clearSelection() {
+  selectedAccountIds.value = new Set()
+}
+
+function setAccountBusy(id: string, busy: boolean) {
+  const next = new Set(busyAccountIds.value)
+  if (busy) {
+    next.add(id)
+  } else {
+    next.delete(id)
+  }
+  busyAccountIds.value = next
+}
+
+function isAccountBusy(id: string): boolean {
+  return actionBusy.value || busyAccountIds.value.has(id)
+}
+
+function isAccountProcessing(id: string): boolean {
+  return busyAccountIds.value.has(id)
+}
+
 function resetForm() {
   Object.assign(form, {
     name: '',
@@ -302,37 +543,76 @@ function resetForm() {
 }
 
 async function loadAccounts() {
+  const seq = ++accountRequestSeq
   loading.value = true
   try {
     let url = apiUrl('/accounts')
     const params = new URLSearchParams()
 
-    if (props.isAdmin && filterUserId.value) {
-      params.append('userId', filterUserId.value)
-    }
-    if (filterSiteType.value) {
-      params.append('siteType', filterSiteType.value)
-    }
-    if (filterEnabled.value) {
-      params.append('enabled', filterEnabled.value)
-    }
-    if (filterLastStatus.value) {
-      params.append('lastStatus', filterLastStatus.value)
-    }
-    if (filterKeyword.value) {
-      params.append('keyword', filterKeyword.value)
-    }
+    if (props.isAdmin && filterUserId.value) params.append('userId', filterUserId.value)
+    if (filterSiteType.value) params.append('siteType', filterSiteType.value)
+    if (filterEnabled.value) params.append('enabled', filterEnabled.value)
+    if (filterLastStatus.value) params.append('lastStatus', filterLastStatus.value)
+    if (filterKeyword.value) params.append('keyword', filterKeyword.value)
 
-    if (params.toString()) {
-      url += `?${params.toString()}`
-    }
+    if (params.toString()) url += `?${params.toString()}`
 
     const response = await request(url, { headers: authHeaders() })
-    accounts.value = await responseData<Account[]>(response)
+    const data = await responseData<Account[]>(response)
+    if (seq === accountRequestSeq) {
+      accounts.value = data
+      pruneSelection()
+    }
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '加载账户失败', 'error')
+    if (seq === accountRequestSeq) {
+      showToast(error instanceof Error ? error.message : '加载账户失败', 'error')
+    }
   } finally {
-    loading.value = false
+    if (seq === accountRequestSeq) {
+      loading.value = false
+    }
+  }
+}
+
+async function batchCheckin(accountIds: readonly string[], scopeLabel = '账户') {
+  const ids = [...new Set(accountIds)]
+  if (ids.length === 0 || batchLoading.value) return
+  if (!(await confirmAction(`确定要对${scopeLabel}（${ids.length} 个）执行签到吗？`))) return
+
+  batchLoading.value = true
+  bulkErrors.value = []
+  lastBatchResult.value = null
+  bulkProgress.value = {
+    label: '批量签到',
+    completed: 0,
+    total: ids.length,
+    current: '后端正在按设置串行执行',
+  }
+
+  try {
+    const response = await request(apiUrl('/checkin-runs/batch'), {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountIds: ids }),
+    })
+    const result = await responseData<BatchCheckinResult>(response)
+    lastBatchResult.value = result
+    bulkProgress.value = {
+      label: '批量签到',
+      completed: result.total,
+      total: result.total,
+      current: '已完成',
+    }
+    showToast(
+      `批量签到完成：成功 ${result.succeeded}，跳过 ${result.skipped}，失败 ${result.failed}`,
+      result.failed > 0 ? 'error' : 'success',
+    )
+    await loadAccounts()
+  } catch (error) {
+    bulkErrors.value = [error instanceof Error ? error.message : '批量签到失败']
+    showToast(bulkErrors.value[0], 'error')
+  } finally {
+    batchLoading.value = false
   }
 }
 
@@ -347,13 +627,13 @@ function openEdit(account: Account) {
   Object.assign(form, {
     name: account.name,
     siteType: account.siteType,
-    baseUrl: account.baseUrl,
+    baseUrl: account.baseUrl || '',
     userId: account.userId || '',
-    authType: account.authType,
+    authType: account.authType || 'access_token',
     accessToken: '',
     cookie: '',
     customCheckinUrl: account.customCheckinUrl || '',
-    enabled: account.enabled,
+    enabled: account.enabled ?? true,
     retryEnabled: account.retryEnabled ?? true,
     note: account.note || '',
   })
@@ -361,23 +641,31 @@ function openEdit(account: Account) {
 }
 
 function closeForm() {
+  if (formSubmitting.value) return
   showForm.value = false
   editingId.value = ''
 }
 
 async function submitForm() {
+  if (formSubmitting.value) return
+  formSubmitting.value = true
+  const optionalString = (value: string) => {
+    const trimmed = value.trim()
+    if (trimmed) return trimmed
+    return editingId.value ? null : undefined
+  }
   const payload = {
     name: form.name,
     siteType: form.siteType,
     baseUrl: form.baseUrl,
-    userId: form.userId || undefined,
+    userId: optionalString(form.userId),
     authType: form.authType,
-    accessToken: form.accessToken || undefined,
-    cookie: form.cookie || undefined,
-    customCheckinUrl: form.customCheckinUrl || undefined,
+    accessToken: form.accessToken.trim() || undefined,
+    cookie: form.cookie.trim() || undefined,
+    customCheckinUrl: optionalString(form.customCheckinUrl),
     enabled: form.enabled,
     retryEnabled: form.retryEnabled,
-    note: form.note || undefined,
+    note: optionalString(form.note),
   }
 
   try {
@@ -387,10 +675,13 @@ async function submitForm() {
       body: JSON.stringify(payload),
     })
     showToast('保存成功', 'success')
-    closeForm()
+    showForm.value = false
+    editingId.value = ''
     await loadAccounts()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '保存失败', 'error')
+  } finally {
+    formSubmitting.value = false
   }
 }
 
@@ -399,6 +690,9 @@ async function deleteAccount(id: string) {
   try {
     await request(apiUrl(`/accounts/${id}`), { method: 'DELETE', headers: authHeaders() })
     showToast('删除成功', 'success')
+    const next = new Set(selectedAccountIds.value)
+    next.delete(id)
+    selectedAccountIds.value = next
     await loadAccounts()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '删除失败', 'error')
@@ -406,16 +700,133 @@ async function deleteAccount(id: string) {
 }
 
 async function refreshBalance(id: string) {
+  if (isAccountBusy(id)) return
+  setAccountBusy(id, true)
   try {
     await request(apiUrl(`/accounts/${id}/refresh-balance`), { method: 'POST', headers: authHeaders() })
     showToast('余额已刷新', 'success')
     await loadAccounts()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '刷新余额失败', 'error')
+  } finally {
+    setAccountBusy(id, false)
   }
 }
 
-// 导入导出功能
+async function updateAccountEnabled(id: string, enabled: boolean) {
+  await request(apiUrl(`/accounts/${id}`), {
+    method: 'PUT',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+async function toggleAccountEnabled(account: Account) {
+  if (isAccountBusy(account.id)) return
+  const nextEnabled = !account.enabled
+  if (!nextEnabled && !(await confirmAction('禁用后该账户不会参与自动签到，确定继续吗？'))) return
+
+  setAccountBusy(account.id, true)
+  try {
+    await updateAccountEnabled(account.id, nextEnabled)
+    showToast(nextEnabled ? '账户已启用' : '账户已禁用', 'success')
+    await loadAccounts()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '更新账户状态失败', 'error')
+  } finally {
+    setAccountBusy(account.id, false)
+  }
+}
+
+async function bulkRefreshBalance() {
+  const ids = selectedIds.value.slice()
+  if (ids.length === 0 || bulkLoading.value) return
+  if (!(await confirmAction(`确定刷新选中 ${ids.length} 个账户的余额吗？`))) return
+
+  bulkLoading.value = true
+  bulkErrors.value = []
+  let succeeded = 0
+  let failed = 0
+
+  try {
+    for (const [index, id] of ids.entries()) {
+      const account = accounts.value.find((item) => item.id === id)
+      bulkProgress.value = {
+        label: '批量刷新余额',
+        completed: index,
+        total: ids.length,
+        current: account?.name || id,
+      }
+      setAccountBusy(id, true)
+      try {
+        await request(apiUrl(`/accounts/${id}/refresh-balance`), { method: 'POST', headers: authHeaders() })
+        succeeded += 1
+      } catch (error) {
+        failed += 1
+        const message = error instanceof Error ? error.message : '刷新失败'
+        bulkErrors.value.push(`${account?.name || id}：${message}`)
+      } finally {
+        setAccountBusy(id, false)
+      }
+    }
+    bulkProgress.value = {
+      label: '批量刷新余额',
+      completed: ids.length,
+      total: ids.length,
+      current: '已完成',
+    }
+    showToast(`余额刷新完成：成功 ${succeeded}，失败 ${failed}`, failed > 0 ? 'error' : 'success')
+    await loadAccounts()
+  } finally {
+    bulkLoading.value = false
+  }
+}
+
+async function bulkSetEnabled(enabled: boolean) {
+  const ids = selectedIds.value.slice()
+  if (ids.length === 0 || bulkLoading.value) return
+  const verb = enabled ? '启用' : '禁用'
+  if (!(await confirmAction(`确定${verb}选中 ${ids.length} 个账户吗？`))) return
+
+  bulkLoading.value = true
+  bulkErrors.value = []
+  let succeeded = 0
+  let failed = 0
+
+  try {
+    for (const [index, id] of ids.entries()) {
+      const account = accounts.value.find((item) => item.id === id)
+      bulkProgress.value = {
+        label: `批量${verb}`,
+        completed: index,
+        total: ids.length,
+        current: account?.name || id,
+      }
+      setAccountBusy(id, true)
+      try {
+        await updateAccountEnabled(id, enabled)
+        succeeded += 1
+      } catch (error) {
+        failed += 1
+        const message = error instanceof Error ? error.message : `${verb}失败`
+        bulkErrors.value.push(`${account?.name || id}：${message}`)
+      } finally {
+        setAccountBusy(id, false)
+      }
+    }
+    bulkProgress.value = {
+      label: `批量${verb}`,
+      completed: ids.length,
+      total: ids.length,
+      current: '已完成',
+    }
+    showToast(`${verb}完成：成功 ${succeeded}，失败 ${failed}`, failed > 0 ? 'error' : 'success')
+    await loadAccounts()
+  } finally {
+    bulkLoading.value = false
+  }
+}
+
 const showImportDialog = ref(false)
 const selectedFile = ref<File | null>(null)
 const importing = ref(false)
@@ -432,6 +843,7 @@ function openImportDialog() {
 }
 
 function closeImportDialog() {
+  if (importing.value) return
   showImportDialog.value = false
   importResult.value = null
   selectedFile.value = null
@@ -450,39 +862,30 @@ async function executeImport() {
 
   importing.value = true
   try {
-    const reader = new FileReader()
-    reader.onload = async (e) => {
-      const csvContent = e.target?.result as string
-      const response = await request(apiUrl('/accounts/import'), {
-        method: 'POST',
-        headers: {
-          ...authHeaders(),
-          'Content-Type': 'text/csv',
-        },
-        body: csvContent,
-      })
+    const csvContent = await selectedFile.value.text()
+    const response = await request(apiUrl('/accounts/import'), {
+      method: 'POST',
+      headers: {
+        ...authHeaders(),
+        'Content-Type': 'text/csv',
+      },
+      body: csvContent,
+    })
 
-      importResult.value = await responseData<{
-        success: number
-        failed: number
-        errors: string[]
-      }>(response)
+    importResult.value = await responseData<{
+      success: number
+      failed: number
+      errors: string[]
+    }>(response)
 
-      if (importResult.value && importResult.value.success > 0) {
-        showToast(`成功导入 ${importResult.value.success} 个账户`, 'success')
-        await loadAccounts()
-      }
-
-      if (importResult.value && importResult.value.failed > 0) {
-        showToast(`${importResult.value.failed} 个账户导入失败`, 'error')
-      }
+    if (importResult.value.success > 0) {
+      showToast(`成功导入 ${importResult.value.success} 个账户`, 'success')
+      await loadAccounts()
     }
 
-    reader.onerror = () => {
-      showToast('读取文件失败', 'error')
+    if (importResult.value.failed > 0) {
+      showToast(`${importResult.value.failed} 个账户导入失败`, 'error')
     }
-
-    reader.readAsText(selectedFile.value)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '导入失败', 'error')
   } finally {
@@ -520,51 +923,106 @@ onMounted(() => {
 watch(filterUserId, () => loadAccounts())
 watch([filterSiteType, filterEnabled, filterLastStatus], () => loadAccounts())
 
-// 关键词搜索防抖
 let keywordDebounce: ReturnType<typeof setTimeout> | null = null
 watch(filterKeyword, () => {
   if (keywordDebounce) clearTimeout(keywordDebounce)
   keywordDebounce = setTimeout(() => loadAccounts(), 300)
 })
+
+onUnmounted(() => {
+  if (keywordDebounce) clearTimeout(keywordDebounce)
+})
 </script>
 
 <style scoped>
-.account-panel { max-width: 1200px; margin: 0 auto; padding: 2rem; }
-.user-filter { background: #1a2937; color: #fff; border: 1px solid #374151; border-radius: 4px; padding: .4rem .6rem; font-size: .85rem; }
-.panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: .75rem; }
+.account-panel { max-width: 1220px; margin: 0 auto; padding: 2rem; }
+.panel-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.25rem; flex-wrap: wrap; gap: .75rem; }
+.panel-header h2 { color: #f8fafc; margin-bottom: 0.25rem; }
+.panel-subtitle { color: #94a3b8; font-size: 0.9rem; }
 .header-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
-.filter-bar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; padding: 1rem; background: #1a1a1a; border-radius: 8px; margin-bottom: 1.5rem; }
-.filter-select { background: #0b1220; border: 1px solid #374151; border-radius: 4px; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; }
-.filter-input { background: #0b1220; border: 1px solid #374151; border-radius: 4px; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; min-width: 200px; }
-.clear-filter { background: #6b7280; border: none; border-radius: 4px; padding: 0.5rem 0.75rem; color: white; font-size: 0.8rem; cursor: pointer; }
-.clear-filter:hover { background: #9ca3af; }
+.user-filter { background: #0b1220; color: #fff; border: 1px solid #374151; border-radius: 6px; padding: .5rem .65rem; font-size: .85rem; }
+.filter-bar,
+.bulk-toolbar,
+.progress-panel,
+.batch-result,
+.error-panel {
+  background: #111827;
+  border: 1px solid #263241;
+  border-radius: 8px;
+}
+.filter-bar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; padding: 1rem; margin-bottom: 1rem; }
+.filter-select { background: #0b1220; border: 1px solid #374151; border-radius: 6px; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; }
+.filter-input { background: #0b1220; border: 1px solid #374151; border-radius: 6px; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; min-width: 240px; }
+.clear-filter { background: #475569; }
 .filter-count { color: #9ca3af; font-size: 0.85rem; margin-left: auto; }
+.bulk-toolbar { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; padding: 0.8rem 1rem; margin-bottom: 1rem; }
+.select-all { color: #d1d5db; display: inline-flex; align-items: center; gap: 0.45rem; }
+.selection-count { color: #cbd5e1; font-size: 0.9rem; margin-right: auto; }
+.progress-panel { padding: 1rem; margin-bottom: 1rem; }
+.progress-meta,
+.batch-result-header,
+.error-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.progress-track { height: 8px; background: #0b1220; border-radius: 999px; overflow: hidden; margin: 0.75rem 0 0.35rem; }
+.progress-track span { display: block; height: 100%; background: #2563eb; transition: width 0.2s ease; }
+.error-panel { padding: 1rem; margin-bottom: 1rem; border-color: rgba(239, 68, 68, 0.45); }
+.error-panel ul { margin-top: 0.75rem; padding-left: 1.2rem; color: #fca5a5; }
+.batch-result { padding: 1rem; margin-bottom: 1rem; }
+.batch-items { display: grid; gap: 0.5rem; margin-top: 0.9rem; max-height: 260px; overflow: auto; }
+.batch-item { display: grid; grid-template-columns: minmax(160px, 1fr) auto minmax(160px, 2fr); align-items: center; gap: 0.75rem; padding: 0.55rem 0.65rem; background: #0b1220; border: 1px solid #263241; border-radius: 6px; }
+.batch-name { color: #e5e7eb; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-message { color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-list { display: grid; gap: 1.5rem; }
 .account-group { display: grid; gap: 1rem; }
-.group-header { display: flex; align-items: center; gap: .6rem; padding-bottom: .25rem; border-bottom: 1px solid #2a2a2a; }
+.group-header { display: flex; align-items: center; gap: .6rem; padding-bottom: .25rem; border-bottom: 1px solid #263241; }
 .group-header h3 { margin: 0; font-size: 1rem; color: #e5e7eb; }
 .group-header .muted { font-size: .8rem; flex: 1; }
-.group-header .batch-btn { background: #10b981; font-size: .8rem; padding: .3rem .7rem; }
-.self-tag { background: #0070f3; border-radius: 999px; padding: .05rem .45rem; margin-left: .4rem; font-size: .7rem; color: #fff; }
-.account-card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1rem; display: flex; justify-content: space-between; gap: 1rem; }
-.title-row { display: flex; gap: .5rem; align-items: center; margin-bottom: .5rem; }
-.badge { background: #0070f3; border-radius: 999px; padding: .15rem .5rem; font-size: .75rem; }
-.badge.disabled { background: #6b7280; }
+.group-header .batch-btn { background: #0f766e; font-size: .8rem; padding: .35rem .7rem; }
+.self-tag { background: #2563eb; border-radius: 999px; padding: .05rem .45rem; margin-left: .4rem; font-size: .7rem; color: #fff; }
+.account-card { background: #111827; border: 1px solid #263241; border-radius: 8px; padding: 1rem; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 1rem; transition: border-color 0.16s ease, background-color 0.16s ease; }
+.account-card:hover { background: #151f2f; border-color: #334155; }
+.account-card.selected { border-color: #3b82f6; }
+.account-card.disabled { opacity: 0.78; }
+.card-select { display: flex; align-items: flex-start; padding-top: 0.25rem; }
+.account-main { min-width: 0; }
+.title-row { display: flex; gap: .5rem; align-items: center; margin-bottom: .65rem; flex-wrap: wrap; }
+.title-row strong { color: #f8fafc; font-size: 1rem; overflow-wrap: anywhere; }
+.badge,
+.status-pill { border-radius: 999px; padding: .15rem .5rem; font-size: .75rem; white-space: nowrap; }
+.badge { background: #1d4ed8; color: #dbeafe; }
+.badge.disabled { background: #475569; color: #cbd5e1; }
+.status-pill { background: #475569; color: #e5e7eb; }
+.status-pill.success { background: rgba(16, 185, 129, 0.18); color: #34d399; }
+.status-pill.failed { background: rgba(239, 68, 68, 0.18); color: #f87171; }
+.status-pill.already { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
+.status-pill.pending { background: rgba(245, 158, 11, 0.18); color: #fbbf24; }
+.status-pill.today { background: rgba(20, 184, 166, 0.18); color: #5eead4; }
+.status-pill.neutral { background: #334155; color: #cbd5e1; }
+.meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.35rem 1rem; color: #9ca3af; font-size: 0.88rem; }
+.meta-grid span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta-grid b { color: #cbd5e1; font-weight: 600; margin-right: 0.4rem; }
+.message { margin-top: 0.65rem; color: #cbd5e1; font-size: 0.86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note { color: #fbbf24; margin-top: .35rem; font-size: .85rem; overflow-wrap: anywhere; }
 .muted { color: #9ca3af; margin: .25rem 0; }
-.note { color: #fbbf24; margin: .25rem 0; font-size: .85rem; }
-.actions { display: flex; gap: .5rem; align-items: center; }
-button { border: 0; border-radius: 4px; padding: .5rem .75rem; cursor: pointer; background: #374151; color: white; }
-button.primary, .primary { background: #0070f3; }
+.actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; align-self: start; max-width: 260px; }
+button { border: 0; border-radius: 6px; padding: .5rem .75rem; cursor: pointer; background: #374151; color: white; }
+button:hover:not(:disabled) { background: #4b5563; }
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+button.primary, .primary { background: #2563eb; }
+button.primary:hover:not(:disabled), .primary:hover:not(:disabled) { background: #1d4ed8; }
+button.secondary { background: #475569; }
+button.secondary:hover:not(:disabled) { background: #64748b; }
+button.ghost { background: transparent; border: 1px solid #334155; color: #cbd5e1; }
+button.ghost:hover:not(:disabled) { background: #1f2937; }
 button.danger { background: #dc2626; }
+button.danger:hover:not(:disabled) { background: #b91c1c; }
 .empty { color: #9ca3af; text-align: center; padding: 2rem; }
-.modal { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: flex; align-items: center; justify-content: center; z-index: 20; }
-.modal-content { width: min(560px, 92vw); max-height: 90vh; overflow: auto; background: #111827; border: 1px solid #374151; border-radius: 10px; padding: 1.5rem; display: grid; gap: .8rem; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: flex; align-items: center; justify-content: center; z-index: 20; padding: 1rem; }
+.modal-content { width: min(560px, 92vw); max-height: 90vh; overflow: auto; background: #111827; border: 1px solid #374151; border-radius: 8px; padding: 1.5rem; display: grid; gap: .8rem; }
+.modal-content h3 { color: #f8fafc; }
 label { display: grid; gap: .35rem; color: #d1d5db; }
 label.inline { display: flex; align-items: center; gap: .5rem; }
-input, select, textarea { background: #0b1220; border: 1px solid #374151; border-radius: 4px; color: white; padding: .55rem; }
+input, select, textarea { background: #0b1220; border: 1px solid #374151; border-radius: 6px; color: white; padding: .55rem; min-width: 0; }
 .modal-actions { display: flex; gap: .75rem; justify-content: flex-end; margin-top: .5rem; }
-
-/* 导入对话框样式 */
 .import-dialog { max-width: 600px; }
 .import-instructions { background: #1f2937; border: 1px solid #374151; border-radius: 6px; padding: 1rem; margin: 1rem 0; }
 .import-instructions h4 { margin: 0 0 0.5rem 0; color: #f3f4f6; font-size: 0.95rem; }
@@ -582,6 +1040,27 @@ input, select, textarea { background: #0b1220; border: 1px solid #374151; border
 .error-list summary { color: #f97316; font-size: 0.9rem; }
 .error-list ul { margin: 0.5rem 0 0 0; padding-left: 1.5rem; max-height: 200px; overflow-y: auto; }
 .error-list li { color: #fca5a5; font-size: 0.85rem; margin: 0.25rem 0; }
-button.secondary { background: #4b5563; }
-button.secondary:hover { background: #6b7280; }
+
+@media (max-width: 900px) {
+  .account-card { grid-template-columns: auto minmax(0, 1fr); }
+  .actions { grid-column: 2; justify-content: flex-start; max-width: none; }
+  .meta-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+  .account-panel { padding: 1rem; }
+  .panel-header { align-items: stretch; }
+  .header-actions,
+  .filter-input,
+  .filter-select,
+  .user-filter { width: 100%; }
+  .header-actions > *,
+  .filter-bar > * { width: 100%; }
+  .filter-count,
+  .selection-count { margin-left: 0; width: 100%; }
+  .bulk-toolbar button,
+  .actions button { flex: 1; }
+  .account-card { padding: 0.9rem; }
+  .batch-item { grid-template-columns: 1fr; align-items: start; }
+}
 </style>

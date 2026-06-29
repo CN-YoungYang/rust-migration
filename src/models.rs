@@ -1,6 +1,14 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::FromRow;
+
+fn deserialize_nullable_field<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct AppUser {
@@ -159,18 +167,30 @@ pub struct UpdateAccountRequest {
     #[serde(rename = "baseUrl")]
     pub base_url: Option<String>,
     // 可清空字段：None=不改, Some(None)=清空为NULL, Some(Some(v))=设为v
-    #[serde(rename = "userId", default)]
+    #[serde(
+        rename = "userId",
+        default,
+        deserialize_with = "deserialize_nullable_field"
+    )]
     pub user_id: Option<Option<String>>,
-    #[serde(rename = "accessToken", default)]
+    #[serde(
+        rename = "accessToken",
+        default,
+        deserialize_with = "deserialize_nullable_field"
+    )]
     pub access_token: Option<Option<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub cookie: Option<Option<String>>,
-    #[serde(rename = "customCheckinUrl", default)]
+    #[serde(
+        rename = "customCheckinUrl",
+        default,
+        deserialize_with = "deserialize_nullable_field"
+    )]
     pub custom_checkin_url: Option<Option<String>>,
     pub enabled: Option<bool>,
     #[serde(rename = "retryEnabled")]
     pub retry_enabled: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub note: Option<Option<String>>,
 }
 
@@ -187,6 +207,44 @@ pub struct UpdateUserRequest {
     pub role: Option<String>,
     pub enabled: Option<bool>,
     pub note: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UpdateAccountRequest;
+
+    #[test]
+    fn account_update_request_distinguishes_missing_null_and_value_fields() {
+        let missing: UpdateAccountRequest = serde_json::from_str("{}").unwrap();
+        assert_eq!(missing.user_id, None);
+        assert_eq!(missing.access_token, None);
+        assert_eq!(missing.cookie, None);
+        assert_eq!(missing.custom_checkin_url, None);
+        assert_eq!(missing.note, None);
+
+        let cleared: UpdateAccountRequest = serde_json::from_str(
+            r#"{"userId":null,"accessToken":null,"cookie":null,"customCheckinUrl":null,"note":null}"#,
+        )
+        .unwrap();
+        assert_eq!(cleared.user_id, Some(None));
+        assert_eq!(cleared.access_token, Some(None));
+        assert_eq!(cleared.cookie, Some(None));
+        assert_eq!(cleared.custom_checkin_url, Some(None));
+        assert_eq!(cleared.note, Some(None));
+
+        let updated: UpdateAccountRequest = serde_json::from_str(
+            r#"{"userId":"42","accessToken":"sk-test","cookie":"sid=1","customCheckinUrl":"/api/checkin","note":"ops"}"#,
+        )
+        .unwrap();
+        assert_eq!(updated.user_id, Some(Some("42".to_string())));
+        assert_eq!(updated.access_token, Some(Some("sk-test".to_string())));
+        assert_eq!(updated.cookie, Some(Some("sid=1".to_string())));
+        assert_eq!(
+            updated.custom_checkin_url,
+            Some(Some("/api/checkin".to_string()))
+        );
+        assert_eq!(updated.note, Some(Some("ops".to_string())));
+    }
 }
 
 // 通知相关模型

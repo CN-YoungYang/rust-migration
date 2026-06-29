@@ -130,9 +130,6 @@ pub async fn execute_batch(
         .await
         .unwrap_or_default();
 
-    // 轻量查询：只取 id + username，避免拉取 passwordHash
-    let user_name_map = db::list_user_id_name_map(&state.db).await?;
-
     let mut items: Vec<BatchResultItem> = Vec::new();
     let mut to_execute: Vec<(String, String)> = Vec::new(); // (account_id, account_name)
 
@@ -151,13 +148,7 @@ pub async fn execute_batch(
             return Err(AppError::Forbidden);
         }
 
-        let account_name = account
-            .owner_id
-            .as_deref()
-            .and_then(|oid| user_name_map.get(oid))
-            .map(|s| s.as_str())
-            .unwrap_or("")
-            .to_string();
+        let account_name = account.name.clone();
 
         // 跳过今日已签/已禁用/不允许重试
         if let Some(reason) = skip_reason_for_batch(account, &settings, today_local) {

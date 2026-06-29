@@ -1,5 +1,7 @@
 import { API_BASE } from '../config'
 
+export const AUTH_EXPIRED_EVENT = 'ai-hub:auth-expired'
+
 export function getToken(): string {
   return ''
 }
@@ -22,6 +24,16 @@ function isUnsafeMethod(method?: string): boolean {
   return ['POST', 'PUT', 'DELETE', 'PATCH'].includes(normalized)
 }
 
+async function errorMessage(response: Response): Promise<string> {
+  const text = await response.text()
+  try {
+    const json = JSON.parse(text)
+    return json.error || json.message || json.details || `HTTP ${response.status}`
+  } catch {
+    return text || `HTTP ${response.status}`
+  }
+}
+
 export async function request(url: string, options: RequestInit = {}): Promise<Response> {
   const headers = new Headers(options.headers)
   if (isUnsafeMethod(options.method) && !headers.has('X-CSRF-Token')) {
@@ -35,20 +47,15 @@ export async function request(url: string, options: RequestInit = {}): Promise<R
     headers
   })
   if (!response.ok) {
-    // 401: session 过期或无效，由调用方切回登录态
     if (response.status === 401) {
-      throw new Error('登录已过期，请重新登录')
-    }
-    const text = await response.text()
-    try {
-      const json = JSON.parse(text)
-      throw new Error(json.error || json.message || json.details || `HTTP ${response.status}`)
-    } catch (e) {
-      if (e instanceof SyntaxError) {
-        throw new Error(text || `HTTP ${response.status}`)
+      const isAuthProbe = url.includes('/auth/login') || url.includes('/auth/me')
+      if (!isAuthProbe) {
+        window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+        throw new Error('登录已过期，请重新登录')
       }
-      throw e
+      throw new Error(await errorMessage(response))
     }
+    throw new Error(await errorMessage(response))
   }
   return response
 }

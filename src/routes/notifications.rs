@@ -48,6 +48,11 @@ fn validate_common(
         }
     }
     if let Some(headers_json) = webhook_headers {
+        if headers_json.trim().is_empty() {
+            return Err(crate::error::AppError::Validation(
+                "webhookHeaders 必须是 JSON 对象".into(),
+            ));
+        }
         let value: serde_json::Value = serde_json::from_str(headers_json).map_err(|_| {
             crate::error::AppError::Validation("webhookHeaders 必须是 JSON 对象".into())
         })?;
@@ -87,6 +92,11 @@ async fn validate_create_request(req: &CreateNotificationRequest) -> Result<()> 
         req.webhook_method.as_deref(),
         req.webhook_headers.as_deref(),
     )?;
+    if req.on_balance_low.unwrap_or(false) && req.balance_threshold.is_none() {
+        return Err(crate::error::AppError::Validation(
+            "启用余额过低通知时必须填写余额阈值".into(),
+        ));
+    }
 
     match req.notify_type.as_str() {
         "email" => {
@@ -131,10 +141,23 @@ async fn validate_update_request(
     validate_common(
         None,
         req.failure_threshold,
-        req.balance_threshold,
+        req.balance_threshold.flatten(),
         req.webhook_method.as_deref(),
-        req.webhook_headers.as_deref(),
+        req.webhook_headers
+            .as_ref()
+            .and_then(|headers| headers.as_deref()),
     )?;
+    let effective_balance_threshold = match req.balance_threshold {
+        Some(value) => value,
+        None => existing.balance_threshold,
+    };
+    if req.on_balance_low.unwrap_or(existing.on_balance_low)
+        && effective_balance_threshold.is_none()
+    {
+        return Err(crate::error::AppError::Validation(
+            "启用余额过低通知时必须填写余额阈值".into(),
+        ));
+    }
 
     let effective_port = req.email_smtp_port.or(existing.email_smtp_port);
     if let Some(host) = req.email_smtp_host.as_deref() {

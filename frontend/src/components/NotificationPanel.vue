@@ -1,8 +1,11 @@
 <template>
   <section class="notification-panel">
     <div class="panel-header">
-      <h2>通知设置</h2>
-      <button class="primary" @click="startCreate">新建通知</button>
+      <div>
+        <h2>通知设置</h2>
+        <p class="panel-subtitle">已配置 {{ configs.length }} 个，启用 {{ enabledCount }} 个</p>
+      </div>
+      <button class="primary" @click="startCreate" :disabled="saving || loading">新建通知</button>
     </div>
 
     <form v-if="editing" class="notification-form" @submit.prevent="saveConfig">
@@ -110,9 +113,26 @@
         <input v-model.trim="form.note" />
       </label>
 
+      <div class="preview-grid">
+        <div>
+          <span>触发条件</span>
+          <strong>{{ formTriggerSummary }}</strong>
+        </div>
+        <div>
+          <span>发送目标</span>
+          <strong>{{ formTargetSummary }}</strong>
+        </div>
+      </div>
+
+      <div v-if="validationErrors.length > 0" class="validation-box">
+        <p v-for="error in validationErrors" :key="error">{{ error }}</p>
+      </div>
+
       <div class="form-actions">
-        <button type="submit" class="primary" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</button>
-        <button type="button" @click="cancelEdit">取消</button>
+        <button type="submit" class="primary" :disabled="saving || validationErrors.length > 0">
+          {{ saving ? '保存中...' : '保存' }}
+        </button>
+        <button type="button" @click="cancelEdit" :disabled="saving">取消</button>
       </div>
     </form>
 
@@ -127,17 +147,20 @@
             <span class="badge" :class="{ disabled: !config.enabled }">{{ config.enabled ? '启用' : '停用' }}</span>
           </div>
           <p class="muted">
-            失败阈值：{{ config.failureThreshold }} 次
-            <span v-if="config.onBalanceLow"> · 余额阈值：${{ config.balanceThreshold ?? 0 }}</span>
+            {{ triggerSummary(config) }}
+          </p>
+          <p class="muted">{{ targetSummary(config) }}</p>
+          <p v-if="testResults[config.id]" :class="['test-result', testResults[config.id].success ? 'success' : 'failed']">
+            {{ testResults[config.id].message }} · {{ testResults[config.id].testedAt }}
           </p>
           <p v-if="config.note" class="note">{{ config.note }}</p>
         </div>
         <div class="actions">
-          <button @click="testConfig(config)" :disabled="testingId === config.id">
+          <button @click="testConfig(config)" :disabled="Boolean(testingId) || saving">
             {{ testingId === config.id ? '测试中...' : '测试' }}
           </button>
-          <button @click="startEdit(config)">编辑</button>
-          <button class="danger" @click="deleteConfig(config.id)">删除</button>
+          <button @click="startEdit(config)" :disabled="saving || Boolean(testingId)">编辑</button>
+          <button class="danger" @click="deleteConfig(config.id)" :disabled="saving || Boolean(testingId)">删除</button>
         </div>
       </article>
     </div>
@@ -145,9 +168,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { apiUrl, authHeaders, request, responseData } from '../utils/api'
-import { showToast } from '../utils/toast'
+import { confirmAction, showToast } from '../utils/toast'
 
 interface NotificationConfig {
   id: string
@@ -167,6 +190,8 @@ interface NotificationConfig {
   webhookHeaders?: string | null
   telegramChatId?: string | null
   note?: string | null
+  createdAt?: string
+  updatedAt?: string
 }
 
 interface NotificationForm extends Partial<NotificationConfig> {
@@ -180,6 +205,65 @@ const saving = ref(false)
 const testingId = ref('')
 const editing = ref(false)
 const form = ref<NotificationForm>(emptyForm())
+const testResults = ref<Record<string, { success: boolean; message: string; testedAt: string }>>({})
+
+const enabledCount = computed(() => configs.value.filter((config) => config.enabled).length)
+
+const validationErrors = computed(() => {
+  const errors: string[] = []
+  if (!form.value.notifyType) errors.push('请选择通知类型。')
+  if ((form.value.failureThreshold ?? 1) < 1 || (form.value.failureThreshold ?? 1) > 100) {
+    errors.push('连续失败阈值必须在 1 到 100 之间。')
+  }
+  if (form.value.onBalanceLow && (form.value.balanceThreshold ?? -1) < 0) {
+    errors.push('余额阈值不能小于 0。')
+  }
+
+  if (form.value.notifyType === 'webhook') {
+    if (!form.value.webhookUrl?.trim()) errors.push('Webhook URL 不能为空。')
+    if (form.value.webhookUrl && !isHttpUrl(form.value.webhookUrl)) {
+      errors.push('Webhook URL 必须是 http 或 https 地址。')
+    }
+    if (form.value.webhookHeaders?.trim()) {
+      const headerError = validateHeadersJson(form.value.webhookHeaders)
+      if (headerError) errors.push(headerError)
+    }
+  }
+
+  if (form.value.notifyType === 'telegram') {
+    if (!form.value.id && !form.value.telegramBotToken?.trim()) {
+      errors.push('新建 Telegram 通知时必须填写 Bot Token。')
+    }
+    if (!form.value.telegramChatId?.trim()) errors.push('Telegram Chat ID 不能为空。')
+  }
+
+  if (form.value.notifyType === 'email') {
+    if (!form.value.emailSmtpHost?.trim()) errors.push('SMTP 主机不能为空。')
+    const port = form.value.emailSmtpPort ?? 0
+    if (port < 1 || port > 65535) errors.push('SMTP 端口必须在 1 到 65535 之间。')
+    if (!form.value.emailSmtpUser?.trim()) errors.push('SMTP 用户名不能为空。')
+    if (!form.value.id && !form.value.emailSmtpPassword?.trim()) {
+      errors.push('新建邮件通知时必须填写 SMTP 密码。')
+    }
+    if (!form.value.emailFrom?.trim()) errors.push('发件人不能为空。')
+    if (!form.value.emailTo?.trim()) errors.push('收件人不能为空。')
+  }
+
+  return errors
+})
+
+const formTriggerSummary = computed(() => {
+  const parts: string[] = []
+  if (form.value.onFailure) parts.push(`失败 ${form.value.failureThreshold ?? 1} 次`)
+  if (form.value.onBalanceLow) parts.push(`余额低于 $${form.value.balanceThreshold ?? 0}`)
+  return parts.length > 0 ? parts.join('，') : '未启用触发条件'
+})
+
+const formTargetSummary = computed(() => {
+  if (form.value.notifyType === 'email') return form.value.emailTo || '邮件收件人未填写'
+  if (form.value.notifyType === 'telegram') return form.value.telegramChatId || 'Telegram Chat ID 未填写'
+  return form.value.webhookUrl || 'Webhook URL 未填写'
+})
 
 function emptyForm(): NotificationForm {
   return {
@@ -195,6 +279,44 @@ function emptyForm(): NotificationForm {
 
 function typeLabel(type: string): string {
   return type === 'email' ? '邮件' : type === 'telegram' ? 'Telegram' : 'Webhook'
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function validateHeadersJson(value: string): string {
+  try {
+    const parsed = JSON.parse(value)
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+      return 'Headers JSON 必须是对象。'
+    }
+    for (const [key, headerValue] of Object.entries(parsed)) {
+      if (!key.trim()) return 'Header 名称不能为空。'
+      if (typeof headerValue !== 'string') return `Header ${key} 的值必须是字符串。`
+    }
+    return ''
+  } catch {
+    return 'Headers JSON 格式无效。'
+  }
+}
+
+function triggerSummary(config: NotificationConfig): string {
+  const parts: string[] = []
+  if (config.onFailure) parts.push(`失败连续 ${config.failureThreshold} 次`)
+  if (config.onBalanceLow) parts.push(`余额低于 $${config.balanceThreshold ?? 0}`)
+  return parts.length > 0 ? parts.join('，') : '未启用触发条件'
+}
+
+function targetSummary(config: NotificationConfig): string {
+  if (config.notifyType === 'email') return `发送至 ${config.emailTo || '-'}`
+  if (config.notifyType === 'telegram') return `Chat ID ${config.telegramChatId || '-'}`
+  return config.webhookUrl || '-'
 }
 
 function startCreate() {
@@ -217,6 +339,8 @@ function buildPayload() {
   if (!raw.emailSmtpPassword) delete raw.emailSmtpPassword
   if (!raw.telegramBotToken) delete raw.telegramBotToken
   if (!raw.onBalanceLow) raw.balanceThreshold = null
+  if (raw.webhookHeaders !== undefined && !raw.webhookHeaders?.trim()) raw.webhookHeaders = null
+  if (raw.note !== undefined && !raw.note?.trim()) raw.note = null
   delete raw.id
   return raw
 }
@@ -234,6 +358,10 @@ async function loadConfigs() {
 }
 
 async function saveConfig() {
+  if (validationErrors.value.length > 0) {
+    showToast(validationErrors.value[0], 'error')
+    return
+  }
   saving.value = true
   try {
     const id = form.value.id
@@ -260,16 +388,34 @@ async function testConfig(config: NotificationConfig) {
       headers: authHeaders()
     })
     const result = await responseData<{ success: boolean; message?: string }>(response)
-    showToast(result.message || '测试完成', result.success ? 'success' : 'error')
+    const message = result.message || '测试完成'
+    testResults.value = {
+      ...testResults.value,
+      [config.id]: {
+        success: result.success,
+        message,
+        testedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      }
+    }
+    showToast(message, result.success ? 'success' : 'error')
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '测试通知失败', 'error')
+    const message = error instanceof Error ? error.message : '测试通知失败'
+    testResults.value = {
+      ...testResults.value,
+      [config.id]: {
+        success: false,
+        message,
+        testedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      }
+    }
+    showToast(message, 'error')
   } finally {
     testingId.value = ''
   }
 }
 
 async function deleteConfig(id: string) {
-  if (!confirm('确定要删除此通知配置吗？')) return
+  if (!(await confirmAction('确定要删除此通知配置吗？'))) return
   try {
     await request(apiUrl(`/notifications/${id}`), {
       method: 'DELETE',
@@ -287,12 +433,13 @@ onMounted(loadConfigs)
 
 <style scoped>
 .notification-panel { max-width: 1000px; margin: 0 auto; padding: 2rem; }
-.panel-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
+.panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.5rem; }
 h2 { color: #fff; }
+.panel-subtitle { color: #94a3b8; font-size: 0.9rem; margin-top: 0.25rem; }
 .notification-form,
 .notification-card {
-  background: #1a1a1a;
-  border: 1px solid #333;
+  background: #111827;
+  border: 1px solid #263241;
   border-radius: 8px;
   padding: 1.25rem;
 }
@@ -310,30 +457,74 @@ select {
 }
 .form-actions,
 .actions { display: flex; gap: 0.75rem; align-items: center; }
+.preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+.preview-grid div {
+  background: #0b1220;
+  border: 1px solid #263241;
+  border-radius: 8px;
+  padding: 0.85rem;
+  display: grid;
+  gap: 0.35rem;
+}
+.preview-grid span {
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+.preview-grid strong {
+  color: #f8fafc;
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+.validation-box {
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.08);
+  color: #fca5a5;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  display: grid;
+  gap: 0.35rem;
+}
 .notification-list { display: grid; gap: 1rem; }
-.notification-card { display: flex; justify-content: space-between; gap: 1rem; }
+.notification-card { display: flex; justify-content: space-between; gap: 1rem; transition: border-color 0.16s ease, background-color 0.16s ease; }
+.notification-card:hover { background: #151f2f; border-color: #334155; }
+.config-main { min-width: 0; }
 .title-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
 .badge { background: #10b981; border-radius: 999px; padding: 0.15rem 0.5rem; font-size: 0.75rem; }
 .badge.disabled { background: #6b7280; }
-.muted { color: #9ca3af; margin: 0.25rem 0; }
+.muted { color: #9ca3af; margin: 0.25rem 0; overflow-wrap: anywhere; }
 .note { color: #fbbf24; margin: 0.25rem 0; }
+.test-result { margin-top: 0.4rem; font-size: 0.85rem; }
+.test-result.success { color: #34d399; }
+.test-result.failed { color: #f87171; }
 button {
   color: #fff;
   background: #374151;
   border: 0;
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 0.5rem 0.85rem;
 }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 button.primary,
-.primary { background: #0070f3; }
+.primary { background: #2563eb; }
+button:hover:not(:disabled) { background: #4b5563; }
+button.primary:hover:not(:disabled),
+.primary:hover:not(:disabled) { background: #1d4ed8; }
 button.danger { background: #dc2626; }
+button.danger:hover:not(:disabled) { background: #b91c1c; }
 .empty { color: #9ca3af; text-align: center; padding: 2rem; }
 
 @media (max-width: 768px) {
   .notification-panel { padding: 1rem; }
+  .panel-header { display: grid; }
   .form-row,
+  .preview-grid,
   .notification-card { grid-template-columns: 1fr; display: grid; }
   .actions { flex-wrap: wrap; }
+  .actions button,
+  .panel-header button { width: 100%; }
 }
 </style>

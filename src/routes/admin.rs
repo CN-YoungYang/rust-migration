@@ -60,7 +60,27 @@ pub async fn list_users(
     if current_user.role == "ADMIN" && params.get("scope").map(|s| s.as_str()) != Some("all") {
         users.retain(|user| user.role == "USER");
     }
-    Ok(crate::routes::data(users))
+    let stats = db::list_user_account_stats(&state.db).await?;
+    let data: Vec<Value> = users
+        .into_iter()
+        .map(|user| {
+            let user_stats = stats.get(&user.id);
+            json!({
+                "id": user.id,
+                "username": user.username,
+                "role": user.role,
+                "enabled": user.enabled,
+                "note": user.note,
+                "createdAt": user.created_at,
+                "updatedAt": user.updated_at,
+                "accountCount": user_stats.map(|s| s.account_count).unwrap_or(0),
+                "enabledAccountCount": user_stats.map(|s| s.enabled_account_count).unwrap_or(0),
+                "failedAccountCount": user_stats.map(|s| s.failed_account_count).unwrap_or(0),
+                "lastRunAt": user_stats.and_then(|s| s.last_run_at.as_ref()).cloned(),
+            })
+        })
+        .collect();
+    Ok(crate::routes::data(data))
 }
 
 pub async fn get_user(

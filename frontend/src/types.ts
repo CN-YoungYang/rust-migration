@@ -22,6 +22,10 @@ export interface Account {
   customCheckinUrl?: string | null
   note?: string | null
   todayRuns?: number
+  lastRunAt?: string | null
+  lastBalanceAt?: string | null
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface AccountGroup {

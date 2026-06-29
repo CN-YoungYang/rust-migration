@@ -42,7 +42,7 @@ pub async fn list_accounts_filtered(
         }
     }
     if filter.keyword.is_some() {
-        sql.push_str(" AND (name LIKE ? OR baseUrl LIKE ?)");
+        sql.push_str(" AND (name LIKE ? OR baseUrl LIKE ? OR note LIKE ?)");
     }
 
     sql.push_str(" ORDER BY createdAt DESC LIMIT ? OFFSET ?");
@@ -65,7 +65,10 @@ pub async fn list_accounts_filtered(
     }
     if let Some(ref kw) = filter.keyword {
         let pattern = format!("%{}%", kw);
-        query = query.bind(pattern.clone()).bind(pattern);
+        query = query
+            .bind(pattern.clone())
+            .bind(pattern.clone())
+            .bind(pattern);
     }
 
     query = query.bind(filter.limit).bind(filter.offset);
@@ -74,10 +77,12 @@ pub async fn list_accounts_filtered(
     Ok(accounts)
 }
 
-/// List only enabled accounts (for scheduler, uses idx_checkin_account_enabled index)
+/// List only enabled accounts owned by enabled users.
 pub async fn list_enabled_accounts(db: &SqlitePool) -> Result<Vec<CheckinAccount>> {
     let sql = format!(
-        "SELECT {} FROM CheckinAccount WHERE enabled = 1 ORDER BY createdAt DESC",
+        "SELECT {} FROM CheckinAccount \
+         WHERE enabled = 1 AND ownerId IN (SELECT id FROM AppUser WHERE enabled = 1) \
+         ORDER BY createdAt DESC",
         ACCOUNT_LIST_COLUMNS
     );
     let accounts = sqlx::query_as::<_, CheckinAccount>(&sql)
@@ -221,4 +226,157 @@ pub async fn delete_account(db: &SqlitePool, id: &str) -> Result<()> {
         .execute(db)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite should connect");
+
+        sqlx::query(
+            "CREATE TABLE AppUser (
+                id TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                passwordHash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                enabled INTEGER NOT NULL,
+                note TEXT,
+                createdAt TEXT NOT NULL,
+                updatedAt TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("user table should be created");
+
+        sqlx::query(
+            "CREATE TABLE CheckinAccount (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                siteType TEXT NOT NULL,
+                baseUrl TEXT NOT NULL,
+                userId TEXT,
+                ownerId TEXT,
+                authType TEXT NOT NULL,
+                accessTokenEnc TEXT,
+                cookieEnc TEXT,
+                customCheckinUrl TEXT,
+                enabled INTEGER NOT NULL,
+                retryEnabled INTEGER NOT NULL,
+                lastBalance REAL,
+                lastBalanceAt TEXT,
+                lastStatus TEXT,
+                lastMessage TEXT,
+                lastRunAt TEXT,
+                note TEXT,
+                createdAt TEXT NOT NULL,
+                updatedAt TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("account table should be created");
+
+        pool
+    }
+
+    async fn insert_user(pool: &SqlitePool, id: &str, enabled: bool) {
+        let now = Utc::now();
+        sqlx::query(
+            "INSERT INTO AppUser (id, username, passwordHash, role, enabled, createdAt, updatedAt)
+             VALUES (?, ?, 'hash', 'USER', ?, ?, ?)",
+        )
+        .bind(id)
+        .bind(format!("user-{id}"))
+        .bind(enabled)
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("user should be inserted");
+    }
+
+    async fn insert_account(pool: &SqlitePool, id: &str, owner_id: &str, enabled: bool) {
+        let now = Utc::now();
+        sqlx::query(
+            "INSERT INTO CheckinAccount (
+                id, name, siteType, baseUrl, ownerId, authType,
+                enabled, retryEnabled, createdAt, updatedAt
+             ) VALUES (?, ?, 'new-api', 'https://example.com', ?, 'access_token', ?, 1, ?, ?)",
+        )
+        .bind(id)
+        .bind(format!("account-{id}"))
+        .bind(owner_id)
+        .bind(enabled)
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("account should be inserted");
+    }
+
+    #[tokio::test]
+    async fn list_enabled_accounts_skips_disabled_users() {
+        let pool = test_pool().await;
+        insert_user(&pool, "active-user", true).await;
+        insert_user(&pool, "disabled-user", false).await;
+        insert_account(&pool, "active-account", "active-user", true).await;
+        insert_account(&pool, "disabled-owner-account", "disabled-user", true).await;
+        insert_account(&pool, "disabled-account", "active-user", false).await;
+
+        let accounts = list_enabled_accounts(&pool)
+            .await
+            .expect("enabled accounts should load");
+
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].id, "active-account");
+    }
+
+    #[tokio::test]
+    async fn update_account_can_clear_nullable_profile_fields() {
+        let pool = test_pool().await;
+        insert_user(&pool, "active-user", true).await;
+        let now = Utc::now();
+        sqlx::query(
+            "INSERT INTO CheckinAccount (
+                id, name, siteType, baseUrl, userId, ownerId, authType,
+                customCheckinUrl, enabled, retryEnabled, note, createdAt, updatedAt
+             ) VALUES (
+                'account-with-optionals', 'account', 'new-api', 'https://example.com',
+                'user-42', 'active-user', 'access_token', '/api/checkin', 1, 1,
+                'ops note', ?, ?
+             )",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("account should be inserted");
+
+        let updated = update_account(
+            &pool,
+            "account-with-optionals",
+            &UpdateAccountRequest {
+                user_id: Some(None),
+                custom_checkin_url: Some(None),
+                note: Some(None),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("account should be updated");
+
+        assert_eq!(updated.user_id, None);
+        assert_eq!(updated.custom_checkin_url, None);
+        assert_eq!(updated.note, None);
+        assert_eq!(updated.name, "account");
+    }
 }

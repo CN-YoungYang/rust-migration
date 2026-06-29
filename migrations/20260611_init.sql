@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS CheckinSetting (
     maxAttemptsPerDay INTEGER NOT NULL DEFAULT 3,
     batchDelayMin INTEGER NOT NULL DEFAULT 3,
     batchDelayMax INTEGER NOT NULL DEFAULT 10,
+    cleanupKeepLatest INTEGER NOT NULL DEFAULT 500,
     updatedAt TEXT NOT NULL
 );
 

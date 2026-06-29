@@ -39,44 +39,10 @@ fn account_to_json(acc: &CheckinAccount, owner_name: Option<&str>) -> Value {
     })
 }
 
-/// 带今日签到次数的账户 JSON（供列表接口使用）
-fn account_to_json_with_runs(
-    acc: &CheckinAccount,
-    owner_name: Option<&str>,
-    today_runs: i32,
-) -> Value {
-    json!({
-        "id": acc.id,
-        "name": acc.name,
-        "siteType": acc.site_type,
-        "baseUrl": acc.base_url,
-        "userId": acc.user_id,
-        "ownerId": acc.owner_id,
-        "ownerName": owner_name,
-        "authType": acc.auth_type,
-        "accessTokenMasked": acc.access_token_enc.as_ref().map(|_| "****"),
-        "cookieMasked": acc.cookie_enc.as_ref().map(|_| "****"),
-        "customCheckinUrl": acc.custom_checkin_url,
-        "enabled": acc.enabled,
-        "retryEnabled": acc.retry_enabled,
-        "note": acc.note,
-        "lastBalance": acc.last_balance,
-        "lastBalanceAt": acc.last_balance_at,
-        "lastStatus": acc.last_status,
-        "lastMessage": acc.last_message,
-        "lastRunAt": acc.last_run_at,
-        "todayRuns": today_runs,
-        "createdAt": acc.created_at,
-        "updatedAt": acc.updated_at,
-    })
-}
-
 // Look up the username of an account's owner so the UI can group accounts by user.
 async fn resolve_owner_name(state: &AppState, owner_id: &Option<String>) -> Result<Option<String>> {
     match owner_id.as_deref() {
-        Some(id) => Ok(db::find_user_by_id(&state.db, id)
-            .await?
-            .map(|u| u.username)),
+        Some(id) => db::find_username_by_id(&state.db, id).await,
         None => Ok(None),
     }
 }
@@ -102,7 +68,8 @@ pub async fn list(
         .unwrap_or(0)
         .max(0);
 
-    let owner_id = if user.role == "ADMIN" || user.role == "SUPER_ADMIN" {
+    let is_admin = user.role == "ADMIN" || user.role == "SUPER_ADMIN";
+    let owner_id = if is_admin {
         filter_user_id.map(|s| s.as_str())
     } else {
         Some(user.id.as_str())
@@ -122,8 +89,11 @@ pub async fn list(
     )
     .await?;
 
-    // 轻量查询：只取 id + username，避免拉取 passwordHash 等无关字段
-    let owner_map = db::list_user_id_name_map(&state.db).await?;
+    let owner_map = if is_admin {
+        Some(db::list_user_id_name_map(&state.db).await?)
+    } else {
+        None
+    };
     // 批量查询今日各账户签到次数，用于前端判断是否达到每日上限
     let account_ids: Vec<String> = accounts.iter().map(|account| account.id.clone()).collect();
     let today_counts = db::count_runs_today_for_accounts(&state.db, &account_ids)
@@ -133,13 +103,18 @@ pub async fn list(
     let masked: Vec<Value> = accounts
         .iter()
         .map(|acc| {
-            let owner_name = acc
-                .owner_id
-                .as_deref()
-                .and_then(|id| owner_map.get(id))
-                .map(|s| s.as_str());
+            let owner_name = if let Some(owner_map) = &owner_map {
+                acc.owner_id
+                    .as_deref()
+                    .and_then(|id| owner_map.get(id))
+                    .map(|s| s.as_str())
+            } else {
+                Some(user.username.as_str())
+            };
             let today_runs = today_counts.get(&acc.id).copied().unwrap_or(0);
-            account_to_json_with_runs(acc, owner_name, today_runs)
+            let mut value = account_to_json(acc, owner_name);
+            value["todayRuns"] = json!(today_runs);
+            value
         })
         .collect();
 

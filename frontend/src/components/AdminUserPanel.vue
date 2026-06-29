@@ -29,18 +29,33 @@
         <label>备注</label>
         <input v-model="newUser.note" placeholder="可选，方便管理员标识用户" />
       </div>
-      <button type="submit" class="btn-primary">创建用户</button>
+      <button type="submit" class="btn-primary" :disabled="creating">
+        {{ creating ? '创建中...' : '创建用户' }}
+      </button>
     </form>
 
     <div class="user-list">
       <h3>用户列表</h3>
       <p v-if="loading" class="loading-hint">加载中...</p>
       <div v-for="user in users" :key="user.id" class="user-card">
-        <div class="user-info">
-          <strong>{{ user.username }}</strong>
-          <span class="badge" :class="user.role.toLowerCase()">{{ user.role }}</span>
-          <span v-if="!user.enabled" class="badge disabled">已禁用</span>
-          <span v-if="user.note" class="user-note" :title="user.note">{{ user.note }}</span>
+        <div class="user-main">
+          <div class="user-info">
+            <strong>{{ user.username }}</strong>
+            <span class="badge" :class="user.role.toLowerCase()">{{ roleText(user.role) }}</span>
+            <span v-if="!user.enabled" class="badge disabled">已禁用</span>
+            <span v-if="user.note" class="user-note" :title="user.note">{{ user.note }}</span>
+          </div>
+          <div class="user-stats">
+            <span><b>{{ user.accountCount ?? 0 }}</b> 账户</span>
+            <span><b>{{ user.enabledAccountCount ?? 0 }}</b> 启用</span>
+            <span :class="{ danger: (user.failedAccountCount ?? 0) > 0 }">
+              <b>{{ user.failedAccountCount ?? 0 }}</b> 失败
+            </span>
+            <span>最近签到：{{ formatDateTime(user.lastRunAt) }}</span>
+          </div>
+          <p v-if="!user.enabled" class="disabled-hint">
+            该用户已禁用，其账户不会参与自动签到。
+          </p>
         </div>
         <div class="user-actions">
           <button @click="editUser(user)" class="btn-edit" :disabled="!canManage(user)">编辑</button>
@@ -79,14 +94,19 @@
               <input v-model="editingUser.enabled" type="checkbox" />
               启用
             </label>
+            <p v-if="!editingUser.enabled" class="disabled-hint">
+              禁用后，该用户的账户不会参与自动签到。
+            </p>
           </div>
           <div class="form-group">
             <label>备注</label>
             <input v-model="editingUser.note" placeholder="可选，方便管理员标识用户" />
           </div>
           <div class="modal-actions">
-            <button type="submit" class="btn-primary">保存</button>
-            <button type="button" @click="editingUser = null" class="btn-cancel">取消</button>
+            <button type="submit" class="btn-primary" :disabled="saving">
+              {{ saving ? '保存中...' : '保存' }}
+            </button>
+            <button type="button" @click="editingUser = null" class="btn-cancel" :disabled="saving">取消</button>
           </div>
         </form>
       </div>
@@ -107,12 +127,18 @@ interface User {
   enabled: boolean
   note?: string | null
   password?: string
+  accountCount?: number
+  enabledAccountCount?: number
+  failedAccountCount?: number
+  lastRunAt?: string | null
 }
 
 const props = defineProps<{ currentUser: CurrentUser | null }>()
 
 const users = ref<User[]>([])
 const loading = ref(false)
+const creating = ref(false)
+const saving = ref(false)
 const newUser = ref({
   username: '',
   password: '',
@@ -130,6 +156,27 @@ const canManage = (user: User) => {
   return false
 }
 
+const roleText = (role: string) => {
+  const map: Record<string, string> = {
+    USER: '普通用户',
+    ADMIN: '管理员',
+    SUPER_ADMIN: '超级管理员'
+  }
+  return map[role] || role
+}
+
+const formatDateTime = (value: string | null | undefined) => {
+  if (!value) return '无记录'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '无记录'
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
 const fetchUsers = async () => {
   loading.value = true
   try {
@@ -145,6 +192,8 @@ const fetchUsers = async () => {
 }
 
 const createUser = async () => {
+  if (creating.value) return
+  creating.value = true
   try {
     await request(apiUrl('/admin/users'), {
       method: 'POST',
@@ -156,6 +205,8 @@ const createUser = async () => {
     await fetchUsers()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '创建用户失败', 'error')
+  } finally {
+    creating.value = false
   }
 }
 
@@ -166,6 +217,8 @@ const editUser = (user: User) => {
 
 const updateUser = async () => {
   if (!editingUser.value) return
+  if (saving.value) return
+  saving.value = true
   const payload: Record<string, unknown> = {
     role: editingUser.value.role,
     enabled: editingUser.value.enabled,
@@ -184,6 +237,8 @@ const updateUser = async () => {
     await fetchUsers()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '更新用户失败', 'error')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -224,10 +279,12 @@ h3 {
 }
 
 .create-form {
-  background: #1a1a1a;
+  background: #111827;
+  border: 1px solid #263241;
   padding: 1.5rem;
   border-radius: 8px;
   margin-bottom: 2rem;
+  box-shadow: 0 14px 35px rgba(0, 0, 0, 0.18);
 }
 
 .form-group {
@@ -236,7 +293,7 @@ h3 {
 
 .form-group label {
   display: block;
-  color: #ccc;
+  color: #d1d5db;
   margin-bottom: 0.5rem;
 }
 
@@ -244,10 +301,10 @@ h3 {
 .form-group input[type="password"],
 .form-group select {
   width: 100%;
-  padding: 0.5rem;
-  background: #2a2a2a;
-  border: 1px solid #444;
-  border-radius: 4px;
+  padding: 0.6rem;
+  background: #0b1220;
+  border: 1px solid #374151;
+  border-radius: 6px;
   color: #fff;
 }
 
@@ -256,32 +313,41 @@ h3 {
 }
 
 .btn-primary {
-  background: #0070f3;
+  background: #2563eb;
   color: white;
   border: none;
   padding: 0.5rem 1.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
 .btn-primary:hover {
-  background: #0051cc;
+  background: #1d4ed8;
 }
 
 .user-list {
-  background: #1a1a1a;
+  background: #111827;
+  border: 1px solid #263241;
   padding: 1.5rem;
   border-radius: 8px;
 }
 
 .user-card {
-  background: #2a2a2a;
+  background: #0f172a;
+  border: 1px solid #263241;
   padding: 1rem;
-  border-radius: 4px;
-  margin-bottom: 0.5rem;
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
+  transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.user-card:hover {
+  background: #151f2f;
+  border-color: #334155;
 }
 
 .user-info {
@@ -291,31 +357,60 @@ h3 {
   color: #fff;
 }
 
+.user-main {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.user-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
+  color: #94a3b8;
+  font-size: 0.86rem;
+}
+
+.user-stats b {
+  color: #e5e7eb;
+}
+
+.user-stats .danger,
+.user-stats .danger b {
+  color: #f87171;
+}
+
+.disabled-hint {
+  color: #fbbf24;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
 .badge {
   padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  border-radius: 999px;
   font-size: 0.75rem;
   font-weight: bold;
 }
 
 .badge.user {
-  background: #555;
-  color: #fff;
+  background: #334155;
+  color: #dbeafe;
 }
 
 .badge.admin {
-  background: #f59e0b;
-  color: #000;
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
 }
 
 .badge.super_admin {
-  background: #ef4444;
-  color: #fff;
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
 }
 
 .badge.disabled {
-  background: #666;
-  color: #aaa;
+  background: #475569;
+  color: #cbd5e1;
 }
 
 .user-actions {
@@ -328,21 +423,26 @@ h3 {
   color: white;
   border: none;
   padding: 0.25rem 0.75rem;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
 .btn-delete {
-  background: #ef4444;
+  background: #dc2626;
   color: white;
   border: none;
   padding: 0.25rem 0.75rem;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
 .btn-delete:disabled {
-  background: #666;
+  background: #475569;
+  cursor: not-allowed;
+}
+
+.btn-primary:disabled {
+  opacity: 0.65;
   cursor: not-allowed;
 }
 
@@ -360,7 +460,8 @@ h3 {
 }
 
 .modal-content {
-  background: #1a1a1a;
+  background: #111827;
+  border: 1px solid #374151;
   padding: 2rem;
   border-radius: 8px;
   width: 90%;
@@ -374,11 +475,11 @@ h3 {
 }
 
 .btn-cancel {
-  background: #666;
+  background: #475569;
   color: white;
   border: none;
   padding: 0.5rem 1.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
@@ -396,5 +497,14 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: default;
+}
+
+@media (max-width: 768px) {
+  .admin-user-panel { padding: 1rem; }
+  .user-card { align-items: flex-start; flex-direction: column; }
+  .user-info { flex-wrap: wrap; }
+  .user-stats { display: grid; gap: 0.35rem; }
+  .user-actions { width: 100%; }
+  .user-actions button { flex: 1; }
 }
 </style>

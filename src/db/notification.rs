@@ -248,7 +248,7 @@ pub async fn update_notification(
         q = q.bind(v);
     }
     if let Some(v) = &req.webhook_headers {
-        q = q.bind(v);
+        q = q.bind(v.as_deref());
     }
     if let Some(v) = &telegram_bot_token {
         q = q.bind(v);
@@ -257,7 +257,7 @@ pub async fn update_notification(
         q = q.bind(v);
     }
     if let Some(v) = &req.note {
-        q = q.bind(v);
+        q = q.bind(v.as_deref());
     }
 
     q = q.bind(&now);
@@ -370,4 +370,117 @@ pub async fn update_last_notified(pool: &SqlitePool, account_id: &str) -> Result
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite should connect");
+
+        sqlx::query(
+            "CREATE TABLE NotificationConfig (
+                id TEXT PRIMARY KEY,
+                ownerId TEXT NOT NULL,
+                notifyType TEXT NOT NULL,
+                enabled INTEGER NOT NULL,
+                onFailure INTEGER NOT NULL,
+                failureThreshold INTEGER NOT NULL,
+                onBalanceLow INTEGER NOT NULL,
+                balanceThreshold REAL,
+                emailSmtpHost TEXT,
+                emailSmtpPort INTEGER,
+                emailSmtpUser TEXT,
+                emailSmtpPassword TEXT,
+                emailFrom TEXT,
+                emailTo TEXT,
+                webhookUrl TEXT,
+                webhookMethod TEXT,
+                webhookHeaders TEXT,
+                telegramBotToken TEXT,
+                telegramChatId TEXT,
+                note TEXT,
+                createdAt TEXT NOT NULL,
+                updatedAt TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("notification table should be created");
+
+        pool
+    }
+
+    fn webhook_create_request() -> CreateNotificationRequest {
+        CreateNotificationRequest {
+            notify_type: "webhook".to_string(),
+            enabled: Some(true),
+            on_failure: Some(true),
+            failure_threshold: Some(2),
+            on_balance_low: Some(true),
+            balance_threshold: Some(5.0),
+            email_smtp_host: None,
+            email_smtp_port: None,
+            email_smtp_user: None,
+            email_smtp_password: None,
+            email_from: None,
+            email_to: None,
+            webhook_url: Some("https://example.com/hook".to_string()),
+            webhook_method: Some("POST".to_string()),
+            webhook_headers: Some("{\"X-Test\":\"1\"}".to_string()),
+            telegram_bot_token: None,
+            telegram_chat_id: None,
+            note: Some("initial note".to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn update_notification_can_clear_nullable_fields() {
+        let pool = test_pool().await;
+        let created = create_notification(&pool, "owner-1", &webhook_create_request())
+            .await
+            .expect("notification should be created");
+
+        let updated = update_notification(
+            &pool,
+            &created.id,
+            "owner-1",
+            &UpdateNotificationRequest {
+                enabled: None,
+                on_failure: None,
+                failure_threshold: None,
+                on_balance_low: Some(false),
+                balance_threshold: Some(None),
+                email_smtp_host: None,
+                email_smtp_port: None,
+                email_smtp_user: None,
+                email_smtp_password: None,
+                email_from: None,
+                email_to: None,
+                webhook_url: None,
+                webhook_method: None,
+                webhook_headers: Some(None),
+                telegram_bot_token: None,
+                telegram_chat_id: None,
+                note: Some(None),
+            },
+        )
+        .await
+        .expect("notification should be updated");
+
+        assert!(!updated.on_balance_low);
+        assert_eq!(updated.balance_threshold, None);
+        assert_eq!(updated.webhook_headers, None);
+        assert_eq!(updated.note, None);
+        assert_eq!(
+            updated.webhook_url.as_deref(),
+            Some("https://example.com/hook")
+        );
+    }
 }

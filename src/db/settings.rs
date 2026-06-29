@@ -19,10 +19,10 @@ fn settings_cache() -> &'static RwLock<Option<(CheckinSetting, Instant)>> {
 /// Existing databases need these columns added. SQLite doesn't support ADD COLUMN IF NOT EXISTS,
 /// so we try + ignore "duplicate column" errors.
 pub async fn ensure_setting_columns(db: &SqlitePool) -> Result<()> {
-    for col in ["batchDelayMin", "batchDelayMax"] {
+    for (col, default_value) in [("batchDelayMin", 3), ("batchDelayMax", 10)] {
         let sql = format!(
-            "ALTER TABLE CheckinSetting ADD COLUMN {} INTEGER NOT NULL DEFAULT 0",
-            col
+            "ALTER TABLE CheckinSetting ADD COLUMN {} INTEGER NOT NULL DEFAULT {}",
+            col, default_value
         );
         if let Err(e) = sqlx::query(&sql).execute(db).await {
             let msg = e.to_string();
@@ -95,20 +95,17 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
     .await?;
 
     if let Some(s) = settings {
-        // After old DB migration, default value is 0, correct it to safe default (3~10s),
-        // and write back to DB to avoid repeated correction on every cache expiration
         let mut s = s;
         let mut needs_update = false;
-        if s.batch_delay_max <= 0 {
-            s.batch_delay_min = 3;
-            s.batch_delay_max = 10;
-            needs_update = true;
-        }
         if s.batch_delay_min < 0 {
             s.batch_delay_min = 0;
             needs_update = true;
         }
-        if s.cleanup_keep_latest <= 0 {
+        if s.batch_delay_max < s.batch_delay_min {
+            s.batch_delay_max = s.batch_delay_min;
+            needs_update = true;
+        }
+        if s.cleanup_keep_latest < 0 {
             s.cleanup_keep_latest = 500;
             needs_update = true;
         }
@@ -185,4 +182,58 @@ pub async fn update_settings(
     }
 
     Ok(settings)
+}
+
+#[cfg(test)]
+fn clear_settings_cache_for_test() {
+    if let Some(cache) = SETTINGS_CACHE.get() {
+        let mut cache = cache.write().unwrap_or_else(|e| e.into_inner());
+        *cache = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::types::UpdateSettingsRequest;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn setup_db() -> SqlitePool {
+        clear_settings_cache_for_test();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        sqlx::query(include_str!("../../migrations/20260611_init.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        ensure_setting_columns(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn get_settings_preserves_explicit_zero_delay_and_cleanup_retention() {
+        let pool = setup_db().await;
+        update_settings(
+            &pool,
+            &UpdateSettingsRequest {
+                batch_delay_min: Some(0),
+                batch_delay_max: Some(0),
+                cleanup_keep_latest: Some(0),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        clear_settings_cache_for_test();
+        let settings = get_settings(&pool).await.unwrap();
+
+        assert_eq!(settings.batch_delay_min, 0);
+        assert_eq!(settings.batch_delay_max, 0);
+        assert_eq!(settings.cleanup_keep_latest, 0);
+    }
 }

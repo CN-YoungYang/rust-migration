@@ -115,9 +115,9 @@ async fn send_email_notification(
 
     let smtp_password = crypto::decrypt(smtp_password_enc)?;
 
-    let subject = format!("[AI Hub] 签到失败提醒 - {}", payload.account_name);
+    let subject = format!("[AI Hub] 签到提醒 - {}", payload.account_name);
     let body = format!(
-        "账户名称：{}\n站点类型：{}\n站点地址：{}\n签到状态：{}\n失败信息：{}\n连续失败：{} 次\n余额：{}\n时间：{}",
+        "账户名称：{}\n站点类型：{}\n站点地址：{}\n签到状态：{}\n通知信息：{}\n连续失败：{} 次\n余额：{}\n时间：{}",
         payload.account_name,
         payload.site_type,
         payload.base_url,
@@ -317,7 +317,7 @@ async fn send_webhook_notification(
     let method = config.webhook_method.as_deref().unwrap_or("POST");
 
     let json_payload = json!({
-        "type": "checkin_failure",
+        "type": "checkin_notification",
         "account_name": payload.account_name,
         "site_type": payload.site_type,
         "base_url": payload.base_url,
@@ -389,11 +389,11 @@ async fn send_telegram_notification(
     let bot_token = crypto::decrypt(bot_token_enc)?;
 
     let text = format!(
-        "🚨 *签到失败提醒*\n\n\
+        "*签到提醒*\n\n\
         📦 账户：`{}`\n\
         🌐 站点：{}\n\
         🔗 地址：{}\n\
-        ❌ 状态：{}\n\
+        状态：{}\n\
         💬 信息：{}\n\
         🔁 连续失败：{} 次\n\
         💰 余额：{}\n\

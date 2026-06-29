@@ -37,6 +37,9 @@ pub struct StatisticsResponse {
     /// 余额变化趋势（最近30天）
     #[serde(rename = "balanceTrend")]
     balance_trend: Vec<BalanceTrend>,
+    /// 最近失败记录
+    #[serde(rename = "recentFailures")]
+    recent_failures: Vec<RecentFailure>,
 }
 
 #[derive(Serialize)]
@@ -111,6 +114,23 @@ pub struct BalanceTrend {
     date: String,
     /// 总余额（美元，500000 quota = $1）
     balance: f64,
+}
+
+#[derive(Serialize)]
+pub struct RecentFailure {
+    #[serde(rename = "runId")]
+    run_id: String,
+    #[serde(rename = "accountId")]
+    account_id: String,
+    #[serde(rename = "accountName")]
+    account_name: String,
+    #[serde(rename = "siteType")]
+    site_type: String,
+    #[serde(rename = "ownerName")]
+    owner_name: Option<String>,
+    message: Option<String>,
+    #[serde(rename = "createdAt")]
+    created_at: DateTime<Utc>,
 }
 
 fn local_day_start(date: NaiveDate) -> Result<DateTime<Utc>> {
@@ -205,11 +225,14 @@ pub async fn get_statistics(
     // 计算余额趋势（最近30天）
     let balance_trend = calculate_balance_trend(&state.db, owner_id).await?;
 
+    let recent_failures = calculate_recent_failures(&state.db, owner_id).await?;
+
     Ok(crate::routes::data(StatisticsResponse {
         overview,
         daily_trend,
         site_stats,
         balance_trend,
+        recent_failures,
     }))
 }
 
@@ -450,11 +473,73 @@ async fn calculate_balance_trend(
     }])
 }
 
+async fn calculate_recent_failures(
+    db: &sqlx::SqlitePool,
+    owner_id: Option<&str>,
+) -> Result<Vec<RecentFailure>> {
+    let sql = format!(
+        "SELECT
+            cr.id,
+            cr.accountId,
+            ca.name,
+            ca.siteType,
+            u.username,
+            cr.message,
+            cr.createdAt
+         FROM CheckinRun cr
+         JOIN CheckinAccount ca ON cr.accountId = ca.id
+         LEFT JOIN AppUser u ON ca.ownerId = u.id
+         WHERE cr.status = 'failed'{}
+         ORDER BY cr.createdAt DESC
+         LIMIT 10",
+        if owner_id.is_some() {
+            " AND ca.ownerId = ?"
+        } else {
+            ""
+        }
+    );
+
+    let mut query = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            DateTime<Utc>,
+        ),
+    >(&sql);
+    if let Some(owner_id) = owner_id {
+        query = query.bind(owner_id);
+    }
+
+    let rows = query.fetch_all(db).await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(run_id, account_id, account_name, site_type, owner_name, message, created_at)| {
+                RecentFailure {
+                    run_id,
+                    account_id,
+                    account_name,
+                    site_type,
+                    owner_name,
+                    message,
+                    created_at,
+                }
+            },
+        )
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::resolve_owner_filter;
+    use super::{calculate_recent_failures, resolve_owner_filter};
     use crate::{error::AppError, models::AppUser};
     use chrono::Utc;
+    use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
     fn user(id: &str, role: &str) -> AppUser {
         let now = Utc::now();
@@ -468,6 +553,122 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite should connect");
+
+        sqlx::query(
+            "CREATE TABLE AppUser (
+                id TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                passwordHash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                enabled INTEGER NOT NULL,
+                note TEXT,
+                createdAt TEXT NOT NULL,
+                updatedAt TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("user table should be created");
+
+        sqlx::query(
+            "CREATE TABLE CheckinAccount (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                siteType TEXT NOT NULL,
+                baseUrl TEXT NOT NULL,
+                ownerId TEXT,
+                authType TEXT NOT NULL,
+                enabled INTEGER NOT NULL,
+                retryEnabled INTEGER NOT NULL,
+                createdAt TEXT NOT NULL,
+                updatedAt TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("account table should be created");
+
+        sqlx::query(
+            "CREATE TABLE CheckinRun (
+                id TEXT PRIMARY KEY,
+                accountId TEXT NOT NULL,
+                status TEXT NOT NULL,
+                message TEXT,
+                durationMs INTEGER,
+                triggeredBy TEXT NOT NULL,
+                rawResponse TEXT,
+                createdAt TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("run table should be created");
+
+        pool
+    }
+
+    async fn insert_user(pool: &SqlitePool, id: &str, username: &str) {
+        let now = Utc::now();
+        sqlx::query(
+            "INSERT INTO AppUser (id, username, passwordHash, role, enabled, createdAt, updatedAt)
+             VALUES (?, ?, 'hash', 'USER', 1, ?, ?)",
+        )
+        .bind(id)
+        .bind(username)
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("user should be inserted");
+    }
+
+    async fn insert_account(pool: &SqlitePool, id: &str, owner_id: &str, name: &str) {
+        let now = Utc::now();
+        sqlx::query(
+            "INSERT INTO CheckinAccount (
+                id, name, siteType, baseUrl, ownerId, authType,
+                enabled, retryEnabled, createdAt, updatedAt
+             ) VALUES (?, ?, 'new-api', 'https://example.com', ?, 'access_token', 1, 1, ?, ?)",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(owner_id)
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("account should be inserted");
+    }
+
+    async fn insert_run(
+        pool: &SqlitePool,
+        id: &str,
+        account_id: &str,
+        status: &str,
+        message: &str,
+        created_at: chrono::DateTime<Utc>,
+    ) {
+        sqlx::query(
+            "INSERT INTO CheckinRun (
+                id, accountId, status, message, durationMs, triggeredBy, createdAt
+             ) VALUES (?, ?, ?, ?, 10, 'manual', ?)",
+        )
+        .bind(id)
+        .bind(account_id)
+        .bind(status)
+        .bind(message)
+        .bind(created_at)
+        .execute(pool)
+        .await
+        .expect("run should be inserted");
     }
 
     #[test]
@@ -501,5 +702,58 @@ mod tests {
             resolve_owner_filter(&regular, false, Some("other-id")),
             Err(AppError::Forbidden)
         ));
+    }
+
+    #[tokio::test]
+    async fn recent_failures_are_limited_to_owner_and_sorted_newest_first() {
+        let pool = test_pool().await;
+        insert_user(&pool, "user-a", "alice").await;
+        insert_user(&pool, "user-b", "bob").await;
+        insert_account(&pool, "account-a", "user-a", "Alice API").await;
+        insert_account(&pool, "account-b", "user-b", "Bob API").await;
+
+        let older = Utc::now() - chrono::Duration::hours(2);
+        let newer = Utc::now();
+        insert_run(
+            &pool,
+            "run-a-old",
+            "account-a",
+            "failed",
+            "old failure",
+            older,
+        )
+        .await;
+        insert_run(
+            &pool,
+            "run-a-new",
+            "account-a",
+            "failed",
+            "new failure",
+            newer,
+        )
+        .await;
+        insert_run(&pool, "run-a-ok", "account-a", "success", "success", newer).await;
+        insert_run(
+            &pool,
+            "run-b-new",
+            "account-b",
+            "failed",
+            "other user failure",
+            newer,
+        )
+        .await;
+
+        let failures = calculate_recent_failures(&pool, Some("user-a"))
+            .await
+            .expect("recent failures should load");
+
+        assert_eq!(failures.len(), 2);
+        assert_eq!(failures[0].run_id, "run-a-new");
+        assert_eq!(failures[1].run_id, "run-a-old");
+        assert_eq!(failures[0].account_name, "Alice API");
+        assert_eq!(failures[0].owner_name.as_deref(), Some("alice"));
+        assert!(failures
+            .iter()
+            .all(|failure| failure.account_id == "account-a"));
     }
 }
