@@ -12,7 +12,7 @@
 ### 2. 内存优化
 - ✅ Docker 内存限制 200MB
 - ✅ RUST_LOG=warn (减少日志)
-- ✅ Alpine 基础镜像 (~20MB)
+- ✅ slim Debian 运行镜像 + stripped release binary
 - ✅ 连接池配置
 
 ### 3. 性能优化
@@ -24,6 +24,8 @@
 ### 4. 安全优化
 - ✅ API 认证中间件
 - ✅ 管理员权限控制
+- ✅ Cookie 会话 + CSRF 校验
+- ✅ 登录失败频率限制
 - ✅ bcrypt 密码哈希
 - ✅ AES-256-GCM 加密
 - ✅ 参数化查询
@@ -63,14 +65,12 @@ let app = Router::new()
     .layer(GovernorLayer { config: governor_conf });
 ```
 
-### 2. Token 过期 (生产环境建议)
-当前 token 永不过期,生产建议使用 JWT:
-```toml
-jsonwebtoken = "9.2"
-```
+### 2. 会话持久化或多实例会话共享
+
+当前会话存储在 SQLite `AppSession` 表，适合单实例部署。多实例部署时，需要确保所有实例共享同一个数据库和一致的 Cookie/CSRF 配置；更高并发场景可考虑 Redis session。
 
 ### 3. Redis Session (高并发场景)
-当前使用内存 HashMap,多实例无法共享:
+当前单实例不需要 Redis。多实例或高并发场景可引入:
 ```toml
 redis = "0.24"
 ```
@@ -133,7 +133,7 @@ POST /api/checkin-runs: 100-500ms (取决于网络)
 ### 需要优化的场景
 - **100+ 并发用户**: 添加频率限制
 - **多实例部署**: 使用 Redis session
-- **公网暴露**: 添加 token 过期
+- **公网暴露**: 使用 HTTPS、设置 `COOKIE_SECURE=true`、限制 CORS 来源
 - **数据量 >10000**: 考虑分页优化
 
 ### 不需要优化的场景

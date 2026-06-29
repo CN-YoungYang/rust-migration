@@ -24,17 +24,20 @@ openssl rand -base64 32
 使用 1Panel 文件管理器或 SSH 上传以下文件到工作目录:
 ```
 /opt/1panel/apps/ai-hub-rust/
-├── docker-compose.yml
+├── docker-compose.hub.yml
 ├── Dockerfile
 ├── Cargo.toml
+├── Cargo.lock
 ├── .env
 ├── src/
+├── frontend/
+├── public/
 └── migrations/
 ```
 
-#### 3. 配置 docker-compose.yml
+#### 3. 配置 docker-compose.hub.yml
 
-在 1Panel 中编辑 `docker-compose.yml`:
+推荐直接使用项目内 `docker-compose.hub.yml`。如需在 1Panel 中手动编辑，保持主机端口 `3000` 映射到容器端口 `8080`:
 
 ```yaml
 version: ''3.8''
@@ -44,13 +47,12 @@ services:
     build: .
     container_name: ai-hub-rust
     ports:
-      - "3000:3000"
+      - "3000:8080"
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=sqlite:/app/data/ai-hub.db
-      - TOKEN_ENCRYPTION_KEY=你的32字节base64密钥
       - RUST_LOG=warn
-      - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=admin123
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -139,7 +141,7 @@ environment=RUST_LOG="warn",DATABASE_URL="sqlite:./data/ai-hub.db",TOKEN_ENCRYPT
 
 ### 2. 端口映射
 
-- 容器端口: 3000
+- 容器端口: 8080
 - 主机端口: 3000 (或其他可用端口)
 
 ### 3. 环境变量 (在 1Panel 界面配置)
@@ -150,7 +152,8 @@ environment=RUST_LOG="warn",DATABASE_URL="sqlite:./data/ai-hub.db",TOKEN_ENCRYPT
 | TOKEN_ENCRYPTION_KEY | (你的密钥) | **必填** |
 | RUST_LOG | warn | 日志级别 |
 | ADMIN_USERNAME | admin | 管理员用户名 |
-| ADMIN_PASSWORD | admin123 | 管理员密码 |
+| ADMIN_PASSWORD | 强密码 | 首次启动创建管理员时必填 |
+| COOKIE_SECURE | true/false | HTTPS 部署建议 true；HTTP 测试保持 false |
 
 ### 4. 数据持久化
 
@@ -184,7 +187,7 @@ A: 在 1Panel 文件管理器中备份:
 A:
 1. 停止容器
 2. 上传新的代码文件
-3. 重新构建: `docker-compose build --no-cache`
+3. 重新构建: `docker compose -f docker-compose.hub.yml build --no-cache`
 4. 启动容器
 
 ### Q: 内存不足?
@@ -240,11 +243,11 @@ server {
 
 - [ ] 生成 TOKEN_ENCRYPTION_KEY
 - [ ] 上传项目文件到 1Panel
-- [ ] 配置 docker-compose.yml
+- [ ] 配置 docker-compose.hub.yml
 - [ ] 设置环境变量
 - [ ] 构建并启动容器
 - [ ] 访问 http://your-ip:3000/api/health
-- [ ] 登录 (admin/admin123)
+- [ ] 使用 `.env` 中的管理员账号登录
 - [ ] 修改管理员密码
 - [ ] 配置反向代理(可选)
 - [ ] 配置 SSL(可选)
@@ -255,13 +258,10 @@ server {
 # 健康检查
 curl http://your-ip:3000/api/health
 
-# 登录测试
-curl -X POST http://your-ip:3000/api/auth/login \
+# 登录测试会设置 Cookie；浏览器验证更直观
+curl -i -X POST http://your-ip:3000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d ''{
-    "username": "admin",
-    "password": "admin123"
-  }''
+  -d ''{"username":"admin","password":"你的管理员密码"}''
 ```
 
 ## 1Panel 监控

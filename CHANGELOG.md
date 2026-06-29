@@ -1,5 +1,87 @@
 # 更新日志
 
+## v2.6.0 (2026-06-29)
+
+### 界面与操作体验
+
+- **账户管理全面增强**
+  - 支持账户多选、选中账户批量签到、批量刷新余额、批量启用、批量禁用。
+  - 批量操作增加进度条、当前处理账户、失败摘要和批量签到结果明细。
+  - 账户卡片显示启用状态、最近签到、余额刷新时间、今日执行次数、归属用户和备注。
+  - 筛选支持站点类型、启用状态、签到状态、关键词；关键词覆盖账户名称、站点地址和备注。
+  - 编辑账户时锁定站点类型和认证方式，避免破坏既有凭证语义。
+  - 编辑时空 `userId`、`customCheckinUrl`、`note` 会以 `null` 提交并清空数据库字段。
+
+- **签到记录页增强**
+  - 支持失败账户一键批量重试、单条失败记录重试。
+  - 增加当前加载记录概览、成功/失败/进行中计数和平均耗时。
+  - 支持复制单条签到摘要，便于排查 provider 响应或反馈问题。
+  - 记录清理保留数量支持 `0`，表示清空全部，并保留后端边界校验。
+
+- **数据统计页增强**
+  - `GET /api/statistics` 新增 `recentFailures` 字段。
+  - 前端新增最近失败列表、风险站点摘要、今日执行概览、7/30/90 天快捷筛选。
+  - 最近失败支持复制摘要，管理员筛选指定用户时仍保持 ownerId 权限边界。
+
+- **通知配置页增强**
+  - 支持 email、webhook、telegram 配置的本地校验、触发条件预览、发送目标预览。
+  - 测试通知结果在界面留痕，便于连续调试。
+  - 更新通知时支持通过 `null` 清空 `balanceThreshold`、`webhookHeaders`、`note`。
+
+- **全局设置页增强**
+  - 暴露 `cleanupKeepLatest` 配置，控制定时清理保留的最新签到记录数。
+  - 增加保存前校验和当前执行策略预览。
+  - `batchDelayMin` / `batchDelayMax` 允许合法 `0` 值，用于关闭批量/定时签到账户间等待。
+
+- **用户管理页增强**
+  - 用户列表显示账户总数、启用账户数、失败账户数、最近签到时间。
+  - 创建和保存用户时增加 loading 状态，避免重复提交。
+
+### 后端与数据层
+
+- **设置更新字段映射修复**
+  - `UpdateSettingsRequest` 支持前端 camelCase 字段：`windowStart`、`windowEnd`、`retryEnabled`、`maxAttemptsPerDay`、`batchDelayMin`、`batchDelayMax`、`cleanupKeepLatest`。
+  - 保留 snake_case alias，兼容脚本或旧调用。
+
+- **设置 0 值语义修复**
+  - `get_settings()` 不再把合法的 `batchDelayMin=0`、`batchDelayMax=0`、`cleanupKeepLatest=0` 改回默认值。
+  - 旧数据库补列默认值调整为 `batchDelayMin=3`、`batchDelayMax=10`，与新库迁移保持一致。
+
+- **三态字段更新**
+  - `UpdateAccountRequest` 支持缺失 / `null` / 有值三态，允许清空可选账户字段。
+  - `UpdateNotificationRequest` 支持缺失 / `null` / 有值三态，允许清空可选通知字段。
+
+- **账户、统计和用户聚合**
+  - 账户关键词筛选增加备注字段。
+  - 管理员用户列表返回账户摘要统计。
+  - 统计最近失败按 owner 过滤并按时间倒序返回。
+
+### 前端通用改进
+
+- 统一 401 会话过期事件，非登录探测接口返回 401 时自动提示重新登录。
+- 登录成功后直接使用登录响应中的用户信息，避免二次 `/auth/me` 失败造成状态错乱。
+- 首屏增加认证检查状态，登录按钮防重复提交。
+- 顶部显示当前用户和角色。
+- Toast 限制最大数量，移动端展示更稳定；确认框支持 Esc / Enter。
+
+### 数据库
+
+- `CheckinSetting` 新增 `cleanupKeepLatest INTEGER NOT NULL DEFAULT 500`。
+- 运行时兼容旧库，缺失列会通过 `ensure_setting_columns()` 幂等补齐。
+
+### 测试与验证
+
+- 新增账户三态更新、通知三态更新、设置字段映射、设置 0 值保留、用户账户摘要、统计最近失败等测试。
+- 验证命令：
+  - `cargo fmt -- --check`
+  - `cargo test`（26 passed）
+  - `cargo clippy -- -D warnings`
+  - `npm run build`
+  - `git diff --check`
+- 真实临时 SQLite + HTTP 流程验证通过：健康检查、登录、CSRF、`auth/me`、设置保存与非法值拦截、统计、通知清空、账户备注筛选、账户字段清空、退出。
+
+---
+
 ## v2.5.0 (2026-06-25)
 
 ### 新功能

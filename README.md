@@ -4,19 +4,21 @@
 
 ## 功能
 
-- **多站点签到** — 支持 new-api、arrouter、x666 三种站点类型
-- **用户管理** — USER / ADMIN / SUPER_ADMIN 三级角色，完整 CRUD
-- **所有权隔离** — 普通用户只能查看和操作自己的账户，管理员可管理所有
-- **按用户分组** — 账户管理与签到记录均按归属用户折叠分组，当前用户分组置顶，避免多用户混淆
-- **自动调度** — 可配置签到窗口（本地时间）、重试策略、每日尝试上限
-- **批量手动签到** — 「全部签到」/「该组签到」，自动跳过今日已签等账户，返回成功 / 跳过 / 失败汇总
-- **防批量判定** — 批量与定时签到均改为串行执行 + 账户间随机延迟 + 随机打乱顺序 + 随机浏览器指纹，降低被站点判定为机器人的风险
-- **余额查询** — 支持 new-api、arrouter 和 x666 站点的实时余额查询
-- **签到反馈** — 签到成功后显示本次获得额度（quota + 美元换算，500000 quota = 1 USD）
-- **余额联动** — 签到成功 / 已签到后自动刷新账户余额（失败不阻塞签到）
-- **反爬处理** — arrouter 自动识别并求解 acw_sc__v2 反爬挑战
-- **记录管理** — 签到记录查看、手动执行、批量清理
-- **安全加固** — 登录频率限制、会话管理、AES-256-GCM 加密存储、时序攻击防护
+- **多站点签到** — 支持 `new-api`、`anyrouter`、`x666` 三种站点类型。
+- **用户管理** — `USER` / `ADMIN` / `SUPER_ADMIN` 三级角色，支持启用、禁用、备注和账户统计。
+- **所有权隔离** — 普通用户只能查看和操作自己的账户、签到记录、统计和通知配置；管理员可按用户筛选。
+- **账户管理增强** — 支持关键词筛选（名称、地址、备注）、按用户分组、多选、批量签到、批量刷新余额、批量启用/禁用、CSV 导入导出。
+- **签到记录增强** — 支持状态、触发方式、时间范围、账户筛选；失败账户一键重试、单条失败重试、摘要复制、记录清理。
+- **数据统计面板** — 支持概览指标、每日趋势、站点统计、最近失败、风险站点、日期快捷筛选和失败摘要复制。
+- **通知系统** — 支持 email、webhook、telegram 通知；可配置失败阈值、余额阈值、Webhook headers、测试发送和结果留痕。
+- **自动调度** — 可配置签到窗口（本地时间）、重试策略、每日尝试上限、账户间随机延迟、记录清理保留数量。
+- **批量手动签到** — 当前列表、用户分组、选中账户均可批量执行，自动跳过今日已签、禁用、关闭重试或达到每日上限的账户。
+- **防批量判定** — 批量与定时签到均串行执行，账户间随机延迟，随机打乱顺序，并轮换浏览器指纹。
+- **余额查询** — 支持 `new-api`、`anyrouter` 和 `x666` 站点的实时余额查询。
+- **签到反馈** — 签到成功后显示本次获得额度（quota + 美元换算，500000 quota = 1 USD）。
+- **余额联动** — 签到成功 / 已签到后自动刷新账户余额，刷新失败不阻塞签到结果。
+- **反爬处理** — `anyrouter` 自动识别并求解 `acw_sc__v2` 反爬挑战。
+- **安全加固** — 登录频率限制、HttpOnly Cookie 会话、CSRF 校验、AES-256-GCM 凭证加密、bcrypt 密码哈希、时序攻击防护。
 
 ## 快速开始
 
@@ -61,12 +63,14 @@ cargo build --release
 ./target/release/ai-hub-rust
 ```
 
-## 默认账户
+## 初始管理员
 
-- 用户名：`admin`
-- 密码：`admin123456`
+首次启动时会根据环境变量创建初始管理员：
 
-**生产环境请立即修改密码！**
+- `ADMIN_USERNAME`：默认 `admin`
+- `ADMIN_PASSWORD`：首次启动必填，至少 8 位
+
+管理员创建成功后，密码会以 bcrypt 哈希存储。生产环境应使用强密码，并在首次登录后修改或移除部署环境中的 `ADMIN_PASSWORD`。
 
 ## 项目结构
 
@@ -75,7 +79,7 @@ rust-migration/
 ├── src/
 │   ├── main.rs              # 入口、路由注册、CORS、中间件
 │   ├── models.rs            # 数据模型 + serde/sqlx 映射
-│   ├── db.rs                # 数据库操作（SQLite）
+│   ├── db/                  # 数据库操作（SQLite）
 │   ├── error.rs             # 统一错误处理
 │   ├── crypto.rs            # AES-256-GCM 加密 + bcrypt 密码
 │   ├── auth_middleware.rs   # 会话管理 + 鉴权
@@ -84,7 +88,10 @@ rust-migration/
 │   │   ├── accounts.rs      # 签到账户 CRUD + 余额刷新
 │   │   ├── admin.rs         # 用户管理（仅管理员）
 │   │   ├── settings.rs      # 全局设置（仅管理员）
-│   │   └── checkin_runs.rs  # 签到记录 + 手动执行 + 清理
+│   │   ├── checkin_runs.rs  # 签到记录 + 手动/批量执行 + 清理
+│   │   ├── statistics.rs    # 数据统计
+│   │   ├── notifications.rs # 通知配置
+│   │   └── import_export.rs # CSV 导入导出
 │   └── services/
 │       ├── scheduler.rs     # Cron 调度器（串行执行 + 随机延迟）
 │       └── checkin/
@@ -96,7 +103,7 @@ rust-migration/
 ├── frontend/
 │   └── src/
 │       ├── App.vue          # 主应用 + 路由
-│       ├── components/      # 4 个面板组件
+│       ├── components/      # 账户、记录、统计、通知、设置、用户管理面板
 │       └── utils/
 │           ├── api.ts       # 请求封装 + 错误解析
 │           └── toast.ts     # Toast + 确认弹窗
@@ -119,7 +126,7 @@ rust-migration/
 ### 用户管理（需 ADMIN+）
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/admin/users` | 用户列表 |
+| GET | `/api/admin/users` | 用户列表，返回账户数、启用数、失败数、最近签到时间 |
 | POST | `/api/admin/users` | 创建用户 |
 | PUT | `/api/admin/users/:id` | 更新用户 |
 | DELETE | `/api/admin/users/:id` | 删除用户（级联） |
@@ -133,6 +140,8 @@ rust-migration/
 | PUT | `/api/accounts/:id` | 更新账户 |
 | DELETE | `/api/accounts/:id` | 删除账户 |
 | POST | `/api/accounts/:id/refresh-balance` | 刷新余额 |
+| GET | `/api/accounts/export` | 导出 CSV |
+| POST | `/api/accounts/import` | 导入 CSV |
 
 ### 签到记录
 | 方法 | 路径 | 说明 |
@@ -141,6 +150,21 @@ rust-migration/
 | POST | `/api/checkin-runs` | 手动执行签到 |
 | POST | `/api/checkin-runs/batch` | 批量签到（串行 + 随机延迟 + 打乱顺序） |
 | POST | `/api/checkin-runs/cleanup` | 清理记录 |
+
+### 数据统计
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/statistics` | 统计概览、趋势、站点统计、最近失败；支持 `startDate`、`endDate`、`userId` |
+
+### 通知配置
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/notifications` | 通知配置列表 |
+| POST | `/api/notifications` | 创建通知配置 |
+| GET | `/api/notifications/:id` | 获取通知配置 |
+| PUT | `/api/notifications/:id` | 更新通知配置 |
+| DELETE | `/api/notifications/:id` | 删除通知配置 |
+| POST | `/api/notifications/:id/test` | 测试通知 |
 
 ### 设置（需 ADMIN+）
 | 方法 | 路径 | 说明 |
@@ -163,8 +187,30 @@ TZ=Asia/Shanghai                 # 时区
 CORS_ALLOWED_ORIGINS=http://localhost:5173
 SESSION_TTL_HOURS=24             # 会话有效期
 ADMIN_USERNAME=admin             # 初始管理员用户名
-ADMIN_PASSWORD=admin123456       # 初始管理员密码
+ADMIN_PASSWORD=YourSecurePassword123!@#  # 初始管理员密码，首次创建管理员时必填
 ```
+
+### 全局设置字段
+
+`PUT /api/settings` 接收前端使用的 camelCase 字段，同时兼容 snake_case：
+
+```json
+{
+  "enabled": true,
+  "windowStart": "02:00",
+  "windowEnd": "05:00",
+  "retryEnabled": true,
+  "maxAttemptsPerDay": 3,
+  "batchDelayMin": 3,
+  "batchDelayMax": 10,
+  "cleanupKeepLatest": 500
+}
+```
+
+说明：
+
+- `batchDelayMin` / `batchDelayMax`：批量和定时签到的账户间随机延迟，单位秒，允许 `0~600`。
+- `cleanupKeepLatest`：调度清理时保留的最新签到记录数，`0` 表示清空全部。
 
 ### 1Panel 部署 CORS 配置
 
@@ -185,6 +231,7 @@ ADMIN_PASSWORD=admin123456       # 初始管理员密码
 
 - **登录保护** — 5 次失败后锁定 5 分钟，时序攻击防护（dummy bcrypt）
 - **会话管理** — 内存 HashMap + TTL 自动过期，最大 1000 会话硬上限
+- **CSRF 防护** — 非安全方法需要 `X-CSRF-Token`，前端自动从 `csrf_token` Cookie 注入
 - **加密存储** — Token/Cookie 使用 AES-256-GCM 加密后存入数据库
 - **密码哈希** — bcrypt cost 10（1C1G 优化）
 - **错误隔离** — 内部错误（DB/Crypto）不泄露详情给客户端，仅记录日志
@@ -196,6 +243,7 @@ ADMIN_PASSWORD=admin123456       # 初始管理员密码
 - bcrypt cost 降为 10（平衡安全与性能）
 - 共享 HTTP 客户端（OnceLock，30s 超时）
 - 调度器串行执行签到，账户间随机延迟（防批量判定，可配置）
+- 设置缓存 30 秒，减少单行配置频繁查询
 - Docker 多阶段构建，CARGO_BUILD_JOBS=1
 - 非 root 用户运行
 

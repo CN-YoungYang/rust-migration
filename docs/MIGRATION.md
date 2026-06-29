@@ -37,7 +37,7 @@
 cd all-api-hub-platform
 
 # 停止服务
-docker-compose down
+docker compose down
 
 # 备份数据库
 cp data/ai-hub.db data/ai-hub.db.backup-$(date +%Y%m%d)
@@ -68,17 +68,17 @@ cp ../all-api-hub-platform/.env ./
 ```env
 DATABASE_URL=sqlite:./data/ai-hub.db
 TOKEN_ENCRYPTION_KEY=your-32-byte-base64-key
-RUST_LOG=info
+RUST_LOG=warn
 ```
 
 ### 步骤 4: 构建并启动
 
 ```bash
 # 使用 Docker
-docker-compose up --build -d
+docker compose -f docker-compose.hub.yml up --build -d
 
 # 查看日志
-docker-compose logs -f
+docker compose -f docker-compose.hub.yml logs -f
 ```
 
 ### 步骤 5: 验证迁移
@@ -86,13 +86,9 @@ docker-compose logs -f
 ```bash
 # 检查健康状态
 curl http://localhost:3000/api/health
-
-# 检查账号列表
-curl http://localhost:3000/api/accounts
-
-# 检查签到记录
-curl http://localhost:3000/api/checkin-runs
 ```
+
+账户列表、签到记录、设置和管理员接口都需要登录后的 `session_id` Cookie；请通过浏览器登录后验证，或按 `ADMIN-FEATURES.md` 中的 Cookie + CSRF 调试方式调用。
 
 ### 步骤 6: 功能测试
 
@@ -159,11 +155,11 @@ SQLite 数据库完全兼容:
 ```bash
 # 1. 停止 Rust 版本
 cd rust-migration
-docker-compose down
+docker compose -f docker-compose.hub.yml down
 
 # 2. 恢复 Next.js 版本
 cd ../all-api-hub-platform
-docker-compose up -d
+docker compose up -d
 ```
 
 数据库不需要回滚,因为两个版本完全兼容。
@@ -208,7 +204,7 @@ curl -w "@curl-format.txt" -o /dev/null -s http://localhost:3000/api/health
 
 ```bash
 # 查看签到执行时间
-docker-compose logs | grep "checkin completed"
+docker compose -f docker-compose.hub.yml logs | grep "checkin completed"
 ```
 
 ## 后续优化
@@ -223,8 +219,8 @@ docker-compose logs | grep "checkin completed"
 
 如遇到问题:
 
-1. 查看日志: `docker-compose logs -f`
-2. 检查环境变量: `docker-compose config`
+1. 查看日志: `docker compose -f docker-compose.hub.yml logs -f`
+2. 检查环境变量: `docker compose -f docker-compose.hub.yml config`
 3. 验证数据库: `sqlite3 data/ai-hub.db ".tables"`
 4. 提交 Issue 到 GitHub
 

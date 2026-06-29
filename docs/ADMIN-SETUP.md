@@ -1,169 +1,132 @@
-﻿# 管理员账号设置指南
+# 管理员账号设置指南
 
-## 默认管理员账号
+## 初始管理员
 
-**首次启动时会自动创建默认管理员账号**:
+首次启动时，如果数据库中还没有 `ADMIN_USERNAME` 对应用户，系统会自动创建 `SUPER_ADMIN`。
 
-- **用户名**: `admin`
-- **密码**: `admin123`
-
-⚠️ **安全警告**: 请在首次登录后立即修改密码!
-
-## 自定义管理员账号
-
-### 方式 1: 环境变量 (推荐)
-
-在 `.env` 文件中设置:
+`.env` 示例：
 
 ```env
-ADMIN_USERNAME=your_admin_username
-ADMIN_PASSWORD=your_secure_password
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=YourSecurePassword123!@#
 ```
 
-### 方式 2: Docker 环境变量
+要求：
 
-在 `docker-compose.yml` 中添加:
+- `ADMIN_PASSWORD` 首次创建管理员时必填。
+- 密码至少 8 位。
+- 生产环境必须使用强密码。
+- 管理员创建后，密码以 bcrypt 哈希存储。
+- 首次登录后建议修改密码，并从部署环境中移除 `ADMIN_PASSWORD`。
+
+## Docker / 1Panel 配置
+
+`docker-compose.hub.yml` 会读取 `.env`：
 
 ```yaml
-services:
-  app:
-    environment:
-      - ADMIN_USERNAME=your_admin_username
-      - ADMIN_PASSWORD=your_secure_password
+env_file:
+  - .env
 ```
 
-### 方式 3: 启动时指定
+生产部署时至少确认：
 
-```bash
-ADMIN_USERNAME=myuser ADMIN_PASSWORD=mypass cargo run
+```env
+TOKEN_ENCRYPTION_KEY=<openssl rand -base64 32 生成的值>
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=<强密码>
+RUST_LOG=warn
+TZ=Asia/Shanghai
+COOKIE_SECURE=true
 ```
 
-或 Docker:
-
-```bash
-docker run -e ADMIN_USERNAME=myuser -e ADMIN_PASSWORD=mypass ...
-```
+如果暂时没有 HTTPS，`COOKIE_SECURE` 需要保持 `false`，否则浏览器不会通过 HTTP 发送认证 Cookie。
 
 ## 修改管理员密码
 
-### 通过 API
+推荐通过前端：
 
-```bash
-curl -X PUT http://localhost:3000/api/admin/users/{user_id} \
-  -H "Content-Type: application/json" \
-  -d ''{
-    "password": "new_secure_password"
-  }''
+1. 使用 `SUPER_ADMIN` 登录。
+2. 进入“用户管理”。
+3. 编辑目标用户。
+4. 输入新密码并保存。
+
+API 调试时需要 Cookie 和 CSRF：
+
+1. 登录并保存 Cookie。
+2. 从 `csrf_token` Cookie 读取值。
+3. `PUT /api/admin/users/:id` 时带上 `X-CSRF-Token`。
+
+请求体示例：
+
+```json
+{
+  "password": "NewSecurePassword123!"
+}
 ```
-
-### 通过前端界面
-
-1. 登录管理员账号
-2. 进入用户管理页面
-3. 编辑管理员用户
-4. 修改密码并保存
 
 ## 创建额外管理员
 
-```bash
-curl -X POST http://localhost:3000/api/admin/users \
-  -H "Content-Type: application/json" \
-  -d ''{
-    "username": "admin2",
-    "password": "secure_password",
-    "role": "ADMIN"
-  }''
+只有 `SUPER_ADMIN` 可以创建 `ADMIN`。
+
+请求体示例：
+
+```json
+{
+  "username": "admin2",
+  "password": "AnotherSecurePassword123!",
+  "role": "ADMIN",
+  "enabled": true,
+  "note": "备用管理员"
+}
 ```
 
-## 安全建议
-
-1. ✅ **立即修改默认密码**
-2. ✅ 使用强密码 (至少 12 位,包含大小写字母、数字、符号)
-3. ✅ 定期更换密码
-4. ✅ 不要在代码或日志中暴露密码
-5. ✅ 使用 HTTPS (生产环境)
-
-## 密码规范建议
-
-**强密码示例**:
-- `MyS3cur3P@ssw0rd!2024`
-- `Tr0ngP@$$word#AI_Hub`
-- `Adm1n!Secur3#2024`
-
-**弱密码 (避免使用)**:
-- `admin`
-- `123456`
-- `password`
-- `admin123` (默认密码)
-
-## 忘记密码?
-
-### 方式 1: 重置通过环境变量
-
-1. 停止服务
-2. 删除数据库中的用户记录
-3. 设置新的 `ADMIN_PASSWORD`
-4. 重启服务 (会自动重新创建)
-
-### 方式 2: 直接修改数据库
-
-```bash
-# 生成新密码哈希
-echo "new_password" | bcrypt-cli
-
-# 更新数据库
-sqlite3 data/ai-hub.db "UPDATE AppUser SET passwordHash = ''your_hash'' WHERE username = ''admin''"
-```
-
-### 方式 3: 删除数据库重新开始
-
-⚠️ **这会丢失所有数据!**
-
-```bash
-rm data/ai-hub.db
-# 重启服务会重新创建数据库和管理员账号
-```
+`ADMIN` 只能创建或管理 `USER`，不能创建或管理其他管理员。
 
 ## 角色说明
 
-- **ADMIN**: 管理员,拥有所有权限
-- **USER**: 普通用户,仅能管理自己的签到账号
+| 角色 | 能力 |
+|------|------|
+| `USER` | 管理自己的账户、记录、统计和通知 |
+| `ADMIN` | 管理普通用户，查看和操作全局账户与记录，修改全局设置 |
+| `SUPER_ADMIN` | 管理普通用户和管理员，但不能被删除或降级 |
 
-## 快速开始
+## 忘记密码
+
+### 方式 1：使用另一个管理员修改
+
+如果还有其他 `SUPER_ADMIN`，直接在“用户管理”中重置密码。
+
+### 方式 2：删除用户后重建
+
+适用于只有一个管理员且无法登录的情况。
+
+1. 停止服务。
+2. 备份 `data/ai-hub.db`。
+3. 删除目标管理员记录。
+4. 设置新的 `ADMIN_PASSWORD`。
+5. 重启服务，让系统重新创建初始管理员。
+
+### 方式 3：重建数据库
+
+这会丢失所有数据，仅在测试环境使用：
 
 ```bash
-# 1. 配置管理员账号 (可选)
-cp .env.example .env
-vim .env  # 设置 ADMIN_USERNAME 和 ADMIN_PASSWORD
-
-# 2. 启动服务
-docker-compose up -d
-
-# 3. 登录
-curl -X POST http://localhost:3000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d ''{
-    "username": "admin",
-    "password": "admin123"
-  }''
-
-# 4. 立即修改密码!
+Remove-Item .\data\ai-hub.db
 ```
 
-## 常见问题
+Linux：
 
-### Q: 管理员账号何时创建?
-A: 首次启动服务时自动创建,如果已存在则不会重复创建。
+```bash
+rm ./data/ai-hub.db
+```
 
-### Q: 可以有多个管理员吗?
-A: 可以,通过 API 或界面创建额外的 ADMIN 角色用户。
+重启后会重新执行 migration 并创建管理员。
 
-### Q: 环境变量修改后需要重启吗?
-A: 是的,管理员账号仅在服务启动时初始化。
+## 安全建议
 
-### Q: 默认密码会在日志中显示吗?
-A: 首次创建时会在日志中警告显示,提醒您修改密码。
-
----
-
-**重要**: 生产环境务必修改默认密码! 🔒
+- 使用 12 位以上强密码。
+- 生产环境使用 HTTPS，并设置 `COOKIE_SECURE=true`。
+- 不要把 `.env` 提交到 Git。
+- 不要在日志、截图、工单中暴露密码、Cookie、token。
+- 保持 `RUST_LOG=warn`，排查问题时临时切到 `debug`。
+- 定期备份 SQLite 数据库。

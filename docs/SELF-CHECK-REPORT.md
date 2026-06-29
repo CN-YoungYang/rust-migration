@@ -28,7 +28,7 @@
   - 更新 SQL migration 为 camelCase  
   - 添加 Rust models serde/sqlx rename 属性  
   - 更新所有 SQL 查询 (20+ 处)  
-**文件**: `migrations/20260611_init.sql`, `src/models.rs`, `src/db.rs`
+**文件**: `migrations/20260611_init.sql`, `src/models.rs`, `src/db/`
 
 ---
 
@@ -139,7 +139,7 @@
 ### Docker 配置 ✅
 
 - [x] Dockerfile (多阶段构建)
-- [x] docker-compose.yml
+- [x] docker-compose.hub.yml
 - [x] .env.example
 
 ### 文档 ✅

@@ -10,7 +10,7 @@ openssl rand -base64 32
 
 # 2. 创建 .env 文件
 cp .env.example .env
-# 编辑 .env，填入 TOKEN_ENCRYPTION_KEY
+# 编辑 .env，填入 TOKEN_ENCRYPTION_KEY 和首次启动用的 ADMIN_PASSWORD
 
 # 3. 启动服务
 docker compose -f docker-compose.hub.yml up --build -d
@@ -37,12 +37,14 @@ cd frontend && npm install && npm run dev
 # http://localhost:5173
 ```
 
-## 默认账户
+## 初始管理员
 
-- 用户名：`admin`
-- 密码：`admin123456`
+首次启动时会根据 `.env` 创建管理员：
 
-**生产环境请立即修改密码！** 可在 `.env` 中通过 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 自定义。
+- `ADMIN_USERNAME`：默认 `admin`
+- `ADMIN_PASSWORD`：首次启动必填，至少 8 位
+
+生产环境请使用强密码。管理员创建后，密码会以 bcrypt 哈希存储；首次登录后建议修改密码并移除部署环境中的 `ADMIN_PASSWORD`。
 
 ## 验证
 
@@ -50,6 +52,8 @@ cd frontend && npm install && npm run dev
 # 健康检查
 curl http://localhost:3000/api/health
 ```
+
+浏览器打开 `http://localhost:3000`，使用 `.env` 中的管理员账号登录。
 
 ## 技术栈
 
@@ -61,3 +65,5 @@ curl http://localhost:3000/api/health
 
 - [README.md](../README.md) — 完整文档
 - [CHANGELOG.md](../CHANGELOG.md) — 更新日志
+- [OPERATIONS.md](OPERATIONS.md) — 操作指南
+- [ADMIN-FEATURES.md](ADMIN-FEATURES.md) — 管理员功能

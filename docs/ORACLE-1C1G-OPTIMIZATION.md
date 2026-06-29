@@ -27,13 +27,12 @@ services:
   app:
     build: .
     ports:
-      - "3000:3000"
+      - "3000:8080"
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=sqlite:/app/data/ai-hub.db
-      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
       - RUST_LOG=warn  # 减少日志输出
-      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -121,16 +120,16 @@ cd rust-migration
 
 # 2. 配置环境
 cp .env.example .env
-vim .env  # 设置 TOKEN_ENCRYPTION_KEY
+vim .env  # 设置 TOKEN_ENCRYPTION_KEY 和 ADMIN_PASSWORD
 
 # 3. 构建(注意: 1C1G 构建较慢,预计 15-30 分钟)
-docker-compose build --no-cache
+docker compose -f docker-compose.hub.yml build --no-cache
 
 # 4. 启动
-docker-compose up -d
+docker compose -f docker-compose.hub.yml up -d
 
 # 5. 查看日志
-docker-compose logs -f
+docker compose -f docker-compose.hub.yml logs -f
 ```
 
 ### 方式 2: 本地编译 (更低内存)
@@ -184,7 +183,7 @@ RUST_LOG=warn  # 仅警告和错误
 MEM_USAGE=$(free | grep Mem | awk ''{print ($3/$2) * 100}'')
 if (( $(echo "$MEM_USAGE > 90" | bc -l) )); then
     echo "内存使用过高: ${MEM_USAGE}%"
-    docker-compose restart
+    docker compose -f docker-compose.hub.yml restart
 fi
 ```
 
@@ -207,7 +206,7 @@ A:
 # 检查内存限制
 docker stats
 
-# 调整 docker-compose.yml
+# 调整 docker-compose.hub.yml
 mem_limit: 150m  # 降低限制
 ```
 
@@ -254,7 +253,7 @@ RUST_LOG=info
 
 - [ ] 添加 2GB swap
 - [ ] 设置 swappiness=10
-- [ ] docker-compose.yml 设置内存限制
+- [ ] docker-compose.hub.yml 设置内存限制
 - [ ] RUST_LOG=warn
 - [ ] 定时清理任务
 - [ ] 监控脚本
