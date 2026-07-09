@@ -269,22 +269,22 @@ onMounted(fetchUsers)
 }
 
 h2 {
-  color: #fff;
+  color: var(--text-strong);
   margin-bottom: 2rem;
 }
 
 h3 {
-  color: #fff;
+  color: var(--text-strong);
   margin-bottom: 1rem;
 }
 
 .create-form {
-  background: #111827;
-  border: 1px solid #263241;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   padding: 1.5rem;
-  border-radius: 8px;
+  border-radius: var(--radius);
   margin-bottom: 2rem;
-  box-shadow: 0 14px 35px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-card);
 }
 
 .form-group {
@@ -293,7 +293,7 @@ h3 {
 
 .form-group label {
   display: block;
-  color: #d1d5db;
+  color: var(--text);
   margin-bottom: 0.5rem;
 }
 
@@ -302,10 +302,10 @@ h3 {
 .form-group select {
   width: 100%;
   padding: 0.6rem;
-  background: #0b1220;
-  border: 1px solid #374151;
+  background: var(--bg-well);
+  border: 1px solid var(--border-input);
   border-radius: 6px;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .form-group input[type="checkbox"] {
@@ -313,7 +313,7 @@ h3 {
 }
 
 .btn-primary {
-  background: #2563eb;
+  background: var(--accent);
   color: white;
   border: none;
   padding: 0.5rem 1.5rem;
@@ -322,21 +322,21 @@ h3 {
 }
 
 .btn-primary:hover {
-  background: #1d4ed8;
+  background: var(--accent-hover);
 }
 
 .user-list {
-  background: #111827;
-  border: 1px solid #263241;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   padding: 1.5rem;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .user-card {
-  background: #0f172a;
-  border: 1px solid #263241;
+  background: var(--bg-app);
+  border: 1px solid var(--border);
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: var(--radius);
   margin-bottom: 0.75rem;
   display: flex;
   justify-content: space-between;
@@ -347,14 +347,14 @@ h3 {
 
 .user-card:hover {
   background: #151f2f;
-  border-color: #334155;
+  border-color: var(--border-strong);
 }
 
 .user-info {
   display: flex;
   gap: 0.5rem;
   align-items: center;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .user-main {
@@ -367,7 +367,7 @@ h3 {
   display: flex;
   flex-wrap: wrap;
   gap: 0.55rem 1rem;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 0.86rem;
 }
 
@@ -381,20 +381,20 @@ h3 {
 }
 
 .disabled-hint {
-  color: #fbbf24;
+  color: var(--warn);
   font-size: 0.85rem;
   margin: 0;
 }
 
 .badge {
   padding: 0.25rem 0.5rem;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.75rem;
   font-weight: bold;
 }
 
 .badge.user {
-  background: #334155;
+  background: var(--border-strong);
   color: #dbeafe;
 }
 
@@ -404,13 +404,13 @@ h3 {
 }
 
 .badge.super_admin {
-  background: rgba(239, 68, 68, 0.18);
+  background: var(--danger-soft);
   color: #f87171;
 }
 
 .badge.disabled {
   background: #475569;
-  color: #cbd5e1;
+  color: var(--text-faint);
 }
 
 .user-actions {
@@ -419,7 +419,7 @@ h3 {
 }
 
 .btn-edit {
-  background: #10b981;
+  background: var(--success);
   color: white;
   border: none;
   padding: 0.25rem 0.75rem;
@@ -460,10 +460,10 @@ h3 {
 }
 
 .modal-content {
-  background: #111827;
-  border: 1px solid #374151;
+  background: var(--bg-card);
+  border: 1px solid var(--border-input);
   padding: 2rem;
-  border-radius: 8px;
+  border-radius: var(--radius);
   width: 90%;
   max-width: 500px;
 }

@@ -10,10 +10,52 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* ── 设计 token：全站统一色板与层次，组件请引用这些变量而非硬编码十六进制 ──
+   背景层由浅到深（用于卡片分层），文本层由亮到暗（主→次要→占位）。 */
+:root {
+  /* 背景（由深到浅） */
+  --bg-base: #0b0d10;        /* 应用底色 */
+  --bg-app: #0f172a;         /* 玻璃/小卡片底 */
+  --bg-card: #111827;        /* 主卡片 */
+  --bg-well: #0b1220;        /* 输入框/内嵌凹陷块 */
+  --bg-elevated: #1f2937;    /* hover 态 */
+
+  /* 边框 */
+  --border: #263241;
+  --border-strong: #334155;
+  --border-input: #374151;
+
+  /* 文本 */
+  --text-strong: #f8fafc;    /* 标题/关键数值 */
+  --text: #d1d5db;           /* 标签/正文 */
+  --text-muted: #94a3b8;     /* 副标题/说明 */
+  --text-faint: #cbd5e1;     /* 次级内容 */
+
+  /* 主色 / 语义 */
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-border: #3b82f6;
+  --accent-soft: rgba(37, 99, 235, 0.16);
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.18);
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.18);
+  --warn: #f59e0b;
+
+  /* focus 环 */
+  --focus-ring: #60a5fa;
+
+  /* 圆角 / 阴影 */
+  --radius: 8px;
+  --radius-pill: 999px;
+  --shadow-card: 0 14px 35px rgba(0, 0, 0, 0.18);
+  --shadow-modal: 0 24px 70px rgba(0, 0, 0, 0.35);
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #0b0d10;
-  color: #f8fafc;
+  background: var(--bg-base);
+  color: var(--text-strong);
   min-height: 100vh;
   line-height: 1.5;
 }
@@ -25,6 +67,24 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid #60a5fa;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* ── 共享占位：空状态 / 加载态，组件可直接 class 复用 ── */
+.empty-state,
+.loading-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

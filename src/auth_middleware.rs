@@ -112,12 +112,30 @@ fn is_csrf_required(method: &Method) -> bool {
     )
 }
 
+/// 常量时间比较两个字节切片。
+/// 等长时遍历每一位做 XOR 累加并归约，避免基于短路返回或长度差异的时序旁路。
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    // 长度不同时不能提前返回：先把差异归并进结果，再处理长度差异，
+    // 使不同长度路径的执行开销尽量与等长路径一致。
+    let max = a.len().max(b.len());
+    let mut diff = (a.len() ^ b.len()) as u8;
+    for i in 0..max {
+        let av = a.get(i).copied().unwrap_or(0);
+        let bv = b.get(i).copied().unwrap_or(0);
+        diff |= av ^ bv;
+    }
+    diff == 0
+}
+
 fn validate_csrf(headers: &HeaderMap, entry: &db::DbSession) -> bool {
-    headers
+    // 常量时间比较，避免基于响应时间旁路猜测 CSRF token。
+    let Some(provided) = headers
         .get("x-csrf-token")
         .and_then(|value| value.to_str().ok())
-        .map(|token| token == entry.csrf_token)
-        .unwrap_or(false)
+    else {
+        return false;
+    };
+    constant_time_eq(provided.as_bytes(), entry.csrf_token.as_bytes())
 }
 
 pub async fn remove_session(db: &SqlitePool, token: &str) -> crate::error::Result<()> {
@@ -148,7 +166,9 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     if let Some(token) = session_token_from_headers(request.headers()) {
-        if let Ok(Some(entry)) = db::find_session(&state.db, &token).await {
+        if let Ok(Some(entry)) =
+            db::find_session_and_renew(&state.db, &token, session_ttl_secs() as i64).await
+        {
             if is_csrf_required(request.method()) && !validate_csrf(request.headers(), &entry) {
                 return Err(StatusCode::FORBIDDEN);
             }
@@ -221,5 +241,38 @@ mod tests {
         headers.insert("x-csrf-token", HeaderValue::from_static("csrf-123"));
 
         assert!(validate_csrf(&headers, &entry));
+    }
+
+    #[test]
+    fn rejects_csrf_mismatch_and_missing_header_in_constant_time() {
+        let entry = db::DbSession {
+            id: "s1".into(),
+            user_id: "u1".into(),
+            csrf_token: "csrf-123".into(),
+            expires_at: chrono::Utc::now() + chrono::Duration::seconds(60),
+        };
+
+        // 等长但不匹配
+        let mut headers = HeaderMap::new();
+        headers.insert("x-csrf-token", HeaderValue::from_static("csrf-999"));
+        assert!(!validate_csrf(&headers, &entry));
+
+        // 不等长（攻击者长度探测）
+        let mut headers = HeaderMap::new();
+        headers.insert("x-csrf-token", HeaderValue::from_static("csrf-1"));
+        assert!(!validate_csrf(&headers, &entry));
+
+        // 缺失头部
+        assert!(!validate_csrf(&HeaderMap::new(), &entry));
+    }
+
+    #[test]
+    fn constant_time_equal_handles_lengths() {
+        assert!(constant_time_eq(b"", b""));
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"ab"));
+        assert!(!constant_time_eq(b"abc", b"abcd"));
+        assert!(!constant_time_eq(b"abc", b""));
     }
 }

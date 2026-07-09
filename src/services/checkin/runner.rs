@@ -142,31 +142,31 @@ pub async fn execute_checkin(
     match result {
         Ok((status, message, raw_response)) => {
             // 签到成功或今日已签时刷新余额（参考 Next.js runner.ts）
-            // 余额刷新失败不影响签到结果，仅在消息中追加提示
+            // 余额刷新失败了不影响签到结果，仅在消息中追加提示。
+            // 余额刷新为网络请求，无法并入 DB 事务；但其写库与状态更新、记录创建
+            // 通过 create_run_with_status_update_and_balance 在同一事务原子提交，
+            // 避免崩溃时出现"余额已更新但无签到记录"的部分写入。
             let mut notification_balance = account.last_balance;
-            let final_message = if status.as_str() == "success"
+            let (balance_to_store, final_message) = if status.as_str() == "success"
                 || status.as_str() == "already_checked"
             {
                 match fetch_account_balance(&account, profile).await {
                     Ok(quota) => {
                         notification_balance = Some(quota);
-                        if let Err(e) = db::update_account_balance(db, account_id, quota).await {
-                            tracing::warn!(account_id = %account_id, error = %e, "签到后余额写库失败");
-                        }
-                        message
+                        (Some(quota), message)
                     }
                     Err(e) => {
                         let msg = e.to_string();
                         tracing::warn!(account_id = %account_id, error = %msg, "签到后余额刷新失败");
-                        format!("{}；余额刷新失败：{}", message, msg)
+                        (None, format!("{}；余额刷新失败：{}", message, msg))
                     }
                 }
             } else {
-                message
+                (None, message)
             };
 
-            // 原子操作：状态更新 + 记录创建放在同一个事务中，避免部分失败
-            let run = db::create_run_with_status_update(
+            // 原子操作：状态更新 + 余额写入（可选）+ 记录创建放在同一事务中
+            let run = db::create_run_with_status_update_and_balance(
                 db,
                 account_id,
                 &status,
@@ -174,6 +174,7 @@ pub async fn execute_checkin(
                 Some(duration_ms),
                 triggered_by,
                 raw_response.as_deref(),
+                balance_to_store,
             )
             .await?;
             handle_notifications(db, &account, &status, &final_message, notification_balance).await;

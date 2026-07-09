@@ -142,7 +142,16 @@ async fn send_email_notification(
 }
 
 async fn send_smtp(email: SmtpMessage<'_>) -> Result<()> {
-    let addr = format!("{}:{}", email.host, email.port);
+    // 发送前再次按实际解析的 IP 做 SSRF 防护，与 webhook 路径保持一致，
+    // 防止配置写入后 DNS 重绑定/TOCTOU 指向内网或元数据地址。
+    let port = u16::try_from(email.port)
+        .map_err(|_| AppError::Validation("SMTP 端口必须在 1~65535 之间".into()))?;
+    crate::security::validate_public_host_resolved(email.host, port, "SMTP 主机").await?;
+    if !(1..=65535).contains(&port) {
+        return Err(AppError::Validation("SMTP 端口必须在 1~65535 之间".into()));
+    }
+
+    let addr = format!("{}:{}", email.host, port);
     let tcp_stream = timeout(Duration::from_secs(10), TcpStream::connect(&addr))
         .await
         .map_err(|_| AppError::Internal("连接 SMTP 服务器超时".into()))??;

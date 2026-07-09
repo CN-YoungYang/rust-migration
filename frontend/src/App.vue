@@ -1,22 +1,22 @@
 ﻿<template>
   <div id="app">
     <!-- 离线提示条 -->
-    <div v-if="!isOnline" class="offline-banner">
+    <div v-if="!isOnline" class="offline-banner" role="status" aria-live="polite">
       网络连接已断开，请检查网络设置
     </div>
 
-    <nav v-if="isLoggedIn" class="navbar">
+    <nav v-if="isLoggedIn" class="navbar" aria-label="主导航">
       <div class="brand">
         <h1>AI Hub</h1>
         <span class="user-chip">{{ currentUser?.username }} · {{ roleText }}</span>
       </div>
-      <div class="nav-links">
-        <button @click="currentView = 'accounts'" :class="{ active: currentView === 'accounts' }">账户管理</button>
-        <button @click="currentView = 'runs'" :class="{ active: currentView === 'runs' }">签到记录</button>
-        <button @click="currentView = 'statistics'" :class="{ active: currentView === 'statistics' }">数据统计</button>
-        <button @click="currentView = 'notifications'" :class="{ active: currentView === 'notifications' }">通知设置</button>
-        <button @click="currentView = 'settings'" :class="{ active: currentView === 'settings' }" v-if="isAdmin">全局设置</button>
-        <button @click="currentView = 'users'" :class="{ active: currentView === 'users' }" v-if="isAdmin">用户管理</button>
+      <div class="nav-links" role="tablist" aria-label="功能切换">
+        <button @click="currentView = 'accounts'" :class="{ active: currentView === 'accounts' }" role="tab" :aria-selected="currentView === 'accounts'">账户管理</button>
+        <button @click="currentView = 'runs'" :class="{ active: currentView === 'runs' }" role="tab" :aria-selected="currentView === 'runs'">签到记录</button>
+        <button @click="currentView = 'statistics'" :class="{ active: currentView === 'statistics' }" role="tab" :aria-selected="currentView === 'statistics'">数据统计</button>
+        <button @click="currentView = 'notifications'" :class="{ active: currentView === 'notifications' }" role="tab" :aria-selected="currentView === 'notifications'">通知设置</button>
+        <button @click="currentView = 'settings'" :class="{ active: currentView === 'settings' }" v-if="isAdmin" role="tab" :aria-selected="currentView === 'settings'">全局设置</button>
+        <button @click="currentView = 'users'" :class="{ active: currentView === 'users' }" v-if="isAdmin" role="tab" :aria-selected="currentView === 'users'">用户管理</button>
         <button @click="logout" class="btn-logout">退出</button>
       </div>
       <div
@@ -24,8 +24,10 @@
         :title="serverTime || '服务器时间'"
         @mouseenter="startHoverTimer"
         @mouseleave="stopHoverTimer"
+        role="status"
+        :aria-label="serverOk ? '服务器在线' : '服务器离线'"
       >
-        <span class="status-dot" :class="serverOk ? 'online' : 'offline'"></span>
+        <span class="status-dot" :class="serverOk ? 'online' : 'offline'" :aria-hidden="true"></span>
         <span class="status-text">{{ serverOk ? '在线' : '离线' }}</span>
       </div>
     </nav>
@@ -252,7 +254,7 @@ onUnmounted(() => {
 <style>
 #app { min-height: 100vh; background: radial-gradient(circle at top left, rgba(16, 185, 129, 0.08), transparent 34rem), #0b0d10; }
 .offline-banner {
-  background: #f59e0b;
+  background: var(--warn);
   color: #000;
   text-align: center;
   padding: 0.75rem;
@@ -262,40 +264,39 @@ onUnmounted(() => {
   z-index: 1000;
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
-.navbar { background: rgba(17, 24, 39, 0.92); padding: 0.85rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #263241; position: sticky; top: 0; z-index: 30; backdrop-filter: blur(10px); gap: 1rem; }
+.navbar { background: rgba(17, 24, 39, 0.92); padding: 0.85rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 30; backdrop-filter: blur(10px); gap: 1rem; }
 .brand { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
-.navbar h1 { font-size: 1.35rem; letter-spacing: 0; color: #f8fafc; white-space: nowrap; }
-.user-chip { color: #cbd5e1; background: #0f172a; border: 1px solid #263241; border-radius: 999px; padding: 0.25rem 0.55rem; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.navbar h1 { font-size: 1.35rem; letter-spacing: 0; color: var(--text-strong); white-space: nowrap; }
+.user-chip { color: var(--text-faint); background: var(--bg-app); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 0.25rem 0.55rem; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 .nav-links { display: flex; gap: 0.4rem; align-items: center; }
-.nav-links button { background: transparent; color: #cbd5e1; border: 1px solid transparent; padding: 0.48rem 0.8rem; cursor: pointer; border-radius: 6px; transition: all 0.16s ease; }
-.nav-links button.active { background: #2563eb; border-color: #3b82f6; color: white; }
-.nav-links button:hover:not(.active) { background: #1f2937; border-color: #334155; color: #fff; }
+.nav-links button { background: transparent; color: var(--text-faint); border: 1px solid transparent; padding: 0.48rem 0.8rem; cursor: pointer; border-radius: 6px; transition: all 0.16s ease; }
+.nav-links button.active { background: var(--accent); border-color: var(--accent-border); color: white; }
+.nav-links button:hover:not(.active) { background: var(--bg-elevated); border-color: var(--border-strong); color: var(--text-strong); }
 .btn-logout { background: #b91c1c; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; }
 .btn-logout:hover { background: #dc2626; }
 .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
 .login-page { display: flex; align-items: center; justify-content: center; min-height: 80vh; }
-.loading-panel { background: #111827; border: 1px solid #263241; border-radius: 8px; color: #cbd5e1; padding: 1.2rem 1.5rem; }
-.login-form { background: #111827; border: 1px solid #263241; padding: 2rem; border-radius: 8px; width: 100%; max-width: 400px; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35); }
-.login-form h2 { margin-bottom: 1.5rem; text-align: center; color: #f8fafc; }
+.loading-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-faint); padding: 1.2rem 1.5rem; }
+.login-form { background: var(--bg-card); border: 1px solid var(--border); padding: 2rem; border-radius: var(--radius); width: 100%; max-width: 400px; box-shadow: var(--shadow-modal); }
+.login-form h2 { margin-bottom: 1.5rem; text-align: center; color: var(--text-strong); }
 .form-group { margin-bottom: 1rem; }
-.form-group input { width: 100%; padding: 0.75rem; background: #0b1220; border: 1px solid #334155; border-radius: 6px; color: #fff; font-size: 1rem; }
-.btn-primary { width: 100%; background: #2563eb; color: white; border: none; padding: 0.75rem; border-radius: 6px; cursor: pointer; font-size: 1rem; font-weight: 600; }
-.btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+.form-group input { width: 100%; padding: 0.75rem; background: var(--bg-well); border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text-strong); font-size: 1rem; }
+.btn-primary { width: 100%; background: var(--accent); color: white; border: none; padding: 0.75rem; border-radius: 6px; cursor: pointer; font-size: 1rem; font-weight: 600; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-primary:disabled { opacity: 0.65; cursor: not-allowed; }
-.error { color: #ef4444; margin-top: 1rem; text-align: center; }
-.server-status { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: #94a3b8; cursor: default; padding: 0.35rem 0.55rem; border: 1px solid #263241; border-radius: 999px; background: #0f172a; }
+.error { color: var(--danger); margin-top: 1rem; text-align: center; }
+.server-status { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--text-muted); cursor: default; padding: 0.35rem 0.55rem; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--bg-app); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; }
-.status-dot.online { background: #10b981; }
-.status-dot.offline { background: #ef4444; }
+.status-dot.online { background: var(--success); }
+.status-dot.offline { background: var(--danger); }
 .status-text { letter-spacing: 0.5px; }
 
 @media (max-width: 768px) {
   .navbar { flex-direction: column; gap: 0.75rem; padding: 0.75rem 1rem; align-items: stretch; }
   .brand { justify-content: space-between; }
   .user-chip { max-width: 58vw; }
-  .nav-links { width: 100%; overflow-x: auto; justify-content: flex-start; gap: 0.5rem; padding-bottom: 0.15rem; }
-  .nav-links button { flex: 0 0 auto; }
-  .nav-links button { padding: 0.4rem 0.75rem; font-size: 0.85rem; }
+  .nav-links { width: 100%; overflow-x: auto; justify-content: flex-start; gap: 0.5rem; padding-bottom: 0.4rem; scrollbar-width: thin; }
+  .nav-links button { flex: 0 0 auto; padding: 0.4rem 0.75rem; font-size: 0.85rem; }
   .server-status { width: fit-content; }
   .container { padding: 1rem; }
 }
