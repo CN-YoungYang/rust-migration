@@ -8,7 +8,8 @@
       <button class="primary" @click="startCreate" :disabled="saving || loading">新建通知</button>
     </div>
 
-    <form v-if="editing" class="notification-form" @submit.prevent="saveConfig">
+    <form v-if="editing" class="notification-form" :aria-busy="saving" aria-labelledby="notification-form-title" @submit.prevent="saveConfig">
+      <h3 id="notification-form-title">{{ form.id ? '编辑通知' : '新建通知' }}</h3>
       <div class="form-row">
         <label>
           通知类型
@@ -124,7 +125,7 @@
         </div>
       </div>
 
-      <div v-if="validationErrors.length > 0" class="validation-box">
+      <div v-if="validationErrors.length > 0" class="validation-box" role="alert">
         <p v-for="error in validationErrors" :key="error">{{ error }}</p>
       </div>
 
@@ -136,10 +137,10 @@
       </div>
     </form>
 
-    <div v-if="loading" class="empty">加载中...</div>
-    <div v-else-if="configs.length === 0" class="empty">暂无通知配置</div>
+    <div v-if="loading" class="empty" role="status" aria-live="polite">加载中...</div>
+    <div v-else-if="configs.length === 0" class="empty" role="status">暂无通知配置，可使用“新建通知”添加。</div>
 
-    <div v-else class="notification-list">
+    <div v-else class="notification-list" :aria-busy="loading">
       <article v-for="config in configs" :key="config.id" class="notification-card">
         <div class="config-main">
           <div class="title-row">
@@ -150,7 +151,7 @@
             {{ triggerSummary(config) }}
           </p>
           <p class="muted">{{ targetSummary(config) }}</p>
-          <p v-if="testResults[config.id]" :class="['test-result', testResults[config.id].success ? 'success' : 'failed']">
+          <p v-if="testResults[config.id]" :class="['test-result', testResults[config.id].success ? 'success' : 'failed']" role="status" aria-live="polite">
             {{ testResults[config.id].message }} · {{ testResults[config.id].testedAt }}
           </p>
           <p v-if="config.note" class="note">{{ config.note }}</p>
@@ -434,7 +435,7 @@ onMounted(loadConfigs)
 <style scoped>
 .notification-panel { max-width: 1000px; margin: 0 auto; padding: 2rem; }
 .panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.5rem; }
-h2 { color: var(--text-strong); }
+h2, h3 { color: var(--text-strong); }
 .panel-subtitle { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }
 .notification-form,
 .notification-card {
@@ -502,8 +503,8 @@ button:focus-visible {
 .notification-card:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
 .config-main { min-width: 0; }
 .title-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
-.badge { background: var(--success); border-radius: var(--radius-pill); padding: 0.15rem 0.5rem; font-size: 0.75rem; }
-.badge.disabled { background: #6b7280; }
+.badge { background: var(--success-soft); color: #6ee7b7; border-radius: var(--radius-pill); padding: 0.15rem 0.5rem; font-size: 0.75rem; }
+.badge.disabled { background: #6b7280; color: #fff; }
 .muted { color: var(--text-muted); margin: 0.25rem 0; overflow-wrap: anywhere; }
 .note { color: #fbbf24; margin: 0.25rem 0; }
 .test-result { margin-top: 0.4rem; font-size: 0.85rem; }

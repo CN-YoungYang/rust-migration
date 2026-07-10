@@ -8,12 +8,12 @@
         </p>
       </div>
       <div class="header-actions">
-        <select v-if="isAdmin" v-model="filterUserId" class="user-filter">
+        <select v-if="isAdmin" v-model="filterUserId" class="user-filter" aria-label="按用户筛选签到记录">
           <option value="">全部用户</option>
           <option v-if="usersLoading" disabled>加载中...</option>
           <option v-for="u in allUsers" :key="u.id" :value="u.id">{{ u.username }}</option>
         </select>
-        <select v-model="selectedAccountId">
+        <select v-model="selectedAccountId" aria-label="选择要执行签到的账户">
           <option value="">选择账户</option>
           <optgroup v-for="group in groupedAccounts" :key="group.key" :label="group.label">
             <option v-for="account in group.items" :key="account.id" :value="account.id">
@@ -27,7 +27,7 @@
         <button @click="retryFailedRuns" class="btn-retry" :disabled="failedAccountIds.length === 0 || actionBusy">
           {{ retryingBatch ? '重试中...' : `重试失败账户 ${failedAccountIds.length}` }}
         </button>
-        <input v-model.number="keepLatest" type="number" min="0" max="10000" class="keep-input" title="保留最新记录数（0=清除全部）" />
+        <input v-model.number="keepLatest" type="number" min="0" max="10000" class="keep-input" aria-label="清理后保留的最新记录数" title="保留最新记录数（0=清除全部）" />
         <button @click="cleanupRuns" class="btn-cleanup" :disabled="cleaning">
           {{ cleaning ? '清理中...' : '清理记录' }}
         </button>
@@ -36,11 +36,12 @@
 
     <!-- 筛选栏 -->
     <div class="filter-bar">
-      <div class="status-filter">
+      <div class="status-filter" role="group" aria-label="按签到状态筛选">
         <button
           v-for="status in statusOptions"
           :key="status.value"
           :class="['status-btn', { active: filterStatus === status.value }]"
+          :aria-pressed="filterStatus === status.value"
           @click="filterStatus = status.value"
         >
           {{ status.label }}
@@ -49,7 +50,7 @@
           </span>
         </button>
       </div>
-      <select v-model="filterTriggeredBy" class="filter-select">
+      <select v-model="filterTriggeredBy" class="filter-select" aria-label="按触发方式筛选">
         <option value="">全部触发方式</option>
         <option value="manual">手动</option>
         <option value="manual_batch">批量手动</option>
@@ -60,6 +61,7 @@
           v-model="filterStartDate"
           type="datetime-local"
           class="filter-input"
+          aria-label="开始时间"
           placeholder="开始时间"
         />
         <span class="date-separator">至</span>
@@ -67,10 +69,11 @@
           v-model="filterEndDate"
           type="datetime-local"
           class="filter-input"
+          aria-label="结束时间"
           placeholder="结束时间"
         />
       </div>
-      <select v-model="filterAccountId" class="filter-select">
+      <select v-model="filterAccountId" class="filter-select" aria-label="按账户筛选">
         <option value="">全部账户</option>
         <optgroup v-for="group in groupedAccounts" :key="group.key" :label="group.label">
           <option v-for="account in group.items" :key="account.id" :value="account.id">
@@ -101,7 +104,7 @@
       </div>
     </div>
 
-    <div v-if="lastBatchResult" class="batch-result">
+    <div v-if="lastBatchResult" class="batch-result" role="status" aria-live="polite">
       <div class="batch-result-header">
         <div>
           <strong>批量重试结果</strong>
@@ -120,7 +123,7 @@
       </div>
     </div>
 
-    <div class="runs-list">
+    <div class="runs-list" :aria-busy="runsLoading">
       <section v-for="group in groupedRuns" :key="group.key" class="run-group">
         <div class="group-header">
           <strong>{{ group.label }}<span v-if="group.isSelf" class="self-tag">我</span></strong>
@@ -154,8 +157,8 @@
           </div>
         </div>
       </section>
-      <div v-if="runs.length === 0 && !runsLoading" class="empty">暂无签到记录</div>
-      <div v-if="runsLoading" class="empty">加载中...</div>
+      <div v-if="runs.length === 0 && !runsLoading" class="empty" role="status">暂无签到记录</div>
+      <div v-if="runsLoading" class="empty" role="status" aria-live="polite">加载中...</div>
       <div v-if="hasMore && runs.length > 0 && !runsLoading" class="load-more">
         <button @click="loadMoreRuns">加载更多</button>
       </div>
@@ -223,6 +226,8 @@ const executingAccountId = ref('')
 const retryingBatch = ref(false)
 const cleaning = ref(false)
 const PAGE_SIZE = 100
+let accountRequestSeq = 0
+let runsRequestSeq = 0
 const maxAttemptsPerDay = ref(3)
 const lastBatchResult = ref<BatchCheckinResult | null>(null)
 
@@ -344,13 +349,16 @@ const groupedRuns = computed<RunGroup[]>(() => {
 })
 
 const fetchAccounts = async () => {
+  const seq = ++accountRequestSeq
   try {
     let url = apiUrl('/accounts')
     if (props.isAdmin && filterUserId.value) {
       url += `?userId=${encodeURIComponent(filterUserId.value)}`
     }
     const response = await request(url, { headers: authHeaders() })
-    accounts.value = await responseData<Account[]>(response)
+    const data = await responseData<Account[]>(response)
+    if (seq !== accountRequestSeq) return
+    accounts.value = data
     // 如果当前选中的账户不在新列表中，清除选择
     if (selectedAccountId.value && !accounts.value.find((a) => a.id === selectedAccountId.value)) {
       selectedAccountId.value = ''
@@ -359,11 +367,14 @@ const fetchAccounts = async () => {
       selectedAccountId.value = accounts.value[0].id
     }
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '加载账户失败', 'error')
+    if (seq === accountRequestSeq) {
+      showToast(error instanceof Error ? error.message : '加载账户失败', 'error')
+    }
   }
 }
 
 const fetchRuns = async (append = false) => {
+  const seq = ++runsRequestSeq
   runsLoading.value = true
   try {
     const offset = append ? runsOffset.value : 0
@@ -396,6 +407,7 @@ const fetchRuns = async (append = false) => {
 
     const response = await request(url, { headers: authHeaders() })
     const data = await responseData<CheckinRun[]>(response)
+    if (seq !== runsRequestSeq) return
     if (append) {
       runs.value.push(...data)
     } else {
@@ -405,9 +417,11 @@ const fetchRuns = async (append = false) => {
     runsOffset.value += data.length
     hasMore.value = data.length >= PAGE_SIZE
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '加载签到记录失败', 'error')
+    if (seq === runsRequestSeq) {
+      showToast(error instanceof Error ? error.message : '加载签到记录失败', 'error')
+    }
   } finally {
-    runsLoading.value = false
+    if (seq === runsRequestSeq) runsLoading.value = false
   }
 }
 
@@ -663,10 +677,10 @@ select, input { background: var(--bg-well); color: #fff; border: 1px solid var(-
 .run-meta { display: flex; flex-direction: column; gap: 0.25rem; color: var(--text-muted); font-size: 0.9rem; }
 .run-actions { display: flex; gap: 0.5rem; align-items: flex-start; flex-wrap: wrap; justify-content: flex-end; min-width: 160px; }
 .badge { padding: 0.25rem 0.55rem; border-radius: var(--radius-pill); font-size: 0.75rem; display: inline-block; width: fit-content; background: #475569; color: white; }
-.badge.success { background: var(--success); }
-.badge.failed { background: var(--danger); }
-.badge.already_checked { background: var(--accent-border); }
-.badge.pending { background: var(--warn); }
+.badge.success { background: var(--success-soft); color: #6ee7b7; }
+.badge.failed { background: var(--danger-soft); color: #fca5a5; }
+.badge.already_checked { background: var(--accent-soft); color: #bfdbfe; }
+.badge.pending { background: rgba(245, 158, 11, 0.18); color: #fde68a; }
 .badge.neutral { background: #475569; }
 .site-tag { background: #1e293b; color: var(--text-faint); border: 1px solid var(--border-strong); border-radius: var(--radius-pill); padding: 0.2rem 0.5rem; font-size: 0.75rem; }
 button { color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; background: var(--border-input); }

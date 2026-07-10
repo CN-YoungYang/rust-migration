@@ -3,9 +3,9 @@
     <div class="panel-header">
       <div>
         <h2>全局设置</h2>
-        <p class="panel-subtitle">{{ settings.enabled ? '自动签到已启用' : '自动签到已停用' }}</p>
+        <p class="panel-subtitle">{{ settingsStatusText }}</p>
       </div>
-      <div class="status-strip">
+      <div v-if="!loading && !loadError" class="status-strip">
         <span :class="['status-pill', settings.enabled ? 'enabled' : 'disabled']">
           {{ settings.enabled ? '启用' : '停用' }}
         </span>
@@ -14,56 +14,62 @@
     </div>
 
 
-    <form @submit.prevent="saveSettings" class="settings-form">
+    <div v-if="loadError" class="validation-box load-error" role="alert">
+      <span>{{ loadError }}</span>
+      <button type="button" @click="fetchSettings">重试</button>
+    </div>
+    <p v-else-if="loading" class="loading-state" role="status" aria-live="polite">正在加载设置...</p>
+
+    <form v-else class="settings-form" :aria-busy="saving" @submit.prevent="saveSettings">
       <div class="form-group">
-        <label>启用自动签到</label>
+        <label for="settings-enabled">启用自动签到</label>
         <label class="switch">
-          <input v-model="settings.enabled" type="checkbox" />
-          <span class="slider"></span>
+          <input id="settings-enabled" v-model="settings.enabled" type="checkbox" />
+          <span class="slider" aria-hidden="true"></span>
         </label>
       </div>
 
       <div class="form-row">
         <div class="form-group">
-          <label>签到窗口开始</label>
-          <input v-model="settings.windowStart" type="time" required />
+          <label for="settings-window-start">签到窗口开始</label>
+          <input id="settings-window-start" v-model="settings.windowStart" type="time" required />
         </div>
         <div class="form-group">
-          <label>签到窗口结束</label>
-          <input v-model="settings.windowEnd" type="time" required />
+          <label for="settings-window-end">签到窗口结束</label>
+          <input id="settings-window-end" v-model="settings.windowEnd" type="time" required />
         </div>
       </div>
 
       <div class="form-group">
-        <label>启用失败重试</label>
+        <label for="settings-retry-enabled">启用失败重试</label>
         <label class="switch">
-          <input v-model="settings.retryEnabled" type="checkbox" />
-          <span class="slider"></span>
+          <input id="settings-retry-enabled" v-model="settings.retryEnabled" type="checkbox" />
+          <span class="slider" aria-hidden="true"></span>
         </label>
       </div>
 
       <div class="form-group">
-        <label>每天最大尝试次数</label>
-        <input v-model.number="settings.maxAttemptsPerDay" type="number" min="1" max="100" />
+        <label for="settings-max-attempts">每天最大尝试次数</label>
+        <input id="settings-max-attempts" v-model.number="settings.maxAttemptsPerDay" type="number" min="1" max="100" />
       </div>
 
       <div class="form-row">
         <div class="form-group">
-          <label>批量/定时签到最小延迟（秒）</label>
-          <input v-model.number="settings.batchDelayMin" type="number" min="0" max="600" />
+          <label for="settings-delay-min">批量/定时签到最小延迟（秒）</label>
+          <input id="settings-delay-min" v-model.number="settings.batchDelayMin" type="number" min="0" max="600" />
         </div>
         <div class="form-group">
-          <label>批量/定时签到最大延迟（秒）</label>
-          <input v-model.number="settings.batchDelayMax" type="number" min="0" max="600" />
+          <label for="settings-delay-max">批量/定时签到最大延迟（秒）</label>
+          <input id="settings-delay-max" v-model.number="settings.batchDelayMax" type="number" min="0" max="600" />
         </div>
       </div>
 
       <div class="form-group">
-        <label>清理记录时保留最新条数</label>
-        <input v-model.number="settings.cleanupKeepLatest" type="number" min="0" max="10000" />
+        <label for="settings-cleanup-latest">清理记录时保留最新条数</label>
+        <input id="settings-cleanup-latest" v-model.number="settings.cleanupKeepLatest" type="number" min="0" max="10000" />
       </div>
 
-      <div v-if="validationErrors.length > 0" class="validation-box">
+      <div v-if="validationErrors.length > 0" class="validation-box" role="alert">
         <p v-for="error in validationErrors" :key="error">{{ error }}</p>
       </div>
 
@@ -72,7 +78,7 @@
       </button>
     </form>
 
-    <div class="info-section">
+    <div v-if="!loading && !loadError" class="info-section">
       <h3>当前执行策略</h3>
       <div class="policy-grid">
         <div>
@@ -124,7 +130,15 @@ const settings = ref<Settings>({
   batchDelayMax: 10,
   cleanupKeepLatest: 500
 })
+const loading = ref(true)
+const loadError = ref('')
 const saving = ref(false)
+
+const settingsStatusText = computed(() => {
+  if (loading.value) return '正在加载设置...'
+  if (loadError.value) return '设置加载失败'
+  return settings.value.enabled ? '自动签到已启用' : '自动签到已停用'
+})
 
 const validationErrors = computed(() => {
   const errors: string[] = []
@@ -184,13 +198,18 @@ const nextWindowText = computed(() => {
 })
 
 const fetchSettings = async () => {
+  loading.value = true
+  loadError.value = ''
   try {
     const response = await request(apiUrl('/settings'), {
       headers: authHeaders()
     })
     settings.value = await responseData<Settings>(response)
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '加载设置失败', 'error')
+    loadError.value = error instanceof Error ? error.message : '加载设置失败'
+    showToast(loadError.value, 'error')
+  } finally {
+    loading.value = false
   }
 }
 
@@ -244,6 +263,8 @@ input:focus-visible + .slider { outline: 2px solid var(--focus-ring); outline-of
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 .validation-box { border: 1px solid rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.08); color: #fca5a5; border-radius: var(--radius); padding: 0.85rem 1rem; margin-bottom: 1rem; display: grid; gap: 0.35rem; }
+.load-error { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.load-error button { border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-elevated); color: var(--text-strong); padding: 0.45rem 0.8rem; }
 .info-section { background: var(--bg-card); border: 1px solid var(--border); padding: 1.5rem; border-radius: var(--radius); }
 .policy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .policy-grid div { background: var(--bg-well); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.9rem; display: grid; gap: 0.35rem; }

@@ -1,31 +1,83 @@
+import { getDialogFocusableElements, wrappedDialogFocusIndex } from './dialogFocus.ts'
+
+export type ConfirmDialogKeyAction = 'cancel' | null
+
+export function confirmDialogKeyAction(key: string): ConfirmDialogKeyAction {
+  return key === 'Escape' ? 'cancel' : null
+}
+
 export function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {
   const existing = Array.from(document.querySelectorAll('.toast'))
   existing.slice(0, Math.max(0, existing.length - 2)).forEach((item) => item.remove())
 
   const toast = document.createElement('div')
   toast.className = `toast toast-${type}`
-  toast.textContent = message
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status')
+  toast.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite')
+  toast.setAttribute('aria-atomic', 'true')
   toast.style.cssText = `
     position: fixed;
     top: 20px;
     right: 20px;
     left: auto;
-    padding: 1rem 1.5rem;
-    border-radius: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
     color: white;
     font-weight: 500;
     z-index: 9999;
     animation: slideIn 0.3s ease;
     max-width: 400px;
     width: max-content;
-    word-wrap: break-word;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+    word-break: break-word;
+    box-shadow: var(--shadow-modal);
   `
 
-  if (type === 'success') toast.style.background = '#10b981'
-  else if (type === 'error') toast.style.background = '#ef4444'
-  else toast.style.background = '#2563eb'
+  if (type === 'success') {
+    toast.style.background = '#065f46'
+    toast.style.borderColor = '#10b981'
+  } else if (type === 'error') {
+    toast.style.background = '#991b1b'
+    toast.style.borderColor = '#ef4444'
+  } else {
+    toast.style.background = '#1e40af'
+    toast.style.borderColor = '#3b82f6'
+  }
 
+  const text = document.createElement('span')
+  text.textContent = message
+  text.style.cssText = 'flex: 1; min-width: 0;'
+
+  const closeButton = document.createElement('button')
+  closeButton.type = 'button'
+  closeButton.textContent = '×'
+  closeButton.setAttribute('aria-label', '关闭提示')
+  closeButton.style.cssText = `
+    flex: 0 0 auto;
+    min-width: 28px;
+    min-height: 28px;
+    margin: -0.25rem -0.35rem -0.25rem 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: white;
+    font-size: 1.25rem;
+    line-height: 1;
+  `
+
+  let dismissed = false
+  const dismiss = () => {
+    if (dismissed) return
+    dismissed = true
+    toast.style.animation = 'slideOut 0.3s ease'
+    window.setTimeout(() => toast.remove(), 300)
+  }
+
+  closeButton.addEventListener('click', dismiss)
+  toast.append(text, closeButton)
   document.body.appendChild(toast)
 
   if (window.innerWidth < 640) {
@@ -35,19 +87,22 @@ export function showToast(message: string, type: 'success' | 'error' | 'info' = 
     toast.style.width = 'auto'
   }
 
-  setTimeout(() => {
-    toast.style.animation = 'slideOut 0.3s ease'
-    setTimeout(() => toast.remove(), 300)
-  }, 3000)
+  window.setTimeout(dismiss, type === 'error' ? 7000 : 4500)
 }
 
 export function confirmAction(message: string): Promise<boolean> {
   return new Promise((resolve) => {
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+    const previousOverflow = document.body.style.overflow
+    let settled = false
+
     const overlay = document.createElement('div')
     overlay.style.cssText = `
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.7);
+      background: rgba(0, 0, 0, 0.72);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -56,53 +111,83 @@ export function confirmAction(message: string): Promise<boolean> {
     `
 
     const dialog = document.createElement('div')
+    const messageId = `confirm-message-${Date.now()}`
+    dialog.setAttribute('role', 'alertdialog')
+    dialog.setAttribute('aria-modal', 'true')
+    dialog.setAttribute('aria-labelledby', messageId)
+    dialog.tabIndex = -1
     dialog.style.cssText = `
       width: min(420px, 92vw);
-      background: #111827;
-      border: 1px solid #374151;
-      border-radius: 8px;
-      color: #fff;
+      background: var(--bg-card);
+      border: 1px solid var(--border-input);
+      border-radius: var(--radius);
+      color: var(--text-strong);
       padding: 1.25rem;
-      box-shadow: 0 20px 45px rgba(0, 0, 0, 0.45);
+      box-shadow: var(--shadow-modal);
     `
 
     const text = document.createElement('p')
+    text.id = messageId
     text.textContent = message
-    text.style.cssText = 'margin: 0 0 1.25rem; line-height: 1.6; color: #e5e7eb;'
+    text.style.cssText = 'margin: 0 0 1.25rem; line-height: 1.6; color: var(--text-faint);'
 
     const actions = document.createElement('div')
     actions.style.cssText = 'display: flex; justify-content: flex-end; gap: 0.75rem; flex-wrap: wrap;'
 
     const cancelButton = document.createElement('button')
+    cancelButton.type = 'button'
     cancelButton.textContent = '取消'
-    cancelButton.style.cssText = 'border: 0; border-radius: 6px; padding: 0.5rem 1rem; color: #fff; background: #4b5563; cursor: pointer;'
+    cancelButton.style.cssText = 'border: 0; border-radius: 6px; min-height: 40px; padding: 0.5rem 1rem; color: white; background: #475569; cursor: pointer;'
 
     const okButton = document.createElement('button')
+    okButton.type = 'button'
     okButton.textContent = '确认'
-    okButton.style.cssText = 'border: 0; border-radius: 6px; padding: 0.5rem 1rem; color: #fff; background: #dc2626; cursor: pointer;'
+    okButton.style.cssText = 'border: 0; border-radius: 6px; min-height: 40px; padding: 0.5rem 1rem; color: white; background: #b91c1c; cursor: pointer;'
 
     const cleanup = (result: boolean) => {
-      document.removeEventListener('keydown', handleKeydown)
+      if (settled) return
+      settled = true
+      dialog.removeEventListener('keydown', handleKeydown)
       overlay.remove()
+      document.body.style.overflow = previousOverflow
+      if (previousFocus?.isConnected) previousFocus.focus()
       resolve(result)
     }
 
     const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') cleanup(false)
-      if (event.key === 'Enter') cleanup(true)
+      if (confirmDialogKeyAction(event.key) === 'cancel') {
+        event.preventDefault()
+        cleanup(false)
+        return
+      }
+
+      if (event.key !== 'Tab') return
+      const focusable = getDialogFocusableElements(dialog)
+      if (focusable.length === 0) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+
+      const currentIndex = focusable.indexOf(document.activeElement as HTMLElement)
+      const nextIndex = wrappedDialogFocusIndex(currentIndex, focusable.length, event.shiftKey)
+      if (nextIndex === null) return
+      event.preventDefault()
+      focusable[nextIndex]?.focus()
     }
 
-    cancelButton.onclick = () => cleanup(false)
-    okButton.onclick = () => cleanup(true)
-    overlay.onclick = (event) => {
+    cancelButton.addEventListener('click', () => cleanup(false))
+    okButton.addEventListener('click', () => cleanup(true))
+    overlay.addEventListener('click', (event) => {
       if (event.target === overlay) cleanup(false)
-    }
-    document.addEventListener('keydown', handleKeydown)
+    })
+    dialog.addEventListener('keydown', handleKeydown)
 
     actions.append(cancelButton, okButton)
     dialog.append(text, actions)
     overlay.append(dialog)
     document.body.appendChild(overlay)
-    okButton.focus()
+    document.body.style.overflow = 'hidden'
+    cancelButton.focus()
   })
 }

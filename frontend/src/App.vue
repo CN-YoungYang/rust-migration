@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div id="app">
     <!-- 离线提示条 -->
     <div v-if="!isOnline" class="offline-banner" role="status" aria-live="polite">
@@ -10,13 +10,13 @@
         <h1>AI Hub</h1>
         <span class="user-chip">{{ currentUser?.username }} · {{ roleText }}</span>
       </div>
-      <div class="nav-links" role="tablist" aria-label="功能切换">
-        <button @click="currentView = 'accounts'" :class="{ active: currentView === 'accounts' }" role="tab" :aria-selected="currentView === 'accounts'">账户管理</button>
-        <button @click="currentView = 'runs'" :class="{ active: currentView === 'runs' }" role="tab" :aria-selected="currentView === 'runs'">签到记录</button>
-        <button @click="currentView = 'statistics'" :class="{ active: currentView === 'statistics' }" role="tab" :aria-selected="currentView === 'statistics'">数据统计</button>
-        <button @click="currentView = 'notifications'" :class="{ active: currentView === 'notifications' }" role="tab" :aria-selected="currentView === 'notifications'">通知设置</button>
-        <button @click="currentView = 'settings'" :class="{ active: currentView === 'settings' }" v-if="isAdmin" role="tab" :aria-selected="currentView === 'settings'">全局设置</button>
-        <button @click="currentView = 'users'" :class="{ active: currentView === 'users' }" v-if="isAdmin" role="tab" :aria-selected="currentView === 'users'">用户管理</button>
+      <div class="nav-links" aria-label="功能导航">
+        <button @click="selectView('accounts')" :class="{ active: currentView === 'accounts' }" :aria-current="currentView === 'accounts' ? 'page' : undefined">账户管理</button>
+        <button @click="selectView('runs')" :class="{ active: currentView === 'runs' }" :aria-current="currentView === 'runs' ? 'page' : undefined">签到记录</button>
+        <button @click="selectView('statistics')" :class="{ active: currentView === 'statistics' }" :aria-current="currentView === 'statistics' ? 'page' : undefined">数据统计</button>
+        <button @click="selectView('notifications')" :class="{ active: currentView === 'notifications' }" :aria-current="currentView === 'notifications' ? 'page' : undefined">通知设置</button>
+        <button @click="selectView('settings')" :class="{ active: currentView === 'settings' }" v-if="isAdmin" :aria-current="currentView === 'settings' ? 'page' : undefined">全局设置</button>
+        <button @click="selectView('users')" :class="{ active: currentView === 'users' }" v-if="isAdmin" :aria-current="currentView === 'users' ? 'page' : undefined">用户管理</button>
         <button @click="logout" class="btn-logout">退出</button>
       </div>
       <div
@@ -24,49 +24,58 @@
         :title="serverTime || '服务器时间'"
         @mouseenter="startHoverTimer"
         @mouseleave="stopHoverTimer"
+        @focus="startHoverTimer"
+        @blur="stopHoverTimer"
         role="status"
-        :aria-label="serverOk ? '服务器在线' : '服务器离线'"
+        tabindex="0"
+        :aria-label="serverStatusLabel"
       >
-        <span class="status-dot" :class="serverOk ? 'online' : 'offline'" :aria-hidden="true"></span>
-        <span class="status-text">{{ serverOk ? '在线' : '离线' }}</span>
+        <span class="status-dot" :class="serverStatusClass" :aria-hidden="true"></span>
+        <span class="status-text">{{ serverStatusText }}</span>
       </div>
     </nav>
 
-    <div class="container">
+    <main class="container">
       <div v-if="authChecking" class="login-page">
-        <div class="loading-panel">正在检查登录状态...</div>
+        <div class="loading-panel" role="status" aria-live="polite" aria-busy="true">正在检查登录状态...</div>
       </div>
 
       <div v-else-if="!isLoggedIn" class="login-page">
-        <form @submit.prevent="login" class="login-form">
-          <h2>登录</h2>
+        <form @submit.prevent="login" class="login-form" aria-labelledby="login-title">
+          <h2 id="login-title">登录</h2>
           <div class="form-group">
-            <input v-model="loginForm.username" placeholder="用户名" required :disabled="loginLoading" />
+            <label class="sr-only" for="login-username">用户名</label>
+            <input id="login-username" v-model="loginForm.username" name="username" placeholder="用户名" autocomplete="username" autocapitalize="none" required :disabled="loginLoading" />
           </div>
           <div class="form-group">
-            <input v-model="loginForm.password" type="password" placeholder="密码" required :disabled="loginLoading" />
+            <label class="sr-only" for="login-password">密码</label>
+            <input id="login-password" v-model="loginForm.password" name="password" type="password" placeholder="密码" autocomplete="current-password" required :disabled="loginLoading" />
           </div>
           <button type="submit" class="btn-primary" :disabled="loginLoading">
             {{ loginLoading ? '登录中...' : '登录' }}
           </button>
-          <p v-if="error" class="error">{{ error }}</p>
+          <p v-if="error" class="error" role="alert" aria-live="assertive">{{ error }}</p>
         </form>
       </div>
 
-      <div v-else>
-        <AccountPanel v-if="currentView === 'accounts'" :current-user="currentUser" :is-admin="isAdmin" />
-        <CheckinRunsPanel v-else-if="currentView === 'runs'" :current-user="currentUser" :is-admin="isAdmin" />
-        <StatisticsPanel v-else-if="currentView === 'statistics'" :current-user="currentUser" :is-admin="isAdmin" />
-        <NotificationPanel v-else-if="currentView === 'notifications'" />
-        <SettingsPanel v-else-if="currentView === 'settings' && isAdmin" />
-        <AdminUserPanel v-else-if="currentView === 'users'" :current-user="currentUser" />
+      <div
+        v-else
+        ref="panelRegion"
+        class="panel-region"
+        role="region"
+        :aria-label="`${currentViewLabel}面板`"
+        tabindex="-1"
+      >
+        <KeepAlive :include="cachedPanelNames">
+          <component :is="activePanelComponent" v-bind="activePanelProps" />
+        </KeepAlive>
       </div>
-    </div>
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, type Component } from 'vue'
 import AccountPanel from './components/AccountPanel.vue'
 import CheckinRunsPanel from './components/CheckinRunsPanel.vue'
 import StatisticsPanel from './components/StatisticsPanel.vue'
@@ -82,16 +91,39 @@ interface AppUser {
   enabled: boolean
 }
 
+type ViewName = 'accounts' | 'runs' | 'statistics' | 'notifications' | 'settings' | 'users'
+
+const panelComponents: Record<ViewName, Component> = {
+  accounts: AccountPanel,
+  runs: CheckinRunsPanel,
+  statistics: StatisticsPanel,
+  notifications: NotificationPanel,
+  settings: SettingsPanel,
+  users: AdminUserPanel,
+}
+
+const viewLabels: Record<ViewName, string> = {
+  accounts: '账户管理',
+  runs: '签到记录',
+  statistics: '数据统计',
+  notifications: '通知设置',
+  settings: '全局设置',
+  users: '用户管理',
+}
+
+const cachedPanelNames = ['AccountPanel', 'CheckinRunsPanel', 'StatisticsPanel']
+
 const isLoggedIn = ref(false)
 const currentUser = ref<AppUser | null>(null)
-const currentView = ref('accounts')
+const currentView = ref<ViewName>('accounts')
 const loginForm = ref({ username: '', password: '' })
 const error = ref('')
 const authChecking = ref(true)
 const loginLoading = ref(false)
-const serverOk = ref(true)
+const serverOk = ref<boolean | null>(null)
 const serverTime = ref('')
 const isOnline = ref(navigator.onLine)
+const panelRegion = ref<HTMLElement | null>(null)
 let serverTimeOffset = 0 // 服务器时间与本地时间的差值（毫秒）
 let hoverTimer: ReturnType<typeof setInterval> | null = null
 let serverTimeSyncTimer: ReturnType<typeof setInterval> | null = null
@@ -108,6 +140,32 @@ const roleText = computed(() => {
   }
   return map[currentUser.value?.role || ''] || '用户'
 })
+
+const currentViewLabel = computed(() => viewLabels[currentView.value])
+const activePanelComponent = computed(() => panelComponents[currentView.value])
+const activePanelProps = computed<Record<string, unknown>>(() => {
+  if (currentView.value === 'users') return { currentUser: currentUser.value }
+  if (currentView.value === 'notifications' || currentView.value === 'settings') return {}
+  return { currentUser: currentUser.value, isAdmin: isAdmin.value }
+})
+const serverStatusText = computed(() => {
+  if (serverOk.value === null) return '检测中'
+  return serverOk.value ? '在线' : '离线'
+})
+const serverStatusClass = computed(() => {
+  if (serverOk.value === null) return 'checking'
+  return serverOk.value ? 'online' : 'offline'
+})
+const serverStatusLabel = computed(() => {
+  const time = serverTime.value ? `，服务器时间 ${serverTime.value}` : ''
+  return `服务器${serverStatusText.value}${time}`
+})
+
+const selectView = (view: ViewName) => {
+  if (currentView.value === view) return
+  currentView.value = view
+  void nextTick(() => panelRegion.value?.focus())
+}
 
 const login = async () => {
   if (loginLoading.value) return
@@ -289,7 +347,9 @@ onUnmounted(() => {
 .status-dot { width: 8px; height: 8px; border-radius: 50%; }
 .status-dot.online { background: var(--success); }
 .status-dot.offline { background: var(--danger); }
+.status-dot.checking { background: var(--warn); }
 .status-text { letter-spacing: 0.5px; }
+.panel-region:focus { outline: none; }
 
 @media (max-width: 768px) {
   .navbar { flex-direction: column; gap: 0.75rem; padding: 0.75rem 1rem; align-items: stretch; }

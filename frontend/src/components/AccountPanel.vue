@@ -8,7 +8,7 @@
         </p>
       </div>
       <div class="header-actions">
-        <select v-if="isAdmin" v-model="filterUserId" class="user-filter">
+        <select v-if="isAdmin" v-model="filterUserId" class="user-filter" aria-label="按用户筛选账户">
           <option value="">全部用户</option>
           <option v-if="usersLoading" disabled>加载中...</option>
           <option v-for="u in allUsers" :key="u.id" :value="u.id">{{ u.username }}</option>
@@ -28,18 +28,18 @@
     </div>
 
     <div class="filter-bar">
-      <select v-model="filterSiteType" class="filter-select">
+      <select v-model="filterSiteType" class="filter-select" aria-label="按站点类型筛选">
         <option value="">全部类型</option>
         <option value="new-api">new-api</option>
         <option value="anyrouter">anyrouter</option>
         <option value="x666">x666</option>
       </select>
-      <select v-model="filterEnabled" class="filter-select">
+      <select v-model="filterEnabled" class="filter-select" aria-label="按启用状态筛选">
         <option value="">全部状态</option>
         <option value="true">已启用</option>
         <option value="false">已禁用</option>
       </select>
-      <select v-model="filterLastStatus" class="filter-select">
+      <select v-model="filterLastStatus" class="filter-select" aria-label="按签到状态筛选">
         <option value="">全部签到状态</option>
         <option value="not_today">今日未签到</option>
         <option value="success">成功</option>
@@ -49,7 +49,8 @@
       </select>
       <input
         v-model="filterKeyword"
-        type="text"
+        type="search"
+        aria-label="搜索账户"
         placeholder="搜索账户名称、地址或备注"
         class="filter-input"
       />
@@ -85,18 +86,18 @@
       </button>
     </div>
 
-    <div v-if="bulkProgress" class="progress-panel">
+    <div v-if="bulkProgress" class="progress-panel" role="status" aria-live="polite" aria-atomic="true">
       <div class="progress-meta">
         <strong>{{ bulkProgress.label }}</strong>
         <span>{{ bulkProgress.completed }} / {{ bulkProgress.total }}</span>
       </div>
-      <div class="progress-track">
+      <div class="progress-track" role="progressbar" :aria-label="bulkProgress.label" aria-valuemin="0" :aria-valuemax="bulkProgress.total" :aria-valuenow="bulkProgress.completed">
         <span :style="{ width: progressPercent + '%' }"></span>
       </div>
       <p v-if="bulkProgress.current" class="muted">当前：{{ bulkProgress.current }}</p>
     </div>
 
-    <div v-if="bulkErrors.length > 0" class="error-panel">
+    <div v-if="bulkErrors.length > 0" class="error-panel" role="alert" aria-live="assertive">
       <div class="error-panel-header">
         <strong>失败摘要</strong>
         <button class="ghost" @click="bulkErrors = []">清除</button>
@@ -106,7 +107,7 @@
       </ul>
     </div>
 
-    <div v-if="lastBatchResult" class="batch-result">
+    <div v-if="lastBatchResult" class="batch-result" role="status" aria-live="polite">
       <div class="batch-result-header">
         <div>
           <strong>批量签到结果</strong>
@@ -125,7 +126,7 @@
       </div>
     </div>
 
-    <p v-if="loading" class="empty">加载中...</p>
+    <p v-if="loading" class="empty" role="status" aria-live="polite">加载中...</p>
 
     <div v-if="!loading" class="account-list">
       <section v-for="group in groupedAccounts" :key="group.key" class="account-group">
@@ -195,12 +196,12 @@
           </div>
         </article>
       </section>
-      <p v-if="accounts.length === 0" class="empty">暂无账户</p>
+      <p v-if="accounts.length === 0" class="empty" role="status">暂无账户，可使用右上角“新增账户”开始配置。</p>
     </div>
 
-    <div v-if="showForm" class="modal" @click.self="closeForm" @keydown.escape="closeForm">
-      <form class="modal-content" @submit.prevent="submitForm">
-        <h3>{{ editingId ? '编辑账户' : '新增账户' }}</h3>
+    <div v-if="showForm" class="modal" role="presentation" @click.self="closeForm" @keydown.escape="closeForm">
+      <form v-focus-trap class="modal-content" role="dialog" aria-modal="true" aria-labelledby="account-form-title" tabindex="-1" @submit.prevent="submitForm">
+        <h3 id="account-form-title">{{ editingId ? '编辑账户' : '新增账户' }}</h3>
         <label>名称<input v-model="form.name" required /></label>
         <label>站点类型
           <select v-model="form.siteType" :disabled="Boolean(editingId)">
@@ -232,9 +233,9 @@
       </form>
     </div>
 
-    <div v-if="showImportDialog" class="modal" @click.self="closeImportDialog">
-      <div class="modal-content import-dialog">
-        <h3>批量导入账户</h3>
+    <div v-if="showImportDialog" class="modal" role="presentation" @click.self="closeImportDialog" @keydown.escape="closeImportDialog">
+      <div v-focus-trap class="modal-content import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title" tabindex="-1">
+        <h3 id="import-dialog-title">批量导入账户</h3>
         <p class="muted">支持 CSV 格式，需包含 header 行</p>
 
         <div class="import-instructions">
@@ -251,6 +252,7 @@
         <input
           type="file"
           accept=".csv"
+          aria-label="选择账户 CSV 文件"
           @change="handleFileSelect"
           class="file-input"
         />
@@ -283,6 +285,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { apiUrl, authHeaders, request, responseData } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
+import { vFocusTrap } from '../utils/dialogFocus'
 import type { CurrentUser, Account, AccountGroup } from '../types'
 import { useUsers } from '../composables/useUsers'
 

@@ -2,19 +2,19 @@
   <div class="admin-user-panel">
     <h2>用户管理</h2>
 
-    <form @submit.prevent="createUser" class="create-form">
-      <h3>创建新用户</h3>
+    <form class="create-form" aria-labelledby="create-user-title" @submit.prevent="createUser">
+      <h3 id="create-user-title">创建新用户</h3>
       <div class="form-group">
-        <label>用户名</label>
-        <input v-model="newUser.username" required />
+        <label for="new-user-username">用户名</label>
+        <input id="new-user-username" v-model="newUser.username" type="text" autocomplete="username" required />
       </div>
       <div class="form-group">
-        <label>密码 (至少8位)</label>
-        <input v-model="newUser.password" type="password" required minlength="8" />
+        <label for="new-user-password">密码（至少 8 位）</label>
+        <input id="new-user-password" v-model="newUser.password" type="password" autocomplete="new-password" required minlength="8" />
       </div>
       <div class="form-group">
-        <label>角色</label>
-        <select v-model="newUser.role" required>
+        <label for="new-user-role">角色</label>
+        <select id="new-user-role" v-model="newUser.role" required>
           <option value="USER">普通用户</option>
           <option v-if="isSuperAdmin()" value="ADMIN">管理员</option>
         </select>
@@ -26,17 +26,18 @@
         </label>
       </div>
       <div class="form-group">
-        <label>备注</label>
-        <input v-model="newUser.note" placeholder="可选，方便管理员标识用户" />
+        <label for="new-user-note">备注</label>
+        <input id="new-user-note" v-model="newUser.note" type="text" placeholder="可选，方便管理员标识用户" />
       </div>
       <button type="submit" class="btn-primary" :disabled="creating">
         {{ creating ? '创建中...' : '创建用户' }}
       </button>
     </form>
 
-    <div class="user-list">
+    <div class="user-list" :aria-busy="loading">
       <h3>用户列表</h3>
-      <p v-if="loading" class="loading-hint">加载中...</p>
+      <p v-if="loading" class="loading-hint" role="status" aria-live="polite">加载中...</p>
+      <p v-if="!loading && users.length === 0" class="loading-hint" role="status">暂无用户</p>
       <div v-for="user in users" :key="user.id" class="user-card">
         <div class="user-main">
           <div class="user-info">
@@ -70,21 +71,21 @@
       </div>
     </div>
 
-    <div v-if="editingUser" class="modal" @click.self="editingUser = null" @keydown.escape="editingUser = null">
-      <div class="modal-content">
-        <h3>编辑用户</h3>
+    <div v-if="editingUser" class="modal" role="presentation" @click.self="editingUser = null" @keydown.escape="editingUser = null">
+      <div v-focus-trap class="modal-content" role="dialog" aria-modal="true" aria-labelledby="edit-user-title" tabindex="-1">
+        <h3 id="edit-user-title">编辑用户</h3>
         <form @submit.prevent="updateUser">
           <div class="form-group">
-            <label>用户名</label>
-            <input v-model="editingUser.username" disabled />
+            <label for="edit-user-username">用户名</label>
+            <input id="edit-user-username" v-model="editingUser.username" type="text" autocomplete="username" disabled />
           </div>
           <div class="form-group">
-            <label>新密码（留空则不修改，至少8位）</label>
-            <input v-model="editingUser.password" type="password" minlength="8" />
+            <label for="edit-user-password">新密码（留空则不修改，至少 8 位）</label>
+            <input id="edit-user-password" v-model="editingUser.password" type="password" autocomplete="new-password" minlength="8" />
           </div>
           <div class="form-group">
-            <label>角色</label>
-            <select v-model="editingUser.role" required>
+            <label for="edit-user-role">角色</label>
+            <select id="edit-user-role" v-model="editingUser.role" required>
               <option value="USER">普通用户</option>
               <option v-if="isSuperAdmin()" value="ADMIN">管理员</option>
             </select>
@@ -99,8 +100,8 @@
             </p>
           </div>
           <div class="form-group">
-            <label>备注</label>
-            <input v-model="editingUser.note" placeholder="可选，方便管理员标识用户" />
+            <label for="edit-user-note">备注</label>
+            <input id="edit-user-note" v-model="editingUser.note" type="text" placeholder="可选，方便管理员标识用户" />
           </div>
           <div class="modal-actions">
             <button type="submit" class="btn-primary" :disabled="saving">
@@ -118,6 +119,7 @@
 import { ref, onMounted } from 'vue'
 import { apiUrl, authHeaders, request, responseData } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
+import { vFocusTrap } from '../utils/dialogFocus'
 import type { CurrentUser } from '../types'
 
 interface User {

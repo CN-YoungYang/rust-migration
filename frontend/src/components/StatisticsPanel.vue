@@ -10,6 +10,7 @@
           v-if="isAdmin"
           v-model="selectedUserId"
           class="user-filter"
+          aria-label="按用户查询统计"
           :disabled="usersLoading || loading"
         >
           <option value="">全部用户</option>
@@ -18,10 +19,10 @@
             {{ u.username }}{{ u.id === currentUser?.id ? '（我）' : '' }}
           </option>
         </select>
-        <div class="date-range">
-          <input v-model="startDate" type="date" class="date-input" :disabled="loading" />
+        <div class="date-range" role="group" aria-label="统计日期范围">
+          <input v-model="startDate" type="date" class="date-input" aria-label="开始日期" :disabled="loading" />
           <span class="date-separator">至</span>
-          <input v-model="endDate" type="date" class="date-input" :disabled="loading" />
+          <input v-model="endDate" type="date" class="date-input" aria-label="结束日期" :disabled="loading" />
           <button class="primary" @click="loadStatistics" :disabled="loading || dateRangeInvalid">
             {{ loading ? '查询中...' : '查询' }}
           </button>
@@ -32,9 +33,9 @@
       </div>
     </div>
 
-    <div v-if="dateRangeInvalid" class="validation-box">开始日期不能晚于结束日期。</div>
+    <div v-if="dateRangeInvalid" class="validation-box" role="alert">开始日期不能晚于结束日期。</div>
 
-    <p v-if="loading" class="empty">加载中...</p>
+    <p v-if="loading" class="empty" role="status" aria-live="polite">加载中...</p>
 
     <div v-if="!loading && statistics" class="stats-content">
       <div class="overview-grid">
@@ -92,29 +93,32 @@
 
       <div class="chart-section">
         <h3>每日签到趋势</h3>
-        <div v-if="statistics.dailyTrend.length > 0" class="chart-container">
+        <div v-if="statistics.dailyTrend.length > 0" class="chart-container" role="group" aria-label="每日签到趋势图">
           <div class="chart-legend">
             <span class="legend-item"><span class="dot success"></span>成功</span>
             <span class="legend-item"><span class="dot failed"></span>失败</span>
             <span class="legend-item"><span class="dot already"></span>已签到</span>
           </div>
-          <div class="bar-chart">
-            <div v-for="day in statistics.dailyTrend" :key="day.date" class="bar-group">
+          <div class="bar-chart" role="list" aria-label="每日签到趋势数据">
+            <div v-for="day in statistics.dailyTrend" :key="day.date" class="bar-group" role="listitem" tabindex="0" :aria-label="trendAriaLabel(day)">
               <div class="bar-stack">
                 <div
                   class="bar success"
                   :style="{ height: getBarHeight(day.success, day.total) + '%' }"
                   :title="`成功：${day.success}`"
+                  aria-hidden="true"
                 ></div>
                 <div
                   class="bar already"
                   :style="{ height: getBarHeight(day.alreadyChecked, day.total) + '%' }"
                   :title="`已签到：${day.alreadyChecked}`"
+                  aria-hidden="true"
                 ></div>
                 <div
                   class="bar failed"
                   :style="{ height: getBarHeight(day.failed, day.total) + '%' }"
                   :title="`失败：${day.failed}`"
+                  aria-hidden="true"
                 ></div>
               </div>
               <div class="bar-label">{{ formatDate(day.date) }}</div>
@@ -123,21 +127,22 @@
             </div>
           </div>
         </div>
-        <p v-else class="empty">所选时间范围内无签到记录</p>
+        <p v-else class="empty" role="status">所选时间范围内无签到记录</p>
       </div>
 
-      <div class="table-section">
+      <div class="table-section" tabindex="0" aria-label="站点统计表，可横向滚动">
         <h3>站点统计</h3>
         <table v-if="statistics.siteStats.length > 0" class="stats-table">
+          <caption class="sr-only">按站点类型汇总的账户数、签到结果、成功率和平均耗时</caption>
           <thead>
             <tr>
-              <th>站点类型</th>
-              <th>账户数</th>
-              <th>总签到</th>
-              <th>成功</th>
-              <th>失败</th>
-              <th>成功率</th>
-              <th>平均耗时</th>
+              <th scope="col">站点类型</th>
+              <th scope="col">账户数</th>
+              <th scope="col">总签到</th>
+              <th scope="col">成功</th>
+              <th scope="col">失败</th>
+              <th scope="col">成功率</th>
+              <th scope="col">平均耗时</th>
             </tr>
           </thead>
           <tbody>
@@ -156,7 +161,7 @@
             </tr>
           </tbody>
         </table>
-        <p v-else class="empty">暂无站点统计</p>
+        <p v-else class="empty" role="status">暂无站点统计</p>
       </div>
 
       <div class="failure-section">
@@ -177,7 +182,7 @@
             <button @click="copyFailureSummary(failure)">复制摘要</button>
           </article>
         </div>
-        <p v-else class="empty">暂无失败记录</p>
+        <p v-else class="empty" role="status">暂无失败记录</p>
       </div>
 
       <div class="info-section">
@@ -322,6 +327,10 @@ function formatDate(dateStr: string): string {
 function getBarHeight(value: number, total: number): number {
   if (total === 0) return 0
   return (value / total) * 100
+}
+
+function trendAriaLabel(day: Statistics['dailyTrend'][number]): string {
+  return `${formatDate(day.date)}：总计 ${day.total} 次，成功 ${day.success} 次，已签到 ${day.alreadyChecked} 次，失败 ${day.failed} 次，成功率 ${day.successRate.toFixed(0)}%`
 }
 
 function getRateClass(rate: number): string {
@@ -659,12 +668,18 @@ button:disabled,
   width: 100%;
   border-radius: 2px 2px 0 0;
   transition: opacity 0.2s;
-  cursor: pointer;
+  cursor: default;
   min-height: 2px;
 }
 
 .bar:hover {
   opacity: 0.8;
+}
+
+.bar-group:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 4px;
+  border-radius: 4px;
 }
 
 .bar.success { background: #4caf50; }
