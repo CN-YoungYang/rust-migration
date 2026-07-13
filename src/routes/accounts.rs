@@ -4,6 +4,7 @@ use crate::{
     error::Result,
     models::{CheckinAccount, CreateAccountRequest, UpdateAccountRequest},
     security::validate_public_http_url_resolved,
+    services::checkin::validate_custom_checkin_url,
     AppState,
 };
 use axum::{
@@ -153,11 +154,11 @@ pub async fn create(
         )));
     }
     validate_public_http_url_resolved(&payload.base_url, "站点地址").await?;
-    if let Some(custom_url) = payload.custom_checkin_url.as_deref() {
-        if custom_url.starts_with("http://") || custom_url.starts_with("https://") {
-            validate_public_http_url_resolved(custom_url, "自定义签到地址").await?;
-        }
-    }
+    validate_custom_checkin_url(
+        &payload.site_type,
+        &payload.base_url,
+        payload.custom_checkin_url.as_deref(),
+    )?;
     if payload.name.trim().is_empty() {
         return Err(crate::error::AppError::Validation(
             "账户名称不能为空".into(),
@@ -248,14 +249,21 @@ pub async fn update(
     if let Some(ref new_base) = payload.base_url {
         validate_public_http_url_resolved(new_base, "站点地址").await?;
     }
-    if let Some(Some(custom_url)) = &payload.custom_checkin_url {
-        if custom_url.starts_with("http://") || custom_url.starts_with("https://") {
-            validate_public_http_url_resolved(custom_url, "自定义签到地址").await?;
-        }
-    }
-
     // Validate based on site type (use existing site_type since it can't be changed)
     let site_type = &existing.site_type;
+    let effective_base_url = payload.base_url.as_deref().unwrap_or(&existing.base_url);
+    let effective_custom_url = match &payload.custom_checkin_url {
+        Some(Some(value)) => Some(value.as_str()),
+        Some(None) => None,
+        None => existing.custom_checkin_url.as_deref(),
+    };
+    if site_type == "new-api" {
+        if let Some(Some(custom_url)) = &payload.custom_checkin_url {
+            validate_custom_checkin_url(site_type, effective_base_url, Some(custom_url))?;
+        }
+    } else {
+        validate_custom_checkin_url(site_type, effective_base_url, effective_custom_url)?;
+    }
 
     // Check if user_id is being cleared for anyrouter
     if site_type == "anyrouter" {

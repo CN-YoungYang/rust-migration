@@ -1,9 +1,10 @@
-pub mod providers;
+﻿pub mod providers;
 pub mod runner;
 
+use crate::error::{AppError, Result};
 use rand::seq::SliceRandom;
 use rand::Rng;
-use reqwest::Client;
+use reqwest::{Client, Url};
 use std::sync::OnceLock;
 
 pub static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
@@ -113,4 +114,194 @@ pub fn random_delay_secs(min: i32, max: i32) -> Option<u64> {
         return Some(hi);
     }
     Some(rand::thread_rng().gen_range(lo..=hi))
+}
+
+fn parse_http_url(raw: &str, field_name: &str) -> Result<Url> {
+    let url = Url::parse(raw.trim())
+        .map_err(|_| AppError::Validation(format!("{}格式无效", field_name)))?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(AppError::Validation(format!(
+            "{}必须是有效的 HTTP(S) URL",
+            field_name
+        )));
+    }
+    Ok(url)
+}
+
+fn same_origin(left: &Url, right: &Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.host_str() == right.host_str()
+        && left.port_or_known_default() == right.port_or_known_default()
+}
+
+fn resolve_same_origin_url(base_url: &str, target: &str) -> Result<String> {
+    let base = parse_http_url(base_url, "站点地址")?;
+    let target = target.trim();
+    if target
+        .chars()
+        .take(2)
+        .all(|character| matches!(character, '/' | '\\'))
+    {
+        return Err(AppError::Validation(
+            "自定义签到 URL 不能使用协议相对地址".into(),
+        ));
+    }
+
+    let resolved = match Url::parse(target) {
+        Ok(url) => url,
+        Err(_) => {
+            let mut base_dir = base.clone();
+            let base_path = base_dir.path().trim_end_matches("/");
+            base_dir.set_path(&format!("{}/", base_path));
+            base_dir.set_query(None);
+            base_dir.set_fragment(None);
+            base_dir
+                .join(target.trim_start_matches("/"))
+                .map_err(|_| AppError::Validation("自定义签到 URL 格式无效".into()))?
+        }
+    };
+
+    if !matches!(resolved.scheme(), "http" | "https") || !same_origin(&base, &resolved) {
+        return Err(AppError::Validation(
+            "自定义签到 URL 必须与站点地址同源（协议、主机和端口均一致）".into(),
+        ));
+    }
+
+    Ok(resolved.to_string())
+}
+
+pub fn resolve_checkin_url(
+    base_url: &str,
+    custom_url: Option<&str>,
+    default_path: &str,
+) -> Result<String> {
+    let target = custom_url
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default_path);
+    resolve_same_origin_url(base_url, target)
+}
+
+pub fn validate_custom_checkin_url(
+    site_type: &str,
+    base_url: &str,
+    custom_url: Option<&str>,
+) -> Result<()> {
+    let Some(custom_url) = custom_url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+
+    match site_type {
+        "anyrouter" | "x666" => {
+            resolve_same_origin_url(base_url, custom_url)?;
+            Ok(())
+        }
+        "new-api" => Err(AppError::Validation("new-api 不支持自定义签到 URL".into())),
+        _ => Err(AppError::Validation(format!(
+            "不支持的站点类型: {}",
+            site_type
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_checkin_url, validate_custom_checkin_url};
+
+    #[test]
+    fn resolves_relative_custom_checkin_url_against_base_url() {
+        let resolved = resolve_checkin_url(
+            "https://relay.example.com/prefix",
+            Some("/api/custom-checkin"),
+            "/api/default-checkin",
+        )
+        .expect("relative custom URL should resolve");
+
+        assert_eq!(
+            resolved,
+            "https://relay.example.com/prefix/api/custom-checkin"
+        );
+    }
+
+    #[test]
+    fn accepts_same_origin_absolute_custom_checkin_url() {
+        let resolved = resolve_checkin_url(
+            "https://relay.example.com",
+            Some("https://relay.example.com:443/api/custom-checkin"),
+            "/api/default-checkin",
+        )
+        .expect("same-origin absolute URL should be accepted");
+
+        assert_eq!(resolved, "https://relay.example.com/api/custom-checkin");
+    }
+
+    #[test]
+    fn rejects_cross_origin_custom_checkin_url() {
+        let error = resolve_checkin_url(
+            "https://relay.example.com",
+            Some("https://collector.example.net/capture"),
+            "/api/default-checkin",
+        )
+        .expect_err("cross-origin custom URL must be rejected");
+
+        assert!(error.to_string().contains("必须与站点地址同源"));
+    }
+
+    #[test]
+    fn rejects_protocol_relative_custom_checkin_url() {
+        let error = resolve_checkin_url(
+            "https://relay.example.com",
+            Some("//collector.example.net/capture"),
+            "/api/default-checkin",
+        )
+        .expect_err("protocol-relative URL must be rejected");
+
+        assert!(error.to_string().contains("协议相对"));
+    }
+
+    #[test]
+    fn rejects_backslash_protocol_relative_custom_checkin_url() {
+        for custom_url in [
+            r"\\collector.example.net/capture",
+            r"\/collector.example.net/capture",
+            r"/\collector.example.net/capture",
+        ] {
+            let error = resolve_checkin_url(
+                "https://relay.example.com",
+                Some(custom_url),
+                "/api/default-checkin",
+            )
+            .expect_err("backslash protocol-relative URL must be rejected");
+
+            assert!(error.to_string().contains("协议相对"));
+        }
+    }
+    #[test]
+    fn rejects_custom_checkin_url_with_different_scheme_or_port() {
+        for custom_url in [
+            "http://relay.example.com/api/custom-checkin",
+            "https://relay.example.com:8443/api/custom-checkin",
+        ] {
+            let error = resolve_checkin_url(
+                "https://relay.example.com",
+                Some(custom_url),
+                "/api/default-checkin",
+            )
+            .expect_err("scheme and port are part of the origin");
+
+            assert!(error.to_string().contains("必须与站点地址同源"));
+        }
+    }
+
+    #[test]
+    fn rejects_custom_checkin_url_for_new_api() {
+        let error = validate_custom_checkin_url(
+            "new-api",
+            "https://relay.example.com",
+            Some("/api/custom-checkin"),
+        )
+        .expect_err("new-api does not use custom check-in URLs");
+
+        assert!(error.to_string().contains("new-api 不支持自定义签到 URL"));
+    }
 }

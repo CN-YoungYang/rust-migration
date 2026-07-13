@@ -1,4 +1,4 @@
-use super::super::{http_client, BrowserProfile};
+use super::super::{http_client, resolve_checkin_url, BrowserProfile};
 use super::{read_error_message, read_number};
 use crate::error::Result;
 
@@ -187,8 +187,7 @@ pub async fn checkin(
     custom_url: Option<&str>,
     profile: &BrowserProfile,
 ) -> Result<(String, String, Option<String>)> {
-    let endpoint = custom_url.unwrap_or(DEFAULT_CHECKIN_PATH);
-    let url = join_url(base_url, endpoint);
+    let url = resolve_checkin_url(base_url, custom_url, DEFAULT_CHECKIN_PATH)?;
     let client = http_client();
 
     let (mut status, mut text, mut content_type) =

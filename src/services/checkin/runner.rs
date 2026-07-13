@@ -228,6 +228,11 @@ async fn execute_anyrouter_checkin(
     account: &CheckinAccount,
     profile: &BrowserProfile,
 ) -> Result<(String, String, Option<String>)> {
+    super::validate_custom_checkin_url(
+        &account.site_type,
+        &account.base_url,
+        account.custom_checkin_url.as_deref(),
+    )?;
     let cookie = if let Some(enc) = &account.cookie_enc {
         Some(decrypt(enc)?)
     } else {
@@ -248,6 +253,11 @@ async fn execute_x666_checkin(
     account: &CheckinAccount,
     profile: &BrowserProfile,
 ) -> Result<(String, String, Option<String>)> {
+    super::validate_custom_checkin_url(
+        &account.site_type,
+        &account.base_url,
+        account.custom_checkin_url.as_deref(),
+    )?;
     let cookie = if let Some(enc) = &account.cookie_enc {
         decrypt(enc)?
     } else {

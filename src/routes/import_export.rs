@@ -2,6 +2,7 @@ use crate::{
     crypto,
     error::{AppError, Result},
     security::validate_public_http_url_resolved,
+    services::checkin::validate_custom_checkin_url,
     AppState,
 };
 use axum::{
@@ -117,13 +118,12 @@ async fn validate_import_record(
         ));
     }
 
-    if let Some(custom_url) = record.custom_checkin_url.as_deref().map(str::trim) {
-        if custom_url.starts_with("http://") || custom_url.starts_with("https://") {
-            validate_public_http_url_resolved(custom_url, "自定义签到地址")
-                .await
-                .map_err(|e| format!("第 {} 行：{}", line_num, e))?;
-        }
-    }
+    validate_custom_checkin_url(
+        site_type,
+        record.base_url.trim(),
+        record.custom_checkin_url.as_deref(),
+    )
+    .map_err(|e| format!("第 {} 行：{}", line_num, e))?;
 
     Ok(())
 }

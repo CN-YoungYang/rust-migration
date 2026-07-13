@@ -211,16 +211,20 @@
           </select>
         </label>
         <label>站点地址<input v-model="form.baseUrl" required /></label>
-        <label>用户ID<input v-model="form.userId" /></label>
-        <label>认证方式
+        <label v-if="formFields.userId">用户ID<input v-model="form.userId" /></label>
+        <label v-if="formFields.authType">认证方式
           <select v-model="form.authType" :disabled="Boolean(editingId)">
             <option value="access_token">access_token</option>
             <option value="cookie">cookie</option>
           </select>
         </label>
-        <label>Access Token<input v-model="form.accessToken" type="password" autocomplete="new-password" /></label>
-        <label>Cookie<textarea v-model="form.cookie" rows="3"></textarea></label>
-        <label>自定义签到URL<input v-model="form.customCheckinUrl" /></label>
+        <label v-if="formFields.accessToken">Access Token<input v-model="form.accessToken" type="password" autocomplete="new-password" /></label>
+        <label v-if="formFields.cookie">Cookie<textarea v-model="form.cookie" rows="3"></textarea></label>
+        <label v-if="formFields.customCheckinUrl">
+          自定义签到 URL
+          <input v-model="form.customCheckinUrl" placeholder="/api/user/sign_in" />
+          <small class="field-hint">仅支持相对路径，或与站点地址协议、主机和端口完全一致的 URL。</small>
+        </label>
         <label class="inline"><input v-model="form.enabled" type="checkbox" /> 启用</label>
         <label class="inline"><input v-model="form.retryEnabled" type="checkbox" /> 允许重试</label>
         <label>备注<input v-model="form.note" placeholder="可选，方便识别账户" /></label>
@@ -286,6 +290,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { apiUrl, authHeaders, request, responseData } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
 import { vFocusTrap } from '../utils/dialogFocus'
+import { accountFormFields } from '../utils/accountForm'
 import type { CurrentUser, Account, AccountGroup } from '../types'
 import { useUsers } from '../composables/useUsers'
 
@@ -409,6 +414,7 @@ const form = reactive({
   retryEnabled: true,
   note: '',
 })
+const formFields = computed(() => accountFormFields(form.siteType, form.authType))
 
 function formatBalance(value: number | string | null | undefined): string {
   if (value === null || value === undefined || value === '') return '未刷新'
@@ -661,11 +667,13 @@ async function submitForm() {
     name: form.name,
     siteType: form.siteType,
     baseUrl: form.baseUrl,
-    userId: optionalString(form.userId),
-    authType: form.authType,
-    accessToken: form.accessToken.trim() || undefined,
-    cookie: form.cookie.trim() || undefined,
-    customCheckinUrl: optionalString(form.customCheckinUrl),
+    userId: formFields.value.userId ? optionalString(form.userId) : undefined,
+    authType: formFields.value.authType ? form.authType : 'cookie',
+    accessToken: formFields.value.accessToken ? (form.accessToken.trim() || undefined) : undefined,
+    cookie: formFields.value.cookie ? (form.cookie.trim() || undefined) : undefined,
+    customCheckinUrl: formFields.value.customCheckinUrl
+      ? optionalString(form.customCheckinUrl)
+      : undefined,
     enabled: form.enabled,
     retryEnabled: form.retryEnabled,
     note: optionalString(form.note),
@@ -1024,6 +1032,7 @@ button.danger:hover:not(:disabled) { background: #b91c1c; }
 .modal-content h3 { color: var(--text-strong); }
 label { display: grid; gap: .35rem; color: var(--text); }
 label.inline { display: flex; align-items: center; gap: .5rem; }
+.field-hint { color: var(--text-muted); font-size: 0.78rem; line-height: 1.45; }
 input, select, textarea { background: var(--bg-well); border: 1px solid var(--border-input); border-radius: 6px; color: white; padding: .55rem; min-width: 0; }
 .modal-actions { display: flex; gap: .75rem; justify-content: flex-end; margin-top: .5rem; }
 .import-dialog { max-width: 600px; }

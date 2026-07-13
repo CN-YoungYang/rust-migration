@@ -1,4 +1,4 @@
-use super::super::{http_client, BrowserProfile};
+use super::super::{http_client, resolve_checkin_url, BrowserProfile};
 use super::{format_awarded_quota, is_already_checked_message, read_number};
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
@@ -66,10 +66,7 @@ pub async fn checkin(
     } else {
         base_url
     };
-    let url = match custom_url {
-        Some(cu) if !cu.is_empty() => cu.to_string(),
-        _ => join_url(effective_base, DEFAULT_CHECKIN_PATH),
-    };
+    let url = resolve_checkin_url(effective_base, custom_url, DEFAULT_CHECKIN_PATH)?;
     let referer = format!("{}/", effective_base.trim_end_matches('/'));
     let client = http_client();
 
