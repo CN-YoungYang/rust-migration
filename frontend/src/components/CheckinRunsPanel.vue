@@ -27,10 +27,19 @@
         <button @click="retryFailedRuns" class="btn-retry" :disabled="failedAccountIds.length === 0 || actionBusy">
           {{ retryingBatch ? '重试中...' : `重试失败账户 ${failedAccountIds.length}` }}
         </button>
-        <input v-model.number="keepLatest" type="number" min="0" max="10000" class="keep-input" aria-label="清理后保留的最新记录数" title="保留最新记录数（0=清除全部）" />
-        <button @click="cleanupRuns" class="btn-cleanup" :disabled="cleaning">
-          {{ cleaning ? '清理中...' : '清理记录' }}
-        </button>
+        <div class="cleanup-controls">
+          <span class="cleanup-scope">清理范围：{{ cleanupScope }}</span>
+          <div class="cleanup-row">
+            <input v-model.number="keepLatest" type="number" min="0" max="10000" class="keep-input" aria-label="清理后保留的最新记录数" title="保留最新记录数（0=清除全部）" />
+            <button @click="cleanupRuns" class="btn-cleanup" :disabled="cleaning">
+              {{ cleaning ? '清理中...' : '清理历史' }}
+            </button>
+          </div>
+          <label v-if="keepLatest === 0" class="cleanup-reset-option">
+            <input v-model="resetState" type="checkbox" />
+            同时重置最近签到状态和失败计数（保留余额）
+          </label>
+        </div>
       </div>
     </div>
 
@@ -172,6 +181,7 @@ import { apiUrl, authHeaders, request, responseData } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
 import type { CurrentUser, Account, AccountGroup } from '../types'
 import { useUsers } from '../composables/useUsers'
+import { buildCleanupRequest, cleanupScopeLabel, cleanupTargetText } from '../utils/cleanupRuns'
 
 interface CheckinRun {
   id: string
@@ -205,6 +215,13 @@ interface BatchCheckinResult {
   skipped: number
   failed: number
 }
+interface CleanupRunsResult {
+  deletedCount: number
+  keepLatest: number
+  resetAccountCount: number
+  deletedFailureCounterCount: number
+  userId: string | null
+}
 
 const props = defineProps<{
   currentUser: CurrentUser | null
@@ -218,6 +235,7 @@ const accounts = ref<Account[]>([])
 const runs = ref<CheckinRun[]>([])
 const selectedAccountId = ref('')
 const keepLatest = ref(100)
+const resetState = ref(true)
 const runsLoading = ref(false)
 const runsOffset = ref(0)
 const hasMore = ref(true)
@@ -229,6 +247,14 @@ const PAGE_SIZE = 100
 let accountRequestSeq = 0
 let runsRequestSeq = 0
 const maxAttemptsPerDay = ref(3)
+const cleanupScope = computed(() => {
+  const selectedUsername = allUsers.value.find((user) => user.id === filterUserId.value)?.username || ''
+  return cleanupScopeLabel(props.isAdmin, filterUserId.value, selectedUsername)
+})
+const cleanupTarget = computed(() => {
+  const selectedUsername = allUsers.value.find((user) => user.id === filterUserId.value)?.username || ''
+  return cleanupTargetText(props.isAdmin, filterUserId.value, selectedUsername)
+})
 const lastBatchResult = ref<BatchCheckinResult | null>(null)
 
 // 筛选相关
@@ -503,26 +529,42 @@ const retryFailedRuns = async () => {
 
 const cleanupRuns = async () => {
   if (cleaning.value) return
+  if (!Number.isInteger(keepLatest.value) || keepLatest.value < 0 || keepLatest.value > 10000) {
+    showToast('保留数量必须是 0~10000 的整数', 'error')
+    return
+  }
+
+  const resetDescription = keepLatest.value === 0 && resetState.value
+    ? '，并重置最近签到状态和失败计数（余额保留）'
+    : ''
   const msg = keepLatest.value === 0
-    ? '确定清除全部签到记录吗？此操作不可撤销！'
-    : `确定清理记录并保留最新 ${keepLatest.value} 条吗？`
+    ? `确定清空${cleanupTarget.value}签到历史${resetDescription}吗？此操作不可撤销！`
+    : `确定清理${cleanupTarget.value}签到历史，并保留最新 ${keepLatest.value} 条吗？`
   if (!(await confirmAction(msg))) return
   cleaning.value = true
   try {
-    await request(apiUrl('/checkin-runs/cleanup'), {
+    const response = await request(apiUrl('/checkin-runs/cleanup'), {
       method: 'POST',
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keepLatest: keepLatest.value })
+      body: JSON.stringify(buildCleanupRequest(
+        keepLatest.value,
+        props.isAdmin,
+        filterUserId.value,
+        resetState.value,
+      ))
     })
-    showToast('记录已清理', 'success')
-    await fetchRuns()
+    const result = await responseData<CleanupRunsResult>(response)
+    const resetSummary = result.resetAccountCount > 0 || result.deletedFailureCounterCount > 0
+      ? `，重置 ${result.resetAccountCount} 个账户状态和 ${result.deletedFailureCounterCount} 个失败计数`
+      : ''
+    showToast(`已删除 ${result.deletedCount} 条签到历史${resetSummary}`, 'success')
+    await Promise.all([fetchRuns(), fetchAccounts()])
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '清理记录失败', 'error')
+    showToast(error instanceof Error ? error.message : '清理签到历史失败', 'error')
   } finally {
     cleaning.value = false
   }
 }
-
 const accountName = (accountId: string) => {
   return accountById.value.get(accountId)?.name || accountId
 }
@@ -633,6 +675,11 @@ h2 { color: #fff; }
 .panel-subtitle { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }
 select, input { background: var(--bg-well); color: #fff; border: 1px solid var(--border-input); border-radius: 6px; padding: .5rem; }
 .keep-input { width: 90px; }
+.cleanup-controls { display: grid; gap: 0.35rem; padding: 0.55rem 0.65rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; }
+.cleanup-row { display: flex; gap: 0.5rem; align-items: center; }
+.cleanup-scope { color: var(--text-muted); font-size: 0.78rem; }
+.cleanup-reset-option { display: flex; align-items: center; gap: 0.4rem; color: var(--text-faint); font-size: 0.78rem; cursor: pointer; }
+.cleanup-reset-option input { width: auto; margin: 0; padding: 0; accent-color: var(--accent); }
 .filter-bar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; padding: 1rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 1.5rem; }
 .filter-select { background: var(--bg-well); border: 1px solid var(--border-input); border-radius: 6px; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; }
 .filter-input { background: var(--bg-well); border: 1px solid var(--border-input); border-radius: 6px; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; min-width: 180px; }
@@ -704,6 +751,9 @@ button.ghost:hover:not(:disabled) { background: var(--bg-elevated); }
   .header-actions,
   .status-filter,
   .date-range { width: 100%; }
+  .cleanup-row { width: 100%; }
+  .cleanup-row .keep-input,
+  .cleanup-row .btn-cleanup { flex: 1; width: auto; }
   .header-actions > *,
   .filter-select,
   .filter-input,

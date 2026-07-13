@@ -255,28 +255,100 @@ pub async fn execute_batch(
     }))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CleanupRunsRequest {
+    #[serde(rename = "keepLatest")]
+    pub keep_latest: Option<i64>,
+    #[serde(rename = "userId")]
+    pub user_id: Option<String>,
+    #[serde(rename = "resetState", default)]
+    pub reset_state: bool,
+}
+
+fn resolve_cleanup_owner_scope(
+    role: &str,
+    current_user_id: &str,
+    requested_user_id: Option<&str>,
+) -> Result<Option<String>> {
+    let requested_user_id = requested_user_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if role == "ADMIN" || role == "SUPER_ADMIN" {
+        return Ok(requested_user_id.map(str::to_string));
+    }
+    if requested_user_id.is_some_and(|requested| requested != current_user_id) {
+        return Err(AppError::Forbidden);
+    }
+    Ok(Some(current_user_id.to_string()))
+}
+
 pub async fn cleanup_runs(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<crate::models::AppUser>,
-    Json(payload): Json<serde_json::Value>,
+    Json(payload): Json<CleanupRunsRequest>,
 ) -> Result<Json<Value>> {
-    let keep_latest_raw = payload["keepLatest"].as_i64().unwrap_or(100);
+    let keep_latest_raw = payload.keep_latest.unwrap_or(100);
     if !(0..=10000).contains(&keep_latest_raw) {
-        return Err(crate::error::AppError::Validation(format!(
+        return Err(AppError::Validation(format!(
             "keepLatest 必须在 0~10000 之间（0 表示清除全部），收到 {}",
             keep_latest_raw
         )));
     }
+    if payload.reset_state && keep_latest_raw != 0 {
+        return Err(AppError::Validation(
+            "resetState 仅可在 keepLatest = 0 时使用".into(),
+        ));
+    }
     let keep_latest = keep_latest_raw as usize;
+    let owner_id = resolve_cleanup_owner_scope(&user.role, &user.id, payload.user_id.as_deref())?;
+    let result = db::cleanup_checkin_data(
+        &state.db,
+        keep_latest,
+        owner_id.as_deref(),
+        payload.reset_state,
+    )
+    .await?;
 
-    let deleted_count = if user.role == "ADMIN" || user.role == "SUPER_ADMIN" {
-        db::cleanup_checkin_runs(&state.db, keep_latest).await?
-    } else {
-        db::cleanup_checkin_runs_by_user(&state.db, &user.id, keep_latest).await?
-    };
+    tracing::info!(
+        operator_id = %user.id,
+        target_user_id = owner_id.as_deref().unwrap_or("ALL"),
+        keep_latest,
+        reset_state = payload.reset_state,
+        deleted_runs = result.deleted_runs,
+        "签到记录清理完成"
+    );
 
     Ok(crate::routes::data(json!({
-        "deletedCount": deleted_count,
-        "keepLatest": keep_latest
+        "deletedCount": result.deleted_runs,
+        "keepLatest": keep_latest,
+        "resetAccountCount": result.reset_accounts,
+        "deletedFailureCounterCount": result.deleted_failure_counters,
+        "userId": owner_id
     })))
+}
+#[cfg(test)]
+mod tests {
+    use super::resolve_cleanup_owner_scope;
+    use crate::error::AppError;
+
+    #[test]
+    fn cleanup_scope_enforces_user_ownership_and_admin_targeting() {
+        assert!(matches!(
+            resolve_cleanup_owner_scope("USER", "user-1", Some("user-2")),
+            Err(AppError::Forbidden)
+        ));
+        assert_eq!(
+            resolve_cleanup_owner_scope("USER", "user-1", None).expect("own scope"),
+            Some("user-1".to_string())
+        );
+        assert_eq!(
+            resolve_cleanup_owner_scope("ADMIN", "admin-1", Some("user-2"))
+                .expect("admin target scope"),
+            Some("user-2".to_string())
+        );
+        assert_eq!(
+            resolve_cleanup_owner_scope("SUPER_ADMIN", "root-1", None).expect("global admin scope"),
+            None
+        );
+    }
 }

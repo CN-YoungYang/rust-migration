@@ -226,20 +226,120 @@ pub async fn create_run_with_status_update_and_balance(
     Ok(run)
 }
 
-/// Cleanup old check-in runs, keeping only the latest N records
-pub async fn cleanup_checkin_runs(db: &SqlitePool, keep_latest: usize) -> Result<u64> {
-    if keep_latest == 0 {
-        let result = sqlx::query("DELETE FROM CheckinRun").execute(db).await?;
-        return Ok(result.rows_affected());
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CleanupCheckinDataResult {
+    pub deleted_runs: u64,
+    pub reset_accounts: u64,
+    pub deleted_failure_counters: u64,
+}
 
-    let result = sqlx::query(
-        "DELETE FROM CheckinRun WHERE id NOT IN (SELECT id FROM CheckinRun ORDER BY createdAt DESC LIMIT ?)"
-    )
-    .bind(keep_latest as i64)
-    .execute(db)
-    .await?;
-    Ok(result.rows_affected())
+/// Cleanup check-in history for all accounts or one owner's accounts.
+/// When reset_state is enabled, the history deletion and related state reset are atomic.
+pub async fn cleanup_checkin_data(
+    db: &SqlitePool,
+    keep_latest: usize,
+    owner_id: Option<&str>,
+    reset_state: bool,
+) -> Result<CleanupCheckinDataResult> {
+    let mut tx = db.begin().await?;
+
+    let deleted_runs = match (owner_id, keep_latest) {
+        (None, 0) => sqlx::query("DELETE FROM CheckinRun")
+            .execute(&mut *tx)
+            .await?
+            .rows_affected(),
+        (None, keep) => sqlx::query(
+            "DELETE FROM CheckinRun
+             WHERE id NOT IN (
+                SELECT id FROM CheckinRun ORDER BY createdAt DESC, id DESC LIMIT ?
+             )",
+        )
+        .bind(keep as i64)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected(),
+        (Some(owner), 0) => sqlx::query(
+            "DELETE FROM CheckinRun
+             WHERE accountId IN (SELECT id FROM CheckinAccount WHERE ownerId = ?)",
+        )
+        .bind(owner)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected(),
+        (Some(owner), keep) => sqlx::query(
+            "DELETE FROM CheckinRun
+             WHERE accountId IN (SELECT id FROM CheckinAccount WHERE ownerId = ?)
+               AND id NOT IN (
+                   SELECT r.id FROM CheckinRun r
+                   JOIN CheckinAccount a ON r.accountId = a.id
+                   WHERE a.ownerId = ?
+                   ORDER BY r.createdAt DESC, r.id DESC
+                   LIMIT ?
+               )",
+        )
+        .bind(owner)
+        .bind(owner)
+        .bind(keep as i64)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected(),
+    };
+
+    let (reset_accounts, deleted_failure_counters) = if reset_state {
+        let reset_accounts = match owner_id {
+            None => sqlx::query(
+                "UPDATE CheckinAccount
+                 SET lastStatus = NULL, lastMessage = NULL, lastRunAt = NULL, updatedAt = ?
+                 WHERE lastStatus IS NOT NULL OR lastMessage IS NOT NULL OR lastRunAt IS NOT NULL",
+            )
+            .bind(Utc::now())
+            .execute(&mut *tx)
+            .await?
+            .rows_affected(),
+            Some(owner) => sqlx::query(
+                "UPDATE CheckinAccount
+                 SET lastStatus = NULL, lastMessage = NULL, lastRunAt = NULL, updatedAt = ?
+                 WHERE ownerId = ?
+                   AND (lastStatus IS NOT NULL OR lastMessage IS NOT NULL OR lastRunAt IS NOT NULL)",
+            )
+            .bind(Utc::now())
+            .bind(owner)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected(),
+        };
+        let deleted_failure_counters = match owner_id {
+            None => sqlx::query("DELETE FROM FailureCounter")
+                .execute(&mut *tx)
+                .await?
+                .rows_affected(),
+            Some(owner) => sqlx::query(
+                "DELETE FROM FailureCounter
+                 WHERE accountId IN (SELECT id FROM CheckinAccount WHERE ownerId = ?)",
+            )
+            .bind(owner)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected(),
+        };
+        (reset_accounts, deleted_failure_counters)
+    } else {
+        (0, 0)
+    };
+
+    tx.commit().await?;
+    Ok(CleanupCheckinDataResult {
+        deleted_runs,
+        reset_accounts,
+        deleted_failure_counters,
+    })
+}
+
+/// Cleanup old check-in runs globally, keeping only the latest N records.
+pub async fn cleanup_checkin_runs(db: &SqlitePool, keep_latest: usize) -> Result<u64> {
+    Ok(cleanup_checkin_data(db, keep_latest, None, false)
+        .await?
+        .deleted_runs)
 }
 
 /// Batch query today's run count per account, returns accountId -> count mapping.
@@ -285,36 +385,6 @@ pub async fn count_runs_today_for_accounts(
     let rows = query.fetch_all(db).await?;
     Ok(rows.into_iter().map(|(id, cnt)| (id, cnt as i32)).collect())
 }
-
-/// Cleanup check-in runs for a specific user's accounts
-pub async fn cleanup_checkin_runs_by_user(
-    db: &SqlitePool,
-    user_id: &str,
-    keep_latest: usize,
-) -> Result<u64> {
-    let owned = "SELECT id FROM CheckinAccount WHERE ownerId = ?";
-    if keep_latest == 0 {
-        let result = sqlx::query(&format!(
-            "DELETE FROM CheckinRun WHERE accountId IN ({})",
-            owned
-        ))
-        .bind(user_id)
-        .execute(db)
-        .await?;
-        return Ok(result.rows_affected());
-    }
-
-    let result = sqlx::query(&format!(
-        "DELETE FROM CheckinRun WHERE accountId IN ({owned}) AND id NOT IN (SELECT id FROM CheckinRun WHERE accountId IN ({owned}) ORDER BY createdAt DESC LIMIT ?)"
-    ))
-    .bind(user_id)
-    .bind(user_id)
-    .bind(keep_latest as i64)
-    .execute(db)
-    .await?;
-    Ok(result.rows_affected())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,6 +497,161 @@ mod tests {
         assert_eq!(count_runs(&pool, "acc-1").await, 1);
     }
 
+    #[tokio::test]
+    async fn cleanup_retention_is_scoped_and_global_cleanup_does_not_reset_state() {
+        let pool = pool_with_account().await;
+        let older = Utc::now();
+        let newer = older + chrono::Duration::seconds(1);
+        sqlx::query("UPDATE CheckinAccount SET ownerId = 'user-1', lastStatus = 'failed' WHERE id = 'acc-1'")
+            .execute(&pool)
+            .await
+            .expect("owned account should be updated");
+        sqlx::query(
+            "INSERT INTO CheckinAccount (
+                id, name, siteType, baseUrl, ownerId, authType, enabled, retryEnabled,
+                lastStatus, createdAt, updatedAt
+             ) VALUES ('acc-2', 'B', 'new-api', 'http://example.net', 'user-2',
+                'access_token', 1, 1, 'success', ?, ?)",
+        )
+        .bind(older)
+        .bind(older)
+        .execute(&pool)
+        .await
+        .expect("other account should be inserted");
+        for (run_id, account_id, created_at) in [
+            ("run-old", "acc-1", older),
+            ("run-new", "acc-1", newer),
+            ("run-other", "acc-2", older),
+        ] {
+            sqlx::query(
+                "INSERT INTO CheckinRun (id, accountId, status, triggeredBy, createdAt)
+                 VALUES (?, ?, 'failed', 'manual', ?)",
+            )
+            .bind(run_id)
+            .bind(account_id)
+            .bind(created_at)
+            .execute(&pool)
+            .await
+            .expect("run should be inserted");
+        }
+
+        let scoped = cleanup_checkin_data(&pool, 1, Some("user-1"), false)
+            .await
+            .expect("scoped retention should succeed");
+        assert_eq!(scoped.deleted_runs, 1);
+        assert_eq!(count_runs(&pool, "acc-1").await, 1);
+        assert_eq!(count_runs(&pool, "acc-2").await, 1);
+        let remaining: (String,) =
+            sqlx::query_as("SELECT id FROM CheckinRun WHERE accountId = 'acc-1'")
+                .fetch_one(&pool)
+                .await
+                .expect("latest run should remain");
+        assert_eq!(remaining.0, "run-new");
+
+        let global = cleanup_checkin_data(&pool, 0, None, false)
+            .await
+            .expect("global cleanup should succeed");
+        assert_eq!(global.deleted_runs, 2);
+        assert_eq!(count_runs(&pool, "acc-1").await, 0);
+        assert_eq!(count_runs(&pool, "acc-2").await, 0);
+        let statuses: Vec<(String, Option<String>)> =
+            sqlx::query_as("SELECT id, lastStatus FROM CheckinAccount ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .expect("account statuses should remain");
+        assert_eq!(statuses[0].1.as_deref(), Some("failed"));
+        assert_eq!(statuses[1].1.as_deref(), Some("success"));
+    }
+    #[tokio::test]
+    async fn cleanup_by_owner_resets_checkin_state_without_touching_balance_or_other_users() {
+        let pool = pool_with_account().await;
+        let now = Utc::now();
+        sqlx::query(
+            "CREATE TABLE FailureCounter (
+                accountId TEXT PRIMARY KEY,
+                consecutiveFailures INTEGER NOT NULL,
+                lastFailedAt TEXT,
+                lastNotifiedAt TEXT,
+                updatedAt TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("failure counter table should be created");
+        sqlx::query(
+            "UPDATE CheckinAccount SET ownerId = 'user-1', lastBalance = 12.5,
+             lastStatus = 'failed', lastMessage = 'timeout', lastRunAt = ? WHERE id = 'acc-1'",
+        )
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("owned account should be updated");
+        sqlx::query(
+            "INSERT INTO CheckinAccount (
+                id, name, siteType, baseUrl, ownerId, authType, enabled, retryEnabled,
+                lastBalance, lastStatus, lastMessage, lastRunAt, createdAt, updatedAt
+             ) VALUES ('acc-2', 'B', 'new-api', 'http://example.net', 'user-2',
+                'access_token', 1, 1, 8.0, 'success', 'ok', ?, ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("other account should be inserted");
+        for (run_id, account_id) in [("run-1", "acc-1"), ("run-2", "acc-2")] {
+            sqlx::query(
+                "INSERT INTO CheckinRun (id, accountId, status, triggeredBy, createdAt)
+                 VALUES (?, ?, 'failed', 'manual', ?)",
+            )
+            .bind(run_id)
+            .bind(account_id)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .expect("run should be inserted");
+            sqlx::query(
+                "INSERT INTO FailureCounter (accountId, consecutiveFailures, updatedAt)
+                 VALUES (?, 2, ?)",
+            )
+            .bind(account_id)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .expect("failure counter should be inserted");
+        }
+
+        let result = cleanup_checkin_data(&pool, 0, Some("user-1"), true)
+            .await
+            .expect("cleanup should succeed");
+
+        assert_eq!(result.deleted_runs, 1);
+        assert_eq!(result.reset_accounts, 1);
+        assert_eq!(result.deleted_failure_counters, 1);
+        let account_1: (Option<f64>, Option<String>, Option<String>, Option<String>) =
+            sqlx::query_as(
+                "SELECT lastBalance, lastStatus, lastMessage, lastRunAt
+                 FROM CheckinAccount WHERE id = 'acc-1'",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("account should remain");
+        assert_eq!(account_1.0, Some(12.5));
+        assert!(account_1.1.is_none() && account_1.2.is_none() && account_1.3.is_none());
+        let account_2: (Option<String>,) =
+            sqlx::query_as("SELECT lastStatus FROM CheckinAccount WHERE id = 'acc-2'")
+                .fetch_one(&pool)
+                .await
+                .expect("other account should remain");
+        assert_eq!(account_2.0.as_deref(), Some("success"));
+        assert_eq!(count_runs(&pool, "acc-1").await, 0);
+        assert_eq!(count_runs(&pool, "acc-2").await, 1);
+        let counters: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM FailureCounter")
+            .fetch_one(&pool)
+            .await
+            .expect("counter count should succeed");
+        assert_eq!(counters.0, 1);
+    }
     #[tokio::test]
     async fn skips_balance_column_when_none_but_still_writes_status_and_run() {
         let pool = pool_with_account().await;

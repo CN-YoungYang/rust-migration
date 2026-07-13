@@ -165,11 +165,16 @@ POST /api/checkin-runs/cleanup
 
 ```json
 {
-  "keepLatest": 500
+  "keepLatest": 0,
+  "userId": "target_user_id",
+  "resetState": true
 }
 ```
 
-`keepLatest = 0` 表示清空全部记录。
+- `keepLatest` 范围为 `0~10000`；`0` 表示清空目标范围内的全部签到历史。
+- `userId` 为可选字段，仅管理员可指定；管理员省略时清理全局，普通用户始终限制为本人。
+- `resetState` 仅可与 `keepLatest = 0` 同时使用；启用后清空账户 `lastStatus`、`lastMessage`、`lastRunAt` 和对应 `FailureCounter`，但保留余额。
+- 响应包含 `deletedCount`、`resetAccountCount` 和 `deletedFailureCounterCount`。
 
 ### 数据统计
 
