@@ -1,5 +1,7 @@
 <template>
   <div id="app">
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+
     <!-- 离线提示条 -->
     <div v-if="!isOnline" class="offline-banner" role="status" aria-live="polite">
       网络连接已断开，请检查网络设置
@@ -35,14 +37,18 @@
       </div>
     </nav>
 
-    <main class="container">
+    <main id="main-content" class="container" tabindex="-1">
       <div v-if="authChecking" class="login-page">
         <div class="loading-panel" role="status" aria-live="polite" aria-busy="true">正在检查登录状态...</div>
       </div>
 
       <div v-else-if="!isLoggedIn" class="login-page">
         <form @submit.prevent="login" class="login-form" aria-labelledby="login-title">
-          <h2 id="login-title">登录</h2>
+          <div class="login-heading">
+            <span class="login-kicker">AI Hub 控制台</span>
+            <h2 id="login-title">欢迎回来</h2>
+            <p>登录后管理站点账户、签到记录与通知。</p>
+          </div>
           <div class="form-group">
             <label class="sr-only" for="login-username">用户名</label>
             <input id="login-username" v-model="loginForm.username" name="username" placeholder="用户名" autocomplete="username" autocapitalize="none" required :disabled="loginLoading" />
@@ -310,7 +316,27 @@ onUnmounted(() => {
 </script>
 
 <style>
-#app { min-height: 100vh; background: radial-gradient(circle at top left, rgba(16, 185, 129, 0.08), transparent 34rem), #0b0d10; }
+#app {
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(37, 99, 235, 0.11), transparent 30rem),
+    radial-gradient(circle at 88% 90%, rgba(37, 99, 235, 0.045), transparent 26rem),
+    var(--bg-base);
+}
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 1100;
+  padding: 0.65rem 0.9rem;
+  border-radius: 6px;
+  background: var(--text-strong);
+  color: var(--bg-base);
+  font-weight: 600;
+  transform: translateY(-180%);
+  transition: transform 0.18s ease;
+}
+.skip-link:focus { transform: translateY(0); }
 .offline-banner {
   background: var(--warn);
   color: #000;
@@ -322,24 +348,30 @@ onUnmounted(() => {
   z-index: 1000;
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
-.navbar { background: rgba(17, 24, 39, 0.92); padding: 0.85rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 30; backdrop-filter: blur(10px); gap: 1rem; }
+.navbar { background: rgba(15, 23, 42, 0.88); padding: 0.85rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 30; backdrop-filter: blur(14px); box-shadow: 0 10px 30px rgba(3, 7, 18, 0.18); gap: 1rem; }
 .brand { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
 .navbar h1 { font-size: 1.35rem; letter-spacing: 0; color: var(--text-strong); white-space: nowrap; }
 .user-chip { color: var(--text-faint); background: var(--bg-app); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 0.25rem 0.55rem; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 .nav-links { display: flex; gap: 0.4rem; align-items: center; }
 .nav-links button { background: transparent; color: var(--text-faint); border: 1px solid transparent; padding: 0.48rem 0.8rem; cursor: pointer; border-radius: 6px; transition: all 0.16s ease; }
-.nav-links button.active { background: var(--accent); border-color: var(--accent-border); color: white; }
+.nav-links button.active { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent-text); }
 .nav-links button:hover:not(.active) { background: var(--bg-elevated); border-color: var(--border-strong); color: var(--text-strong); }
-.btn-logout { background: #b91c1c; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; }
-.btn-logout:hover { background: #dc2626; }
+.nav-links button.btn-logout { background: transparent; color: var(--danger-text); border-color: rgba(239, 68, 68, 0.4); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; }
+.nav-links button.btn-logout:hover:not(.active) { background: var(--danger-soft); border-color: var(--danger); color: var(--danger-text-strong); }
 .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
-.login-page { display: flex; align-items: center; justify-content: center; min-height: 80vh; }
+.login-page { display: flex; align-items: center; justify-content: center; min-height: min(80vh, 50rem); padding: 3rem 0 5rem; }
 .loading-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-faint); padding: 1.2rem 1.5rem; }
-.login-form { background: var(--bg-card); border: 1px solid var(--border); padding: 2rem; border-radius: var(--radius); width: 100%; max-width: 400px; box-shadow: var(--shadow-modal); }
-.login-form h2 { margin-bottom: 1.5rem; text-align: center; color: var(--text-strong); }
+.login-form { position: relative; overflow: hidden; background: rgba(17, 24, 39, 0.9); border: 1px solid var(--border); padding: 2.4rem; border-radius: 14px; width: 100%; max-width: 430px; box-shadow: 0 28px 90px rgba(3, 7, 18, 0.5); backdrop-filter: blur(18px); }
+.login-form::before { content: ''; position: absolute; inset: 0 0 auto; height: 3px; background: linear-gradient(90deg, var(--accent), rgba(96, 165, 250, 0.25)); opacity: 0.8; }
+.login-heading { margin-bottom: 1.75rem; }
+.login-kicker { display: block; margin-bottom: 0.55rem; color: var(--accent-text); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.12em; }
+.login-form h2 { margin-bottom: 0.55rem; color: var(--text-strong); font-size: clamp(1.7rem, 5vw, 2.15rem); line-height: 1.08; }
+.login-heading p { max-width: 32ch; color: var(--text-muted); font-size: 0.92rem; }
 .form-group { margin-bottom: 1rem; }
-.form-group input { width: 100%; padding: 0.75rem; background: var(--bg-well); border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text-strong); font-size: 1rem; }
-.btn-primary { width: 100%; background: var(--accent); color: white; border: none; padding: 0.75rem; border-radius: 6px; cursor: pointer; font-size: 1rem; font-weight: 600; }
+.form-group input { width: 100%; padding: 0.8rem 0.9rem; background: rgba(11, 18, 32, 0.82); border: 1px solid var(--border-strong); border-radius: 7px; color: var(--text-strong); font-size: 1rem; transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease; }
+.form-group input:hover:not(:disabled) { border-color: var(--border-hover); }
+.form-group input:focus { background: var(--bg-well); border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-soft); }
+.btn-primary { width: 100%; background: var(--accent); color: white; border: 1px solid var(--accent-border); padding: 0.78rem; border-radius: 7px; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.22); }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-primary:disabled { opacity: 0.65; cursor: not-allowed; }
 .error { color: var(--danger); margin-top: 1rem; text-align: center; }

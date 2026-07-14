@@ -129,7 +129,12 @@ async fn validate_create_request(req: &CreateNotificationRequest) -> Result<()> 
             require_non_empty(req.telegram_bot_token.as_deref(), "Telegram Bot Token")?;
             require_non_empty(req.telegram_chat_id.as_deref(), "Telegram Chat ID")?;
         }
-        _ => unreachable!("notify_type 已在 validate_common 中校验"),
+        _ => {
+            return Err(crate::error::AppError::Validation(format!(
+                "不支持的通知类型: {}",
+                req.notify_type
+            )));
+        }
     }
     Ok(())
 }
@@ -274,5 +279,18 @@ pub async fn test_notification(
             "success": false,
             "message": format!("测试通知发送失败: {}", e)
         }))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_common;
+
+    #[test]
+    fn validate_common_rejects_unknown_notification_type() {
+        let error = validate_common(Some("sms"), None, None, None, None)
+            .expect_err("unknown notification type should be rejected");
+
+        assert!(error.to_string().contains("不支持的通知类型"));
     }
 }

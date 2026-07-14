@@ -178,7 +178,9 @@ async fn send_smtp(email: SmtpMessage<'_>) -> Result<()> {
         smtp_cmd(&mut stream, "STARTTLS\r\n", &[220]).await?;
         let plain_stream = match stream {
             SmtpStream::Plain(stream) => stream,
-            SmtpStream::Tls(_) => unreachable!("non-465 SMTP starts as plaintext"),
+            SmtpStream::Tls(_) => {
+                return Err(AppError::Internal("SMTP STARTTLS 状态异常".into()));
+            }
         };
         stream = SmtpStream::Tls(Box::new(connect_tls(email.host, plain_stream).await?));
         smtp_cmd(&mut stream, "EHLO ai-hub.local\r\n", &[250]).await?;
