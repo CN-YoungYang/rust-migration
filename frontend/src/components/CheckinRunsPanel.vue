@@ -667,7 +667,7 @@ watch([filterStatus, filterTriggeredBy, filterStartDate, filterEndDate, filterAc
 </script>
 
 <style scoped>
-.checkin-runs-panel { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+.checkin-runs-panel { max-width: 1200px; margin: 0 auto; padding: clamp(1rem, 2.5vw, 2.25rem) 0 3rem; }
 .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; gap: 1rem; flex-wrap: wrap; }
 .header-actions { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
 .user-filter { background: var(--bg-well); color: #fff; border: 1px solid var(--border-input); border-radius: 6px; padding: .5rem .65rem; font-size: .85rem; }

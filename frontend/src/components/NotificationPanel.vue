@@ -433,7 +433,7 @@ onMounted(loadConfigs)
 </script>
 
 <style scoped>
-.notification-panel { max-width: 1000px; margin: 0 auto; padding: 2rem; }
+.notification-panel { max-width: 1000px; margin: 0 auto; padding: clamp(1rem, 2.5vw, 2.25rem) 0 3rem; }
 .panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.5rem; }
 h2, h3 { color: var(--text-strong); }
 .panel-subtitle { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }

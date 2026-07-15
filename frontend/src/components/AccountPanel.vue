@@ -946,7 +946,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.account-panel { max-width: 1220px; margin: 0 auto; padding: 2rem; }
+.account-panel { max-width: 1220px; margin: 0 auto; padding: clamp(1rem, 2.5vw, 2.25rem) 0 3rem; }
 .panel-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.25rem; flex-wrap: wrap; gap: .75rem; }
 .panel-header h2 { color: var(--text-strong); margin-bottom: 0.25rem; }
 .panel-subtitle { color: var(--text-muted); font-size: 0.9rem; }

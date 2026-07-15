@@ -9,7 +9,7 @@
 
     <nav v-if="isLoggedIn" class="navbar" aria-label="主导航">
       <div class="brand">
-        <h1>AI Hub</h1>
+        <h1>AI HUB // CTRL</h1>
         <span class="user-chip">{{ currentUser?.username }} · {{ roleText }}</span>
       </div>
       <div class="nav-links" aria-label="功能导航">
@@ -45,7 +45,7 @@
       <div v-else-if="!isLoggedIn" class="login-page">
         <form @submit.prevent="login" class="login-form" aria-labelledby="login-title">
           <div class="login-heading">
-            <span class="login-kicker">AI Hub 控制台</span>
+            <span class="login-kicker">[ AI HUB / CONTROL TERMINAL ]</span>
             <h2 id="login-title">欢迎回来</h2>
             <p>登录后管理站点账户、签到记录与通知。</p>
           </div>
@@ -317,11 +317,17 @@ onUnmounted(() => {
 
 <style>
 #app {
+  position: relative;
   min-height: 100dvh;
-  background:
-    radial-gradient(circle at 12% 8%, rgba(37, 99, 235, 0.11), transparent 30rem),
-    radial-gradient(circle at 88% 90%, rgba(37, 99, 235, 0.045), transparent 26rem),
-    var(--bg-base);
+  background: var(--bg-base);
+}
+#app::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255, 255, 255, 0.018) 3px, rgba(255, 255, 255, 0.018) 4px);
 }
 .skip-link {
   position: fixed;
@@ -329,12 +335,12 @@ onUnmounted(() => {
   left: 0.75rem;
   z-index: 1100;
   padding: 0.65rem 0.9rem;
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--text-strong);
   color: var(--bg-base);
   font-weight: 600;
   transform: translateY(-180%);
-  transition: transform 0.18s ease;
+  transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .skip-link:focus { transform: translateY(0); }
 .offline-banner {
@@ -346,32 +352,32 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 1000;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  box-shadow: 0 12px 30px rgba(2, 8, 23, 0.24);
 }
-.navbar { background: rgba(15, 23, 42, 0.88); padding: 0.85rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 30; backdrop-filter: blur(14px); box-shadow: 0 10px 30px rgba(3, 7, 18, 0.18); gap: 1rem; }
+.navbar { width: min(calc(100% - 1.5rem), 1480px); margin: 0.75rem auto 0; background: var(--bg-app); padding: 0.9rem clamp(1rem, 3vw, 2.5rem); display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border-strong); border-radius: 0; position: sticky; top: 0.75rem; z-index: 30; gap: 1rem; }
 .brand { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
-.navbar h1 { font-size: 1.35rem; letter-spacing: 0; color: var(--text-strong); white-space: nowrap; }
+.navbar h1 { font-size: 1.15rem; letter-spacing: 0.08em; color: var(--text-strong); white-space: nowrap; }
 .user-chip { color: var(--text-faint); background: var(--bg-app); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 0.25rem 0.55rem; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 .nav-links { display: flex; gap: 0.4rem; align-items: center; }
-.nav-links button { background: transparent; color: var(--text-faint); border: 1px solid transparent; padding: 0.48rem 0.8rem; cursor: pointer; border-radius: 6px; transition: all 0.16s ease; }
+.nav-links button { background: transparent; color: var(--text-muted); border: 1px solid transparent; padding: 0.52rem 0.82rem; cursor: pointer; border-radius: 0; letter-spacing: 0.04em; }
 .nav-links button.active { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent-text); }
 .nav-links button:hover:not(.active) { background: var(--bg-elevated); border-color: var(--border-strong); color: var(--text-strong); }
-.nav-links button.btn-logout { background: transparent; color: var(--danger-text); border-color: rgba(239, 68, 68, 0.4); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; }
+.nav-links button.btn-logout { background: transparent; color: var(--danger-text); border-color: var(--danger); padding: 0.5rem 1rem; border-radius: 0; cursor: pointer; }
 .nav-links button.btn-logout:hover:not(.active) { background: var(--danger-soft); border-color: var(--danger); color: var(--danger-text-strong); }
-.container { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
-.login-page { display: flex; align-items: center; justify-content: center; min-height: min(80vh, 50rem); padding: 3rem 0 5rem; }
+.container { max-width: 1440px; margin: 0 auto; padding: clamp(1rem, 2.5vw, 2.25rem); }
+.login-page { display: flex; align-items: center; justify-content: center; min-height: min(78vh, 50rem); padding: 4rem 0 6rem; }
 .loading-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-faint); padding: 1.2rem 1.5rem; }
-.login-form { position: relative; overflow: hidden; background: rgba(17, 24, 39, 0.9); border: 1px solid var(--border); padding: 2.4rem; border-radius: 14px; width: 100%; max-width: 430px; box-shadow: 0 28px 90px rgba(3, 7, 18, 0.5); backdrop-filter: blur(18px); }
-.login-form::before { content: ''; position: absolute; inset: 0 0 auto; height: 3px; background: linear-gradient(90deg, var(--accent), rgba(96, 165, 250, 0.25)); opacity: 0.8; }
+.login-form { position: relative; overflow: hidden; background: var(--bg-card); border: 1px solid var(--border-strong); padding: clamp(1.6rem, 4vw, 2.7rem); border-radius: 0; width: 100%; max-width: 450px; box-shadow: var(--shadow-modal); }
+.login-form::before { content: ''; position: absolute; inset: 0 0 auto; height: 4px; background: var(--accent); }
 .login-heading { margin-bottom: 1.75rem; }
 .login-kicker { display: block; margin-bottom: 0.55rem; color: var(--accent-text); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.12em; }
 .login-form h2 { margin-bottom: 0.55rem; color: var(--text-strong); font-size: clamp(1.7rem, 5vw, 2.15rem); line-height: 1.08; }
 .login-heading p { max-width: 32ch; color: var(--text-muted); font-size: 0.92rem; }
 .form-group { margin-bottom: 1rem; }
-.form-group input { width: 100%; padding: 0.8rem 0.9rem; background: rgba(11, 18, 32, 0.82); border: 1px solid var(--border-strong); border-radius: 7px; color: var(--text-strong); font-size: 1rem; transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease; }
+.form-group input { width: 100%; padding: 0.86rem 0.95rem; background: var(--bg-well); border: 1px solid var(--border-strong); border-radius: 0; color: var(--text-strong); font-size: 1rem; transition: border-color 260ms cubic-bezier(0.32, 0.72, 0, 1), background-color 260ms cubic-bezier(0.32, 0.72, 0, 1), box-shadow 260ms cubic-bezier(0.32, 0.72, 0, 1); }
 .form-group input:hover:not(:disabled) { border-color: var(--border-hover); }
 .form-group input:focus { background: var(--bg-well); border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-soft); }
-.btn-primary { width: 100%; background: var(--accent); color: white; border: 1px solid var(--accent-border); padding: 0.78rem; border-radius: 7px; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.22); }
+.btn-primary { width: 100%; background: var(--accent); color: #fff; border: 1px solid var(--accent-border); padding: 0.86rem; border-radius: 0; cursor: pointer; font-size: 1rem; font-weight: 700; box-shadow: none; letter-spacing: 0.08em; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-primary:disabled { opacity: 0.65; cursor: not-allowed; }
 .error { color: var(--danger); margin-top: 1rem; text-align: center; }
@@ -384,7 +390,7 @@ onUnmounted(() => {
 .panel-region:focus { outline: none; }
 
 @media (max-width: 768px) {
-  .navbar { flex-direction: column; gap: 0.75rem; padding: 0.75rem 1rem; align-items: stretch; }
+  .navbar { width: 100%; margin: 0; top: 0; border-left: 0; border-right: 0; border-radius: 0; flex-direction: column; gap: 0.75rem; padding: 0.75rem 1rem; align-items: stretch; }
   .brand { justify-content: space-between; }
   .user-chip { max-width: 58vw; }
   .nav-links { width: 100%; overflow-x: auto; justify-content: flex-start; gap: 0.5rem; padding-bottom: 0.4rem; scrollbar-width: thin; }

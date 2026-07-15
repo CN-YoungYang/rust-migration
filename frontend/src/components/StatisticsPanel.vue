@@ -418,7 +418,7 @@ watch(() => props.isAdmin, (isAdmin) => {
 .statistics-panel {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: clamp(1rem, 2.5vw, 2.25rem) 0 3rem;
   color: var(--text-strong);
 }
 

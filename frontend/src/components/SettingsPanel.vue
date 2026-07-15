@@ -238,7 +238,7 @@ onMounted(fetchSettings)
 </script>
 
 <style scoped>
-.settings-panel { max-width: 860px; margin: 0 auto; padding: 2rem; }
+.settings-panel { max-width: 860px; margin: 0 auto; padding: clamp(1rem, 2.5vw, 2.25rem) 0 3rem; }
 .panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
 h2 { color: var(--text-strong); margin-bottom: 0.25rem; }
 .panel-subtitle { color: var(--text-muted); font-size: 0.9rem; }
