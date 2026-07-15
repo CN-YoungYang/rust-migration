@@ -9,7 +9,7 @@
 }
 
 @keyframes panelReveal {
-  from { transform: translateY(8px); opacity: 0; }
+  from { transform: translateY(12px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
 
@@ -17,67 +17,70 @@
 html { scroll-behavior: smooth; }
 ::selection { background: var(--accent-soft); color: var(--text-strong); }
 
-/* ── 设计 token：全站统一色板与层次，组件请引用这些变量而非硬编码十六进制 ──
-   背景层由浅到深（用于卡片分层），文本层由亮到暗（主→次要→占位）。 */
+/* 暖白编辑式主题：低对比结构线、少量语义色、无重阴影。 */
 :root {
-  /* 背景（由深到浅） */
-  --bg-base: #0a0a0a;        /* CRT 底色 */
-  --bg-app: #121212;         /* 模块底 */
-  --bg-card: #171717;        /* 主卡片 */
-  --bg-well: #0e0e0e;        /* 输入框/内嵌凹陷块 */
-  --bg-elevated: #242424;    /* hover 态 */
+  --font-ui: "Avenir Next", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-editorial: "Iowan Old Style", "Songti SC", "Noto Serif SC", Georgia, serif;
+  --font-mono: "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
 
-  /* 边框 */
-  --border: #3a3a3a;
-  --border-strong: #666;
-  --border-input: #777;
+  --bg-base: #f5f3ee;
+  --bg-app: #fbfaf7;
+  --bg-card: #ffffff;
+  --bg-well: #f8f7f4;
+  --bg-elevated: #f0eee9;
 
-  /* 文本 */
-  --text-strong: #eaeaea;    /* 白色磷光 */
-  --text: #d0d0d0;           /* 标签/正文 */
-  --text-muted: #999;        /* 副标题/说明 */
-  --text-faint: #bcbcbc;     /* 次级内容 */
+  --border: #e7e3dc;
+  --border-strong: #d8d2c8;
+  --border-input: #cbc4b8;
+  --border-hover: #a89f91;
 
-  /* 主色 / 语义 */
-  --accent: #e61919;
-  --accent-hover: #ff2a2a;
-  --accent-border: #ff2a2a;
-  --accent-soft: rgba(230, 25, 25, 0.16);
-  --accent-text: #ff6b6b;
-  --success: #10b981;
-  --success-soft: rgba(16, 185, 129, 0.18);
-  --danger: #ef4444;
-  --danger-soft: rgba(239, 68, 68, 0.18);
-  --danger-text: #fca5a5;
-  --danger-text-strong: #fecaca;
-  --warn: #f59e0b;
-  --border-hover: #475569;
+  --text-strong: #1c1b18;
+  --text: #3f3c37;
+  --text-muted: #777169;
+  --text-faint: #5d5851;
 
-  /* focus 环 */
-  --focus-ring: #ff6b6b;
+  --accent: #1c1b18;
+  --accent-hover: #37342f;
+  --accent-border: #1c1b18;
+  --accent-soft: #eeece7;
+  --accent-text: #1c1b18;
+  --success: #426c49;
+  --success-soft: #edf3ec;
+  --danger: #9f3f3a;
+  --danger-soft: #fdebec;
+  --danger-text: #9f3f3a;
+  --danger-text-strong: #7d2d29;
+  --warn: #8a620f;
+  --warn-soft: #fbf3db;
+  --warn-border: #eadcae;
+  --pale-blue: #e1f3fe;
+  --pale-blue-text: #1f6c9f;
+  --pale-orange: #f8eadf;
+  --pale-orange-text: #98552c;
 
-  /* 圆角 / 阴影 */
-  --radius: 0;
-  --radius-pill: 0;
-  --shadow-card: none;
-  --shadow-modal: none;
+  --focus-ring: #6e6252;
+  --radius: 10px;
+  --radius-pill: 999px;
+  --shadow-card: 0 2px 8px rgba(28, 27, 24, 0.035);
+  --shadow-modal: 0 18px 60px rgba(28, 27, 24, 0.08);
 }
 
 body {
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", "PingFang SC", monospace;
+  font-family: var(--font-ui);
   background: var(--bg-base);
-  color: var(--text-strong);
+  color: var(--text);
   min-height: 100vh;
-  line-height: 1.5;
+  line-height: 1.6;
   font-variant-numeric: tabular-nums;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
-h1, h2, h3 { letter-spacing: -0.025em; text-wrap: balance; }
+h1, h2, h3 { color: var(--text-strong); letter-spacing: -0.035em; text-wrap: balance; }
 p { text-wrap: pretty; }
 
 .panel-region > * {
-  animation: panelReveal 420ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  animation: panelReveal 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .sr-only {
@@ -93,9 +96,9 @@ p { text-wrap: pretty; }
 }
 
 button, input, select, textarea { font: inherit; }
-button { cursor: pointer; transition: background-color 260ms cubic-bezier(0.32, 0.72, 0, 1), border-color 260ms cubic-bezier(0.32, 0.72, 0, 1), color 260ms cubic-bezier(0.32, 0.72, 0, 1), transform 260ms cubic-bezier(0.32, 0.72, 0, 1); }
+button { cursor: pointer; transition: background-color 220ms ease, border-color 220ms ease, color 220ms ease, transform 220ms cubic-bezier(0.16, 1, 0.3, 1); }
 button:hover:not(:disabled) { transform: translateY(-1px); }
-button:active:not(:disabled) { transform: translateY(1px); }
+button:active:not(:disabled) { transform: scale(0.98); }
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -111,6 +114,170 @@ textarea:focus-visible {
   padding: 3rem 1rem;
   color: var(--text-muted);
   font-size: 0.95rem;
+}
+
+/* Shared panel skin. Component styles remain local for layout, while these
+   rules keep every workspace surface on the same editorial system. */
+.panel-region section[class$="-panel"],
+.panel-region .checkin-runs-panel {
+  color: var(--text) !important;
+}
+.panel-region .panel-header,
+.panel-region .header {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+.panel-region .panel-header h2,
+.panel-region .header h2,
+.panel-region h2 {
+  color: var(--text-strong) !important;
+}
+.panel-region .panel-header > div:first-child > h2,
+.panel-region .header > div:first-child > h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.panel-region .panel-subtitle,
+.panel-region .muted,
+.panel-region .filter-count,
+.panel-region .date-separator {
+  color: var(--text-muted) !important;
+}
+.panel-region input,
+.panel-region select,
+.panel-region textarea {
+  background: var(--bg-well) !important;
+  color: var(--text-strong) !important;
+  border: 1px solid var(--border-input) !important;
+  border-radius: 6px !important;
+}
+.panel-region input:focus,
+.panel-region select:focus,
+.panel-region textarea:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft) !important;
+}
+.panel-region .filter-bar,
+.panel-region .bulk-toolbar,
+.panel-region .progress-panel,
+.panel-region .batch-result,
+.panel-region .cleanup-controls,
+.panel-region .create-form,
+.panel-region .settings-form,
+.panel-region .notification-form,
+.panel-region .summary-card,
+.panel-region .stat-card,
+.panel-region .insight-item,
+.panel-region .chart-section,
+.panel-region .table-section,
+.panel-region .failure-section,
+.panel-region .info-section,
+.panel-region .notification-card,
+.panel-region .settings-card,
+.panel-region .user-card,
+.panel-region .account-card,
+.panel-region .run-card {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+.panel-region .policy-grid > div,
+.panel-region .preview-grid > div {
+  background: var(--bg-well) !important;
+  border-color: var(--border) !important;
+}
+.panel-region .account-card:hover,
+.panel-region .run-card:hover,
+.panel-region .stat-card:hover,
+.panel-region .user-card:hover {
+  background: var(--bg-card) !important;
+  border-color: var(--border-strong) !important;
+  box-shadow: 0 4px 14px rgba(28, 27, 24, 0.05) !important;
+}
+.panel-region .batch-item,
+.panel-region .bar-chart,
+.panel-region .import-instructions,
+.panel-region .info-section,
+.panel-region .empty {
+  background: var(--bg-well) !important;
+  border-color: var(--border) !important;
+}
+.panel-region button {
+  background: var(--bg-elevated) !important;
+  color: var(--text-strong) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+}
+.panel-region button:hover:not(:disabled) {
+  background: var(--text-strong) !important;
+  color: #fff !important;
+  border-color: var(--text-strong) !important;
+}
+.panel-region button.primary,
+.panel-region button.btn-execute,
+.panel-region button.btn-primary {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
+}
+.panel-region button.danger,
+.panel-region button.btn-cleanup {
+  background: var(--danger-soft) !important;
+  color: var(--danger) !important;
+  border-color: #efc9c5 !important;
+}
+.panel-region button.btn-retry {
+  background: var(--pale-blue) !important;
+  color: var(--pale-blue-text) !important;
+  border-color: #c7e5f4 !important;
+}
+.panel-region .badge,
+.panel-region .site-tag,
+.panel-region .status-pill,
+.panel-region .rate-badge,
+.panel-region .owner-tag {
+  border-radius: var(--radius-pill) !important;
+  border: 0 !important;
+  background: var(--accent-soft) !important;
+  color: var(--text) !important;
+}
+.panel-region .badge.success,
+.panel-region .status-pill.success,
+.panel-region .rate-excellent,
+.panel-region .test-result.success { background: var(--success-soft) !important; color: var(--success) !important; }
+.panel-region .badge.failed,
+.panel-region .status-pill.failed,
+.panel-region .rate-poor,
+.panel-region .test-result.failed { background: var(--danger-soft) !important; color: var(--danger) !important; }
+.panel-region .status-pill.pending,
+.panel-region .rate-good,
+.panel-region .rate-fair { background: var(--warn-soft) !important; color: var(--warn) !important; }
+.panel-region .badge.already_checked,
+.panel-region .status-pill.already,
+.panel-region .status-pill.today { background: var(--pale-blue) !important; color: var(--pale-blue-text) !important; }
+.panel-region .modal { background: rgba(28, 27, 24, 0.36) !important; }
+.panel-region .modal-content { background: var(--bg-card) !important; border: 1px solid var(--border-strong) !important; border-radius: 12px !important; box-shadow: var(--shadow-modal) !important; }
+.panel-region .error-panel,
+.panel-region .validation-box { background: var(--danger-soft) !important; color: var(--danger) !important; border-color: #efc9c5 !important; }
+.panel-region .bar.success { background: #759b7d !important; }
+.panel-region .bar.already { background: #8eb8d1 !important; }
+.panel-region .bar.failed { background: #cf817b !important; }
+
+@media (max-width: 720px) {
+  .panel-region .panel-header,
+  .panel-region .header { align-items: flex-start; }
+  .panel-region .summary-grid,
+  .panel-region .overview-grid,
+  .panel-region .insight-grid { grid-template-columns: 1fr !important; }
 }
 
 @media (max-width: 768px) {

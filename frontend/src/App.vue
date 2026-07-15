@@ -1,5 +1,5 @@
 <template>
-  <div id="app">
+  <div id="app" ref="appRoot">
     <a class="skip-link" href="#main-content">跳到主要内容</a>
 
     <!-- 离线提示条 -->
@@ -7,81 +7,126 @@
       网络连接已断开，请检查网络设置
     </div>
 
-    <nav v-if="isLoggedIn" class="navbar" aria-label="主导航">
-      <div class="brand">
-        <h1>AI HUB // CTRL</h1>
-        <span class="user-chip">{{ currentUser?.username }} · {{ roleText }}</span>
-      </div>
-      <div class="nav-links" aria-label="功能导航">
-        <button @click="selectView('accounts')" :class="{ active: currentView === 'accounts' }" :aria-current="currentView === 'accounts' ? 'page' : undefined">账户管理</button>
-        <button @click="selectView('runs')" :class="{ active: currentView === 'runs' }" :aria-current="currentView === 'runs' ? 'page' : undefined">签到记录</button>
-        <button @click="selectView('statistics')" :class="{ active: currentView === 'statistics' }" :aria-current="currentView === 'statistics' ? 'page' : undefined">数据统计</button>
-        <button @click="selectView('notifications')" :class="{ active: currentView === 'notifications' }" :aria-current="currentView === 'notifications' ? 'page' : undefined">通知设置</button>
-        <button @click="selectView('settings')" :class="{ active: currentView === 'settings' }" v-if="isAdmin" :aria-current="currentView === 'settings' ? 'page' : undefined">全局设置</button>
-        <button @click="selectView('users')" :class="{ active: currentView === 'users' }" v-if="isAdmin" :aria-current="currentView === 'users' ? 'page' : undefined">用户管理</button>
-        <button @click="logout" class="btn-logout">退出</button>
-      </div>
-      <div
-        class="server-status"
-        :title="serverTime || '服务器时间'"
-        @mouseenter="startHoverTimer"
-        @mouseleave="stopHoverTimer"
-        @focus="startHoverTimer"
-        @blur="stopHoverTimer"
-        role="status"
-        tabindex="0"
-        :aria-label="serverStatusLabel"
-      >
-        <span class="status-dot" :class="serverStatusClass" :aria-hidden="true"></span>
-        <span class="status-text">{{ serverStatusText }}</span>
-      </div>
-    </nav>
+    <div v-if="isLoggedIn" class="workspace-shell">
+      <nav class="navbar" aria-label="主导航">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">AH</span>
+          <div>
+            <h1>AI Hub</h1>
+            <p>自动签到控制台</p>
+          </div>
+        </div>
 
-    <main id="main-content" class="container" tabindex="-1">
+        <div class="nav-links" aria-label="功能导航">
+          <button @click="selectView('accounts')" :class="{ active: currentView === 'accounts' }" :aria-current="currentView === 'accounts' ? 'page' : undefined"><span class="nav-mark" aria-hidden="true"></span>账户管理</button>
+          <button @click="selectView('runs')" :class="{ active: currentView === 'runs' }" :aria-current="currentView === 'runs' ? 'page' : undefined"><span class="nav-mark" aria-hidden="true"></span>签到记录</button>
+          <button @click="selectView('statistics')" :class="{ active: currentView === 'statistics' }" :aria-current="currentView === 'statistics' ? 'page' : undefined"><span class="nav-mark" aria-hidden="true"></span>数据统计</button>
+          <button @click="selectView('notifications')" :class="{ active: currentView === 'notifications' }" :aria-current="currentView === 'notifications' ? 'page' : undefined"><span class="nav-mark" aria-hidden="true"></span>通知设置</button>
+          <button @click="selectView('settings')" :class="{ active: currentView === 'settings' }" v-if="isAdmin" :aria-current="currentView === 'settings' ? 'page' : undefined"><span class="nav-mark" aria-hidden="true"></span>全局设置</button>
+          <button @click="selectView('users')" :class="{ active: currentView === 'users' }" v-if="isAdmin" :aria-current="currentView === 'users' ? 'page' : undefined"><span class="nav-mark" aria-hidden="true"></span>用户管理</button>
+        </div>
+
+        <div class="nav-footer">
+          <div
+            class="server-status"
+            :title="serverTime || '服务器时间'"
+            @mouseenter="startHoverTimer"
+            @mouseleave="stopHoverTimer"
+            @focus="startHoverTimer"
+            @blur="stopHoverTimer"
+            role="status"
+            tabindex="0"
+            :aria-label="serverStatusLabel"
+          >
+            <span class="status-dot" :class="serverStatusClass" :aria-hidden="true"></span>
+            <span>
+              <small>服务状态</small>
+              <strong class="status-text">{{ serverStatusText }}</strong>
+            </span>
+          </div>
+          <div class="user-card">
+            <span class="user-avatar" aria-hidden="true">{{ userInitial }}</span>
+            <span class="user-meta">
+              <strong>{{ currentUser?.username }}</strong>
+              <small>{{ roleText }}</small>
+            </span>
+            <button @click="logout" class="btn-logout">退出</button>
+          </div>
+        </div>
+      </nav>
+
+      <main id="main-content" class="container workspace-main" tabindex="-1">
+        <header class="workspace-heading">
+          <div>
+            <p>运行工作台</p>
+            <h2>{{ currentViewLabel }}</h2>
+          </div>
+          <p class="workspace-description">{{ currentViewDescription }}</p>
+        </header>
+
+        <div
+          ref="panelRegion"
+          class="panel-region"
+          role="region"
+          :aria-label="`${currentViewLabel}面板`"
+          tabindex="-1"
+        >
+          <KeepAlive :include="cachedPanelNames">
+            <component :is="activePanelComponent" v-bind="activePanelProps" />
+          </KeepAlive>
+        </div>
+      </main>
+    </div>
+
+    <main v-else id="main-content" class="container auth-container" tabindex="-1">
       <div v-if="authChecking" class="login-page">
         <div class="loading-panel" role="status" aria-live="polite" aria-busy="true">正在检查登录状态...</div>
       </div>
 
-      <div v-else-if="!isLoggedIn" class="login-page">
+      <div v-else class="login-page">
+        <section class="login-intro" aria-labelledby="login-intro-title">
+          <div class="login-brand"><span class="brand-mark" aria-hidden="true">AH</span><span>AI Hub</span></div>
+          <div class="login-copy">
+            <p class="login-kicker">多站点签到管理</p>
+            <h1 id="login-intro-title">把重复签到，交给一个安静可靠的工作台。</h1>
+            <p>集中管理 New API 兼容站点账户、执行记录、余额与通知。面向低资源服务器设计，保持清晰、稳定、可追踪。</p>
+          </div>
+          <div class="login-capabilities" aria-label="平台能力">
+            <span>批量执行</span>
+            <span>失败重试</span>
+            <span>定时调度</span>
+          </div>
+        </section>
+
         <form @submit.prevent="login" class="login-form" aria-labelledby="login-title">
           <div class="login-heading">
-            <span class="login-kicker">[ AI HUB / CONTROL TERMINAL ]</span>
+            <span class="login-kicker">进入控制台</span>
             <h2 id="login-title">欢迎回来</h2>
-            <p>登录后管理站点账户、签到记录与通知。</p>
+            <p>使用管理员创建的账户继续。</p>
           </div>
           <div class="form-group">
-            <label class="sr-only" for="login-username">用户名</label>
-            <input id="login-username" v-model="loginForm.username" name="username" placeholder="用户名" autocomplete="username" autocapitalize="none" required :disabled="loginLoading" />
+            <label for="login-username">用户名</label>
+            <input id="login-username" v-model="loginForm.username" name="username" placeholder="输入用户名" autocomplete="username" autocapitalize="none" required :disabled="loginLoading" />
           </div>
           <div class="form-group">
-            <label class="sr-only" for="login-password">密码</label>
-            <input id="login-password" v-model="loginForm.password" name="password" type="password" placeholder="密码" autocomplete="current-password" required :disabled="loginLoading" />
+            <label for="login-password">密码</label>
+            <input id="login-password" v-model="loginForm.password" name="password" type="password" placeholder="输入密码" autocomplete="current-password" required :disabled="loginLoading" />
           </div>
           <button type="submit" class="btn-primary" :disabled="loginLoading">
-            {{ loginLoading ? '登录中...' : '登录' }}
+            {{ loginLoading ? '正在登录' : '登录' }}
           </button>
           <p v-if="error" class="error" role="alert" aria-live="assertive">{{ error }}</p>
+          <p class="login-footnote">会话通过 HttpOnly Cookie 保存，凭据不会存储在浏览器本地。</p>
         </form>
-      </div>
-
-      <div
-        v-else
-        ref="panelRegion"
-        class="panel-region"
-        role="region"
-        :aria-label="`${currentViewLabel}面板`"
-        tabindex="-1"
-      >
-        <KeepAlive :include="cachedPanelNames">
-          <component :is="activePanelComponent" v-bind="activePanelProps" />
-        </KeepAlive>
       </div>
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted, type Component } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch, type Component } from 'vue'
+import { gsap } from 'gsap'
+import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import AccountPanel from './components/AccountPanel.vue'
 import CheckinRunsPanel from './components/CheckinRunsPanel.vue'
 import StatisticsPanel from './components/StatisticsPanel.vue'
@@ -90,6 +135,9 @@ import SettingsPanel from './components/SettingsPanel.vue'
 import AdminUserPanel from './components/AdminUserPanel.vue'
 import { AUTH_EXPIRED_EVENT, apiUrl, request, responseData } from './utils/api'
 import { showToast } from './utils/toast'
+
+gsap.registerPlugin(ScrollTrigger)
+const motionAllowed = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
 interface AppUser {
   id: string
   username: string
@@ -117,6 +165,15 @@ const viewLabels: Record<ViewName, string> = {
   users: '用户管理',
 }
 
+const viewDescriptions: Record<ViewName, string> = {
+  accounts: '管理站点凭据、余额与批量签到任务。',
+  runs: '查看每次执行结果、失败原因与重试状态。',
+  statistics: '按时间和站点观察成功率、余额与运行趋势。',
+  notifications: '配置邮件、Webhook 与 Telegram 通知。',
+  settings: '调整全局调度窗口、重试规则与清理策略。',
+  users: '维护用户状态、角色与平台访问权限。',
+}
+
 const cachedPanelNames = ['AccountPanel', 'CheckinRunsPanel', 'StatisticsPanel']
 
 const isLoggedIn = ref(false)
@@ -130,9 +187,14 @@ const serverOk = ref<boolean | null>(null)
 const serverTime = ref('')
 const isOnline = ref(navigator.onLine)
 const panelRegion = ref<HTMLElement | null>(null)
+const appRoot = ref<HTMLElement | null>(null)
 let serverTimeOffset = 0 // 服务器时间与本地时间的差值（毫秒）
 let hoverTimer: ReturnType<typeof setInterval> | null = null
 let serverTimeSyncTimer: ReturnType<typeof setInterval> | null = null
+let loginMotionContext: gsap.Context | null = null
+let panelMotionContext: gsap.Context | null = null
+let panelObserver: MutationObserver | null = null
+let panelRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const isAdmin = computed(() => {
   return currentUser.value?.role === 'ADMIN' || currentUser.value?.role === 'SUPER_ADMIN'
@@ -148,6 +210,8 @@ const roleText = computed(() => {
 })
 
 const currentViewLabel = computed(() => viewLabels[currentView.value])
+const currentViewDescription = computed(() => viewDescriptions[currentView.value])
+const userInitial = computed(() => currentUser.value?.username?.trim().slice(0, 1).toUpperCase() || 'U')
 const activePanelComponent = computed(() => panelComponents[currentView.value])
 const activePanelProps = computed<Record<string, unknown>>(() => {
   if (currentView.value === 'users') return { currentUser: currentUser.value }
@@ -171,6 +235,83 @@ const selectView = (view: ViewName) => {
   if (currentView.value === view) return
   currentView.value = view
   void nextTick(() => panelRegion.value?.focus())
+}
+
+const animateLogin = async () => {
+  await nextTick()
+  if (!motionAllowed || !appRoot.value || isLoggedIn.value) return
+  loginMotionContext?.revert()
+  loginMotionContext = gsap.context(() => {
+    const intro = appRoot.value?.querySelector('.login-intro')
+    const form = appRoot.value?.querySelector('.login-form')
+    if (!intro || !form) return
+    gsap.from([intro, form], {
+      opacity: 0,
+      y: 24,
+      duration: 0.8,
+      stagger: 0.12,
+      ease: 'power3.out',
+      clearProps: 'transform',
+    })
+    gsap.from('.login-copy h1', {
+      x: -18,
+      opacity: 0,
+      duration: 0.9,
+      delay: 0.14,
+      ease: 'power3.out',
+    })
+  }, appRoot.value)
+}
+
+const animatePanel = async () => {
+  await nextTick()
+  if (!motionAllowed || !appRoot.value || !isLoggedIn.value || !panelRegion.value) return
+  panelObserver?.disconnect()
+  if (panelRefreshTimer) clearTimeout(panelRefreshTimer)
+  panelMotionContext?.revert()
+  panelMotionContext = gsap.context(() => {
+    const panel = panelRegion.value
+    if (!panel) return
+
+    const cards = gsap.utils.toArray<HTMLElement>(
+      '.account-card, .run-card, .summary-card, .stat-card, .insight-item, .notification-card, .settings-form, .chart-section, .table-section, .failure-section, .info-section, .user-card'
+    )
+    if (cards.length) {
+      gsap.set(cards, { opacity: 0, y: 18 })
+      ScrollTrigger.batch(cards, {
+        interval: 0.08,
+        batchMax: 10,
+        onEnter: (batch) => gsap.to(batch, { opacity: 1, y: 0, duration: 0.62, stagger: 0.06, ease: 'power3.out', overwrite: true }),
+        onEnterBack: (batch) => gsap.to(batch, { opacity: 1, y: 0, duration: 0.48, stagger: 0.04, ease: 'power2.out', overwrite: true }),
+      })
+    }
+
+    const heading = appRoot.value?.querySelector('.workspace-heading')
+    if (heading) {
+      gsap.to(heading, {
+        opacity: 0.55,
+        y: -10,
+        ease: 'none',
+        scrollTrigger: {
+          trigger: panel,
+          start: 'top top+=96',
+          end: '+=320',
+          scrub: true,
+        },
+      })
+    }
+  }, panelRegion.value)
+
+  panelObserver = new MutationObserver((mutations) => {
+    if (!mutations.some((mutation) => mutation.addedNodes.length > 0)) return
+    if (panelRefreshTimer) clearTimeout(panelRefreshTimer)
+    panelRefreshTimer = setTimeout(() => {
+      panelRefreshTimer = null
+      void animatePanel()
+    }, 120)
+  })
+  panelObserver.observe(panelRegion.value, { childList: true, subtree: true })
+  ScrollTrigger.refresh()
 }
 
 const login = async () => {
@@ -303,6 +444,20 @@ onMounted(() => {
   window.addEventListener('online', handleOnline)
   window.addEventListener('offline', handleOffline)
   window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
+  void animateLogin()
+})
+
+watch([isLoggedIn, authChecking], ([loggedIn, checking]) => {
+  if (checking) return
+  if (loggedIn) {
+    void animatePanel()
+    return
+  }
+  void animateLogin()
+})
+
+watch(currentView, () => {
+  if (isLoggedIn.value) void animatePanel()
 })
 
 onUnmounted(() => {
@@ -312,6 +467,10 @@ onUnmounted(() => {
   window.removeEventListener('online', handleOnline)
   window.removeEventListener('offline', handleOffline)
   window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
+  loginMotionContext?.revert()
+  panelMotionContext?.revert()
+  panelObserver?.disconnect()
+  if (panelRefreshTimer) clearTimeout(panelRefreshTimer)
 })
 </script>
 
@@ -320,14 +479,19 @@ onUnmounted(() => {
   position: relative;
   min-height: 100dvh;
   background: var(--bg-base);
+  overflow-x: hidden;
 }
 #app::before {
   content: '';
   position: fixed;
-  inset: 0;
-  z-index: 20;
+  width: 36rem;
+  height: 36rem;
+  right: -18rem;
+  top: -18rem;
+  z-index: 0;
   pointer-events: none;
-  background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255, 255, 255, 0.018) 3px, rgba(255, 255, 255, 0.018) 4px);
+  border: 1px solid rgba(28, 27, 24, 0.06);
+  border-radius: 50%;
 }
 .skip-link {
   position: fixed;
@@ -335,68 +499,167 @@ onUnmounted(() => {
   left: 0.75rem;
   z-index: 1100;
   padding: 0.65rem 0.9rem;
-  border-radius: 0;
+  border-radius: 6px;
   background: var(--text-strong);
-  color: var(--bg-base);
+  color: #fff;
   font-weight: 600;
   transform: translateY(-180%);
-  transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .skip-link:focus { transform: translateY(0); }
 .offline-banner {
-  background: var(--warn);
-  color: #000;
+  background: var(--warn-soft);
+  color: var(--warn);
   text-align: center;
-  padding: 0.75rem;
-  font-weight: 500;
+  padding: 0.65rem;
+  font-weight: 600;
   position: sticky;
   top: 0;
   z-index: 1000;
-  box-shadow: 0 12px 30px rgba(2, 8, 23, 0.24);
+  border-bottom: 1px solid var(--warn-border);
 }
-.navbar { width: min(calc(100% - 1.5rem), 1480px); margin: 0.75rem auto 0; background: var(--bg-app); padding: 0.9rem clamp(1rem, 3vw, 2.5rem); display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border-strong); border-radius: 0; position: sticky; top: 0.75rem; z-index: 30; gap: 1rem; }
-.brand { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
-.navbar h1 { font-size: 1.15rem; letter-spacing: 0.08em; color: var(--text-strong); white-space: nowrap; }
-.user-chip { color: var(--text-faint); background: var(--bg-app); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 0.25rem 0.55rem; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
-.nav-links { display: flex; gap: 0.4rem; align-items: center; }
-.nav-links button { background: transparent; color: var(--text-muted); border: 1px solid transparent; padding: 0.52rem 0.82rem; cursor: pointer; border-radius: 0; letter-spacing: 0.04em; }
-.nav-links button.active { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent-text); }
-.nav-links button:hover:not(.active) { background: var(--bg-elevated); border-color: var(--border-strong); color: var(--text-strong); }
-.nav-links button.btn-logout { background: transparent; color: var(--danger-text); border-color: var(--danger); padding: 0.5rem 1rem; border-radius: 0; cursor: pointer; }
-.nav-links button.btn-logout:hover:not(.active) { background: var(--danger-soft); border-color: var(--danger); color: var(--danger-text-strong); }
-.container { max-width: 1440px; margin: 0 auto; padding: clamp(1rem, 2.5vw, 2.25rem); }
-.login-page { display: flex; align-items: center; justify-content: center; min-height: min(78vh, 50rem); padding: 4rem 0 6rem; }
-.loading-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-faint); padding: 1.2rem 1.5rem; }
-.login-form { position: relative; overflow: hidden; background: var(--bg-card); border: 1px solid var(--border-strong); padding: clamp(1.6rem, 4vw, 2.7rem); border-radius: 0; width: 100%; max-width: 450px; box-shadow: var(--shadow-modal); }
-.login-form::before { content: ''; position: absolute; inset: 0 0 auto; height: 4px; background: var(--accent); }
-.login-heading { margin-bottom: 1.75rem; }
-.login-kicker { display: block; margin-bottom: 0.55rem; color: var(--accent-text); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.12em; }
-.login-form h2 { margin-bottom: 0.55rem; color: var(--text-strong); font-size: clamp(1.7rem, 5vw, 2.15rem); line-height: 1.08; }
-.login-heading p { max-width: 32ch; color: var(--text-muted); font-size: 0.92rem; }
-.form-group { margin-bottom: 1rem; }
-.form-group input { width: 100%; padding: 0.86rem 0.95rem; background: var(--bg-well); border: 1px solid var(--border-strong); border-radius: 0; color: var(--text-strong); font-size: 1rem; transition: border-color 260ms cubic-bezier(0.32, 0.72, 0, 1), background-color 260ms cubic-bezier(0.32, 0.72, 0, 1), box-shadow 260ms cubic-bezier(0.32, 0.72, 0, 1); }
-.form-group input:hover:not(:disabled) { border-color: var(--border-hover); }
-.form-group input:focus { background: var(--bg-well); border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-soft); }
-.btn-primary { width: 100%; background: var(--accent); color: #fff; border: 1px solid var(--accent-border); padding: 0.86rem; border-radius: 0; cursor: pointer; font-size: 1rem; font-weight: 700; box-shadow: none; letter-spacing: 0.08em; }
-.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-.btn-primary:disabled { opacity: 0.65; cursor: not-allowed; }
-.error { color: var(--danger); margin-top: 1rem; text-align: center; }
-.server-status { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--text-muted); cursor: default; padding: 0.35rem 0.55rem; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--bg-app); }
+.workspace-shell {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 17rem minmax(0, 1fr);
+  min-height: 100dvh;
+}
+.navbar {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+  padding: 1.5rem 1.25rem;
+  background: var(--bg-app);
+  border-right: 1px solid var(--border);
+  z-index: 30;
+}
+.brand,
+.login-brand { display: flex; align-items: center; gap: 0.8rem; min-width: 0; }
+.brand-mark {
+  width: 2.5rem;
+  height: 2.5rem;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: var(--text-strong);
+  color: #fff;
+  font: 700 0.72rem/1 var(--font-mono);
+  letter-spacing: 0.08em;
+}
+.navbar h1 { color: var(--text-strong); font-size: 1.05rem; letter-spacing: -0.02em; white-space: nowrap; }
+.brand p { margin-top: 0.1rem; color: var(--text-muted); font-size: 0.76rem; }
+.nav-links { display: grid; gap: 0.35rem; }
+.nav-links button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  padding: 0.7rem 0.75rem;
+  text-align: left;
+  border-radius: 6px;
+  font-weight: 550;
+}
+.nav-mark { width: 0.42rem; height: 0.42rem; flex: 0 0 auto; border: 1px solid currentColor; border-radius: 2px; }
+.nav-links button.active { background: var(--accent-soft); border-color: var(--border); color: var(--text-strong); }
+.nav-links button.active .nav-mark { background: var(--text-strong); border-color: var(--text-strong); }
+.nav-links button:hover:not(.active) { background: var(--bg-elevated); color: var(--text-strong); }
+.nav-footer { display: grid; gap: 0.75rem; margin-top: auto; }
+.server-status,
+.user-card { border: 1px solid var(--border); background: var(--bg-card); border-radius: 8px; }
+.server-status { display: flex; align-items: center; gap: 0.65rem; color: var(--text-muted); padding: 0.7rem 0.75rem; cursor: default; }
+.server-status > span:last-child { display: grid; gap: 0.05rem; }
+.server-status small,
+.user-meta small { color: var(--text-muted); font-size: 0.7rem; }
+.status-text { color: var(--text-strong); font-size: 0.82rem; letter-spacing: 0.02em; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; }
 .status-dot.online { background: var(--success); }
 .status-dot.offline { background: var(--danger); }
 .status-dot.checking { background: var(--warn); }
-.status-text { letter-spacing: 0.5px; }
+.user-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.65rem; padding: 0.65rem; }
+.user-avatar { width: 2rem; height: 2rem; display: grid; place-items: center; border-radius: 6px; background: var(--pale-blue); color: var(--pale-blue-text); font-weight: 700; }
+.user-meta { min-width: 0; display: grid; }
+.user-meta strong { overflow: hidden; color: var(--text-strong); font-size: 0.8rem; text-overflow: ellipsis; white-space: nowrap; }
+.btn-logout { background: transparent; color: var(--danger); border: 0; padding: 0.35rem; font-size: 0.74rem; }
+.btn-logout:hover:not(:disabled) { background: var(--danger-soft); }
+.container { width: 100%; max-width: 1520px; margin: 0 auto; padding: clamp(1.25rem, 3vw, 3rem); }
+.workspace-main { min-width: 0; }
+.workspace-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 0.5rem 0 clamp(1.75rem, 4vw, 3.5rem);
+  border-bottom: 1px solid var(--border);
+}
+.workspace-heading > div > p,
+.login-kicker { color: var(--text-muted); font: 600 0.72rem/1.4 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.workspace-heading h2 { margin-top: 0.55rem; font: 500 clamp(2rem, 4vw, 3.6rem)/1 var(--font-editorial); color: var(--text-strong); letter-spacing: -0.045em; }
+.workspace-description { max-width: 34rem; color: var(--text-muted); text-align: right; }
 .panel-region:focus { outline: none; }
+.auth-container { position: relative; z-index: 1; max-width: 1500px; }
+.login-page { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(22rem, 0.65fr); align-items: stretch; min-height: calc(100dvh - 6rem); padding: clamp(1rem, 4vw, 4rem) 0; }
+.loading-panel { grid-column: 1 / -1; place-self: center; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-faint); padding: 1.2rem 1.5rem; }
+.login-intro { display: flex; flex-direction: column; justify-content: space-between; gap: 5rem; padding: clamp(1rem, 5vw, 5rem) clamp(2rem, 7vw, 7rem) clamp(2rem, 5vw, 5rem) 0; }
+.login-brand { color: var(--text-strong); font-weight: 700; letter-spacing: -0.02em; }
+.login-copy { max-width: 58rem; }
+.login-copy h1 { max-width: 15ch; margin: 1.25rem 0 1.5rem; font: 500 clamp(3rem, 6vw, 6.8rem)/0.94 var(--font-editorial); color: var(--text-strong); letter-spacing: -0.055em; text-wrap: balance; }
+.login-copy > p:last-child { max-width: 47rem; color: var(--text-muted); font-size: clamp(1rem, 1.5vw, 1.18rem); line-height: 1.75; }
+.login-capabilities { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.login-capabilities span { padding: 1rem 0; color: var(--text); font: 600 0.76rem/1.4 var(--font-mono); letter-spacing: 0.05em; }
+.login-capabilities span + span { padding-left: 1rem; border-left: 1px solid var(--border); }
+.login-form { align-self: center; background: var(--bg-card); border: 1px solid var(--border); padding: clamp(1.75rem, 4vw, 3rem); border-radius: 12px; width: 100%; max-width: 30rem; box-shadow: var(--shadow-modal); }
+.login-heading { margin-bottom: 1.75rem; }
+.login-kicker { display: block; margin-bottom: 0.75rem; }
+.login-form h2 { margin-bottom: 0.55rem; color: var(--text-strong); font: 500 clamp(2rem, 4vw, 3rem)/1 var(--font-editorial); letter-spacing: -0.04em; }
+.login-heading p { max-width: 32ch; color: var(--text-muted); font-size: 0.92rem; }
+.form-group { margin-bottom: 1rem; }
+.form-group label { display: block; margin-bottom: 0.45rem; color: var(--text); font-size: 0.82rem; font-weight: 600; }
+.form-group input { width: 100%; padding: 0.82rem 0.9rem; background: var(--bg-well); border: 1px solid var(--border-input); border-radius: 6px; color: var(--text-strong); font-size: 0.95rem; transition: border-color 220ms ease, background-color 220ms ease, box-shadow 220ms ease; }
+.form-group input:hover:not(:disabled) { border-color: var(--border-hover); }
+.form-group input:focus { background: var(--bg-well); border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-soft); }
+.btn-primary { width: 100%; background: var(--accent); color: #fff; border: 1px solid var(--accent-border); padding: 0.82rem; border-radius: 6px; cursor: pointer; font-size: 0.95rem; font-weight: 700; box-shadow: none; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-primary:disabled { opacity: 0.65; cursor: not-allowed; }
+.error { color: var(--danger); margin-top: 1rem; text-align: left; font-size: 0.85rem; }
+.login-footnote { margin-top: 1.25rem; color: var(--text-muted); font-size: 0.74rem; line-height: 1.6; }
 
-@media (max-width: 768px) {
-  .navbar { width: 100%; margin: 0; top: 0; border-left: 0; border-right: 0; border-radius: 0; flex-direction: column; gap: 0.75rem; padding: 0.75rem 1rem; align-items: stretch; }
-  .brand { justify-content: space-between; }
-  .user-chip { max-width: 58vw; }
-  .nav-links { width: 100%; overflow-x: auto; justify-content: flex-start; gap: 0.5rem; padding-bottom: 0.4rem; scrollbar-width: thin; }
-  .nav-links button { flex: 0 0 auto; padding: 0.4rem 0.75rem; font-size: 0.85rem; }
-  .server-status { width: fit-content; }
+@media (max-width: 980px) {
+  .workspace-shell { grid-template-columns: 1fr; }
+  .navbar { position: sticky; height: auto; padding: 0.75rem 1rem; gap: 0.75rem; border-right: 0; border-bottom: 1px solid var(--border); }
+  .brand p,
+  .nav-footer .server-status { display: none; }
+  .nav-links { display: flex; gap: 0.35rem; overflow-x: auto; padding-bottom: 0.2rem; scrollbar-width: thin; }
+  .nav-links button { width: auto; flex: 0 0 auto; padding: 0.55rem 0.7rem; }
+  .nav-footer { position: absolute; top: 0.75rem; right: 1rem; }
+  .user-card { border: 0; background: transparent; padding: 0; }
+  .user-avatar,
+  .user-meta small { display: none; }
+  .workspace-heading { padding-top: 0; }
+  .login-page { grid-template-columns: 1fr; min-height: auto; }
+  .login-intro { padding: 2rem 0 4rem; gap: 4rem; }
+  .login-form { max-width: none; }
+}
+
+@media (max-width: 640px) {
   .container { padding: 1rem; }
+  .navbar { padding-right: 0.75rem; }
+  .brand { padding-right: 7.5rem; }
+  .brand-mark { width: 2.25rem; height: 2.25rem; }
+  .nav-mark { display: none; }
+  .workspace-heading { display: grid; gap: 0.8rem; }
+  .workspace-description { text-align: left; }
+  .login-intro { padding-top: 1rem; }
+  .login-copy h1 { max-width: 12ch; font-size: clamp(2.8rem, 15vw, 4.5rem); }
+  .login-capabilities { grid-template-columns: 1fr; }
+  .login-capabilities span + span { padding-left: 0; border-left: 0; border-top: 1px solid var(--border); }
 }
 </style>
 
