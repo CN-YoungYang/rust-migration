@@ -304,8 +304,6 @@ a:focus-visible {
 }
 
 .panel-region .summary-grid,
-.panel-region .overview-grid,
-.panel-region .insight-grid,
 .panel-region .policy-grid,
 .panel-region .preview-grid {
   display: grid;
@@ -318,8 +316,6 @@ a:focus-visible {
 }
 
 .panel-region .summary-card,
-.panel-region .stat-card,
-.panel-region .insight-item,
 .panel-region .policy-grid > div,
 .panel-region .preview-grid > div {
   min-width: 0;
@@ -334,7 +330,6 @@ a:focus-visible {
 }
 
 .panel-region .summary-card strong,
-.panel-region .stat-card strong,
 .panel-region .policy-grid strong,
 .panel-region .preview-grid strong {
   color: var(--color-ink);
@@ -345,8 +340,7 @@ a:focus-visible {
 .panel-region .account-list,
 .panel-region .runs-list,
 .panel-region .notification-list,
-.panel-region .user-list,
-.panel-region .stats-content {
+.panel-region .user-list {
   display: grid;
   gap: var(--space-lg);
 }
@@ -370,8 +364,6 @@ a:focus-visible {
 
 .panel-region .group-header,
 .panel-region .table-section > h3,
-.panel-region .chart-section > h3,
-.panel-region .failure-section > h3,
 .panel-region .info-section > h3,
 .panel-region .user-list > h3,
 .panel-region .create-form > h3 {

@@ -6,128 +6,115 @@
         <p class="panel-subtitle">{{ selectedUserName }} · {{ rangeLabel }}</p>
       </div>
       <div class="toolbar">
-        <select
-          v-if="isAdmin"
-          v-model="selectedUserId"
-          class="user-filter"
-          aria-label="按用户查询统计"
-          :disabled="usersLoading || loading"
-        >
-          <option value="">全部用户</option>
-          <option v-if="usersLoading" disabled>加载中...</option>
-          <option v-for="u in allUsers" :key="u.id" :value="u.id">
-            {{ u.username }}{{ u.id === currentUser?.id ? '（我）' : '' }}
-          </option>
-        </select>
+        <label v-if="isAdmin" class="filter-field">
+          <span>统计用户</span>
+          <select v-model="selectedUserId" class="user-filter" :disabled="usersLoading || loading">
+            <option value="">全部用户</option>
+            <option v-if="usersLoading" disabled>加载中...</option>
+            <option v-for="u in allUsers" :key="u.id" :value="u.id">
+              {{ u.username }}{{ u.id === currentUser?.id ? '（我）' : '' }}
+            </option>
+          </select>
+        </label>
         <div class="date-range" role="group" aria-label="统计日期范围">
-          <input v-model="startDate" type="date" class="date-input" aria-label="开始日期" :disabled="loading" />
+          <label class="filter-field"><span>开始日期</span><input v-model="startDate" type="date" class="date-input" :disabled="loading" /></label>
           <span class="date-separator">至</span>
-          <input v-model="endDate" type="date" class="date-input" aria-label="结束日期" :disabled="loading" />
+          <label class="filter-field"><span>结束日期</span><input v-model="endDate" type="date" class="date-input" :disabled="loading" /></label>
           <button class="primary" @click="loadStatistics" :disabled="loading || dateRangeInvalid">
             {{ loading ? '查询中...' : '查询' }}
           </button>
-          <button @click="applyRange(7)" :disabled="loading">7天</button>
-          <button @click="applyRange(30)" :disabled="loading">30天</button>
-          <button @click="applyRange(90)" :disabled="loading">90天</button>
+          <button v-for="days in [7, 30, 90]" :key="days" @click="applyRange(days)" :disabled="loading" :aria-pressed="isActiveRange(days)" :class="{ selected: isActiveRange(days) }">{{ days }}天</button>
         </div>
       </div>
     </div>
 
     <div v-if="dateRangeInvalid" class="validation-box" role="alert">开始日期不能晚于结束日期。</div>
 
-    <p v-if="loading" class="empty" role="status" aria-live="polite">加载中...</p>
+    <p v-if="loading && !statistics" class="empty" role="status" aria-live="polite">正在加载统计数据...</p>
+    <div v-if="loadError" class="load-error" role="alert">
+      <span>{{ loadError }}</span>
+      <button @click="loadStatistics" :disabled="loading">重新查询</button>
+    </div>
 
-    <div v-if="!loading && statistics" class="stats-content">
-      <div class="overview-grid">
-        <div class="stat-card">
-          <div class="stat-mark">账户</div>
-          <div class="stat-info">
-            <div class="stat-value">{{ statistics.overview.totalAccounts }}</div>
-            <div class="stat-label">总账户数</div>
-            <div class="stat-sub">启用率：{{ enabledRatio }}%</div>
-          </div>
+    <div v-if="statistics" class="stats-content" :aria-busy="loading">
+      <p v-if="loading" class="refresh-status" role="status" aria-live="polite">正在更新，当前仍显示上次结果。</p>
+      <dl class="summary-strip" aria-label="统计概览">
+        <div>
+          <dt>今日执行</dt>
+          <dd>{{ statistics.overview.todayTotal }}<small>次</small></dd>
+          <p>成功 {{ statistics.overview.todaySuccess }} · 已签到 {{ statistics.overview.todayAlreadyChecked }} · 等待 {{ statistics.overview.todayPending }} · 失败 {{ statistics.overview.todayFailed }}</p>
         </div>
-
-        <div class="stat-card" :class="{ warning: statistics.overview.todayFailed > 0 }">
-          <div class="stat-mark">今日</div>
-          <div class="stat-info">
-            <div class="stat-value">{{ statistics.overview.todaySuccess }}</div>
-            <div class="stat-label">今日成功</div>
-            <div class="stat-sub">失败：{{ statistics.overview.todayFailed }}，失败率：{{ todayFailureRate }}%</div>
-          </div>
+        <div :class="{ warning: statistics.overview.todayFailed > 0 }">
+          <dt>区间成功率</dt>
+          <dd>{{ statistics.overview.completedRuns > 0 ? statistics.overview.successRate.toFixed(1) : '—' }}<small v-if="statistics.overview.completedRuns > 0">%</small></dd>
+          <p>共执行 {{ statistics.overview.totalRuns }} 次</p>
         </div>
-
-        <div class="stat-card">
-          <div class="stat-mark">成功率</div>
-          <div class="stat-info">
-            <div class="stat-value">{{ statistics.overview.successRate.toFixed(1) }}%</div>
-            <div class="stat-label">区间成功率</div>
-            <div class="stat-sub">总计：{{ statistics.overview.totalRuns }} 次</div>
-          </div>
+        <div>
+          <dt>启用账户</dt>
+          <dd>{{ statistics.overview.enabledAccounts }}<small>/ {{ statistics.overview.totalAccounts }}</small></dd>
+          <p>启用率 {{ enabledRatio }}%</p>
         </div>
-
-        <div class="stat-card">
-          <div class="stat-mark">余额</div>
-          <div class="stat-info">
-            <div class="stat-value">${{ statistics.overview.totalBalance.toFixed(2) }}</div>
-            <div class="stat-label">总余额</div>
-            <div class="stat-sub">已启用账户</div>
-          </div>
+        <div>
+          <dt>当前总余额</dt>
+          <dd><small>$</small>{{ statistics.overview.totalBalance.toFixed(2) }}</dd>
+          <p>基于账户最后刷新结果</p>
         </div>
-      </div>
-
-      <div class="insight-grid">
-        <div class="insight-item">
-          <span>最近失败</span>
-          <strong>{{ statistics.recentFailures.length }} 条</strong>
-        </div>
-        <div class="insight-item">
-          <span>风险站点</span>
-          <strong>{{ highestRiskSite }}</strong>
-        </div>
-        <div class="insight-item">
-          <span>今日执行</span>
-          <strong>{{ todayTotal }} 次</strong>
-        </div>
-      </div>
+      </dl>
 
       <div class="chart-section">
-        <h3>每日签到趋势</h3>
+        <div class="section-heading">
+          <div>
+            <h3>每日执行量</h3>
+            <p>统一按区间内最大单日执行量绘制，柱高可直接跨日期比较。</p>
+          </div>
+          <div class="chart-scale"><span>最高单日</span><strong>{{ maxDailyTotal }} 次</strong></div>
+        </div>
         <div v-if="statistics.dailyTrend.length > 0" class="chart-container" role="group" aria-label="每日签到趋势图">
           <div class="chart-legend">
             <span class="legend-item"><span class="dot success"></span>成功</span>
-            <span class="legend-item"><span class="dot failed"></span>失败</span>
             <span class="legend-item"><span class="dot already"></span>已签到</span>
+            <span class="legend-item"><span class="dot pending"></span>等待中</span>
+            <span class="legend-item"><span class="dot failed"></span>失败</span>
           </div>
-          <div class="bar-chart" role="list" aria-label="每日签到趋势数据">
-            <div v-for="day in statistics.dailyTrend" :key="day.date" class="bar-group" role="listitem" tabindex="0" :aria-label="trendAriaLabel(day)">
-              <div class="bar-stack">
-                <div
-                  class="bar success"
-                  :style="{ height: getBarHeight(day.success, day.total) + '%' }"
-                  :title="`成功：${day.success}`"
-                  aria-hidden="true"
-                ></div>
-                <div
-                  class="bar already"
-                  :style="{ height: getBarHeight(day.alreadyChecked, day.total) + '%' }"
-                  :title="`已签到：${day.alreadyChecked}`"
-                  aria-hidden="true"
-                ></div>
-                <div
-                  class="bar failed"
-                  :style="{ height: getBarHeight(day.failed, day.total) + '%' }"
-                  :title="`失败：${day.failed}`"
-                  aria-hidden="true"
-                ></div>
-              </div>
-              <div class="bar-label">{{ formatDate(day.date) }}</div>
-              <div class="bar-value">{{ day.total }}</div>
-              <div class="bar-rate">{{ day.successRate.toFixed(0) }}%</div>
+          <div class="plot-scroll" aria-label="每日执行量图表，可横向滚动">
+            <div class="bar-chart" role="group" aria-label="每日签到趋势数据">
+              <button
+                v-for="day in dailyTrendSeries"
+                :key="day.date"
+                type="button"
+                class="bar-group"
+                :class="{ selected: selectedTrendDay?.date === day.date }"
+                :aria-label="trendAriaLabel(day)"
+                :aria-pressed="selectedTrendDay?.date === day.date"
+                @focus="activeTrendDate = day.date"
+                @click="activeTrendDate = day.date"
+              >
+                <div class="bar-stack" aria-hidden="true">
+                  <div v-if="day.success > 0" class="bar success" :style="{ height: getTrendHeight(day.success) + '%' }"></div>
+                  <div v-if="day.alreadyChecked > 0" class="bar already" :style="{ height: getTrendHeight(day.alreadyChecked) + '%' }"></div>
+                  <div v-if="day.pending > 0" class="bar pending" :style="{ height: getTrendHeight(day.pending) + '%' }"></div>
+                  <div v-if="day.failed > 0" class="bar failed" :style="{ height: getTrendHeight(day.failed) + '%' }"></div>
+                </div>
+                <span class="bar-label">{{ formatDate(day.date) }}</span>
+                <span class="bar-value">{{ day.total }}</span>
+                <span class="bar-rate">{{ completedCount(day) > 0 ? `${day.successRate.toFixed(0)}%` : '—' }}</span>
+              </button>
             </div>
           </div>
+          <dl v-if="selectedTrendDay" class="trend-detail">
+            <div><dt>日期</dt><dd>{{ selectedTrendDay.date }}</dd></div>
+            <div><dt>总执行</dt><dd>{{ selectedTrendDay.total }}</dd></div>
+            <div><dt>成功</dt><dd>{{ selectedTrendDay.success }}</dd></div>
+            <div><dt>已签到</dt><dd>{{ selectedTrendDay.alreadyChecked }}</dd></div>
+            <div><dt>等待中</dt><dd>{{ selectedTrendDay.pending }}</dd></div>
+            <div><dt>失败</dt><dd>{{ selectedTrendDay.failed }}</dd></div>
+            <div><dt>成功率</dt><dd>{{ completedCount(selectedTrendDay) > 0 ? `${selectedTrendDay.successRate.toFixed(1)}%` : '—' }}</dd></div>
+          </dl>
         </div>
-        <p v-else class="empty" role="status">所选时间范围内无签到记录</p>
+        <div v-else class="empty" role="status">
+          <p>所选时间范围内无签到记录。</p>
+          <button @click="applyRange(30)" :disabled="loading">查看最近30天</button>
+        </div>
       </div>
 
       <div class="table-section" tabindex="0" aria-label="站点统计表，可横向滚动">
@@ -140,7 +127,9 @@
               <th scope="col">账户数</th>
               <th scope="col">总签到</th>
               <th scope="col">成功</th>
+              <th scope="col">已签到</th>
               <th scope="col">失败</th>
+              <th scope="col">等待中</th>
               <th scope="col">成功率</th>
               <th scope="col">平均耗时</th>
             </tr>
@@ -151,13 +140,15 @@
               <td data-label="账户数">{{ site.accountCount }}</td>
               <td data-label="总签到">{{ site.totalRuns }}</td>
               <td data-label="成功" class="success-text">{{ site.success }}</td>
+              <td data-label="已签到">{{ site.alreadyChecked }}</td>
               <td data-label="失败" class="failed-text">{{ site.failed }}</td>
+              <td data-label="等待中">{{ site.pending }}</td>
               <td data-label="成功率">
-                <span class="rate-badge" :class="getRateClass(site.successRate)">
-                  {{ site.successRate.toFixed(1) }}%
+                <span class="rate-badge" :class="completedCount(site) > 0 ? getRateClass(site.successRate) : 'rate-empty'">
+                  {{ completedCount(site) > 0 ? `${site.successRate.toFixed(1)}%` : '—' }}
                 </span>
               </td>
-              <td data-label="平均耗时">{{ site.avgDuration.toFixed(0) }}ms</td>
+              <td data-label="平均耗时">{{ site.avgDuration == null ? '—' : `${site.avgDuration.toFixed(0)}ms` }}</td>
             </tr>
           </tbody>
         </table>
@@ -165,7 +156,13 @@
       </div>
 
       <div class="failure-section">
-        <h3>最近失败</h3>
+        <div class="section-heading">
+          <div>
+            <h3>异常与风险</h3>
+            <p>最近失败不受当前日期范围限制，用于快速定位仍需处理的问题。</p>
+          </div>
+          <div class="risk-summary"><span>风险站点</span><strong>{{ highestRiskSite }}</strong></div>
+        </div>
         <div v-if="statistics.recentFailures.length > 0" class="failure-list">
           <article v-for="failure in statistics.recentFailures" :key="failure.runId" class="failure-item">
             <div class="failure-main">
@@ -185,14 +182,6 @@
         <p v-else class="empty" role="status">暂无失败记录</p>
       </div>
 
-      <div class="info-section">
-        <h3>余额信息</h3>
-        <p class="info-text">
-          当前总余额：<strong>${{ statistics.overview.totalBalance.toFixed(2) }}</strong>
-          （{{ (statistics.overview.totalBalance * 500000).toFixed(0) }} quota）
-        </p>
-        <p class="muted">余额基于最后一次刷新时间，可能不是实时数据。</p>
-      </div>
     </div>
   </section>
 </template>
@@ -209,8 +198,12 @@ interface Statistics {
     totalAccounts: number
     enabledAccounts: number
     todaySuccess: number
+    todayAlreadyChecked: number
     todayFailed: number
+    todayPending: number
+    todayTotal: number
     totalRuns: number
+    completedRuns: number
     successRate: number
     totalBalance: number
   }
@@ -219,6 +212,7 @@ interface Statistics {
     success: number
     failed: number
     alreadyChecked: number
+    pending: number
     total: number
     successRate: number
   }>
@@ -227,13 +221,11 @@ interface Statistics {
     accountCount: number
     totalRuns: number
     success: number
+    alreadyChecked: number
     failed: number
+    pending: number
     successRate: number
-    avgDuration: number
-  }>
-  balanceTrend: Array<{
-    date: string
-    balance: number
+    avgDuration: number | null
   }>
   recentFailures: Array<{
     runId: string
@@ -257,6 +249,8 @@ const statistics = ref<Statistics | null>(null)
 const startDate = ref('')
 const endDate = ref('')
 const selectedUserId = ref('')
+const activeTrendDate = ref('')
+const loadError = ref('')
 let requestSeq = 0
 
 const selectedUserName = computed(() => {
@@ -278,14 +272,37 @@ const enabledRatio = computed(() => {
   return (statistics.value.overview.enabledAccounts / statistics.value.overview.totalAccounts * 100).toFixed(1)
 })
 
-const todayTotal = computed(() => {
-  if (!statistics.value) return 0
-  return statistics.value.overview.todaySuccess + statistics.value.overview.todayFailed
+const maxDailyTotal = computed(() => {
+  return Math.max(...dailyTrendSeries.value.map((day) => day.total), 0)
 })
 
-const todayFailureRate = computed(() => {
-  if (!statistics.value || todayTotal.value === 0) return '0.0'
-  return (statistics.value.overview.todayFailed / todayTotal.value * 100).toFixed(1)
+const dailyTrendSeries = computed<Statistics['dailyTrend']>(() => {
+  if (!statistics.value || !startDate.value || !endDate.value) return []
+  const byDate = new Map(statistics.value.dailyTrend.map((day) => [day.date, day]))
+  const series: Statistics['dailyTrend'] = []
+  const cursor = new Date(`${startDate.value}T00:00:00`)
+  const end = new Date(`${endDate.value}T00:00:00`)
+
+  while (cursor <= end) {
+    const date = formatDateInput(cursor)
+    series.push(byDate.get(date) || {
+      date,
+      success: 0,
+      failed: 0,
+      alreadyChecked: 0,
+      pending: 0,
+      total: 0,
+      successRate: 0,
+    })
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return series
+})
+
+const selectedTrendDay = computed(() => {
+  const selected = dailyTrendSeries.value.find((day) => day.date === activeTrendDate.value)
+  if (selected) return selected
+  return [...dailyTrendSeries.value].reverse().find((day) => day.total > 0) || dailyTrendSeries.value.at(-1) || null
 })
 
 const highestRiskSite = computed(() => {
@@ -315,8 +332,19 @@ function applyRange(days: number) {
   loadStatistics()
 }
 
+function isActiveRange(days: number): boolean {
+  if (!startDate.value || !endDate.value) return false
+  const start = new Date(`${startDate.value}T00:00:00`)
+  const end = new Date(`${endDate.value}T00:00:00`)
+  const today = formatDateInput(new Date())
+  return endDate.value === today && Math.round((end.getTime() - start.getTime()) / 86400000) + 1 === days
+}
+
 function formatDateInput(date: Date): string {
-  return date.toISOString().split('T')[0]
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function formatDate(dateStr: string): string {
@@ -324,13 +352,18 @@ function formatDate(dateStr: string): string {
   return `${month}/${day}`
 }
 
-function getBarHeight(value: number, total: number): number {
-  if (total === 0) return 0
-  return (value / total) * 100
+function getTrendHeight(value: number): number {
+  if (maxDailyTotal.value === 0) return 0
+  return (value / maxDailyTotal.value) * 100
+}
+
+function completedCount(item: { success: number; alreadyChecked: number; failed: number }): number {
+  return item.success + item.alreadyChecked + item.failed
 }
 
 function trendAriaLabel(day: Statistics['dailyTrend'][number]): string {
-  return `${formatDate(day.date)}：总计 ${day.total} 次，成功 ${day.success} 次，已签到 ${day.alreadyChecked} 次，失败 ${day.failed} 次，成功率 ${day.successRate.toFixed(0)}%`
+  const rate = completedCount(day) > 0 ? `${day.successRate.toFixed(0)}%` : '无样本'
+  return `${formatDate(day.date)}：总计 ${day.total} 次，成功 ${day.success} 次，已签到 ${day.alreadyChecked} 次，等待中 ${day.pending} 次，失败 ${day.failed} 次，成功率 ${rate}`
 }
 
 function getRateClass(rate: number): string {
@@ -346,6 +379,7 @@ async function loadStatistics() {
     return
   }
   const seq = ++requestSeq
+  loadError.value = ''
   loading.value = true
   try {
     const params = new URLSearchParams()
@@ -361,7 +395,8 @@ async function loadStatistics() {
     }
   } catch (error) {
     if (seq === requestSeq) {
-      showToast(error instanceof Error ? error.message : '加载统计数据失败', 'error')
+      loadError.value = error instanceof Error ? error.message : '加载统计数据失败'
+      showToast(loadError.value, 'error')
     }
   } finally {
     if (seq === requestSeq) {
@@ -414,453 +449,4 @@ watch(() => props.isAdmin, (isAdmin) => {
 })
 </script>
 
-<style scoped>
-.statistics-panel {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: clamp(1rem, 2.5vw, 2.25rem) 0 3rem;
-  color: var(--text-strong);
-}
-
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.panel-header h2 {
-  color: var(--text-strong);
-}
-
-.panel-subtitle {
-  color: var(--text-muted);
-  font-size: var(--text-meta);
-  margin-top: 0.25rem;
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.date-range {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.date-separator {
-  color: var(--text);
-}
-
-.date-input,
-.user-filter {
-  padding: 8px 12px;
-  border: 1px solid var(--border-input);
-  border-radius: 6px;
-  background: var(--bg-well);
-  color: var(--color-accent-ink);
-  font-size: 14px;
-}
-
-.user-filter {
-  min-width: 160px;
-}
-
-button {
-  border: 0;
-  border-radius: 6px;
-  padding: 8px 12px;
-  background: var(--border-input);
-  color: var(--color-accent-ink);
-  cursor: pointer;
-}
-
-button.primary {
-  background: var(--accent);
-}
-
-button:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-
-button:disabled,
-.date-input:disabled,
-.user-filter:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.validation-box {
-  background: var(--color-danger-soft);
-  border: 1px solid var(--color-danger);
-  color: var(--color-danger);
-  border-radius: var(--radius);
-  padding: 0.85rem 1rem;
-  margin-bottom: 1rem;
-}
-
-.overview-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
-  margin-bottom: 32px;
-}
-
-.stat-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  box-shadow: var(--shadow-card);
-}
-
-.stat-card.warning {
-  border-color: var(--color-danger);
-}
-
-.stat-mark {
-  min-width: 48px;
-  height: 48px;
-  border-radius: var(--radius);
-  background: var(--bg-well);
-  border: 1px solid var(--border);
-  display: grid;
-  place-items: center;
-  color: var(--color-accent-hover);
-  font-size: var(--text-meta);
-  font-weight: 600;
-}
-
-.stat-info {
-  flex: 1;
-}
-
-.stat-value {
-  font-size: 28px;
-  font-weight: 600;
-  color: var(--text-strong);
-  margin-bottom: 4px;
-}
-
-.stat-label {
-  font-size: 14px;
-  color: var(--text-faint);
-  margin-bottom: 4px;
-}
-
-.stat-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.insight-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.insight-item {
-  background: var(--bg-well);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1rem;
-  display: grid;
-  gap: 0.35rem;
-}
-
-.insight-item span {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-}
-
-.insight-item strong {
-  color: var(--text-strong);
-  font-size: 1rem;
-  overflow-wrap: anywhere;
-}
-
-.chart-section, .table-section, .info-section, .failure-section {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 24px;
-  margin-bottom: 24px;
-  color: var(--text-strong);
-  box-shadow: var(--shadow-card);
-}
-
-.table-section {
-  overflow-x: auto;
-}
-
-.chart-section h3, .table-section h3, .info-section h3, .failure-section h3 {
-  margin: 0 0 16px 0;
-  font-size: 18px;
-  color: var(--text-strong);
-}
-
-.chart-legend {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 16px;
-  font-size: 14px;
-  color: var(--text-faint);
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 2px;
-}
-
-.dot.success { background: var(--color-success); }
-.dot.failed { background: var(--color-danger); }
-.dot.already { background: var(--color-warning); }
-
-.bar-chart {
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-  height: 200px;
-  padding: 16px;
-  background: var(--bg-well);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow-x: auto;
-}
-
-.bar-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-width: 40px;
-}
-
-.bar-stack {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
-  height: 140px;
-  width: 32px;
-  gap: 2px;
-}
-
-.bar {
-  width: 100%;
-  border-radius: 2px 2px 0 0;
-  transition: opacity var(--dur-short) var(--ease-out);
-  cursor: default;
-  min-height: 2px;
-}
-
-.bar:hover {
-  opacity: 0.8;
-}
-
-.bar-group:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 4px;
-  border-radius: 4px;
-}
-
-.bar.success { background: var(--color-success); }
-.bar.failed { background: var(--color-danger); }
-.bar.already { background: var(--color-warning); }
-
-.bar-label {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  margin-top: 8px;
-  white-space: nowrap;
-}
-
-.bar-value {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--color-ink-2);
-  margin-top: 4px;
-}
-
-.bar-rate {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-}
-
-.stats-table {
-  width: 100%;
-  min-width: 720px;
-  border-collapse: collapse;
-  color: var(--color-ink-2);
-}
-
-.stats-table th {
-  background: var(--bg-app);
-  padding: 12px;
-  text-align: left;
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text-strong);
-  border-bottom: 1px solid var(--border-strong);
-}
-
-.stats-table td {
-  padding: 12px;
-  border-bottom: 1px solid var(--border);
-  font-size: 14px;
-  color: var(--text-faint);
-}
-
-.stats-table tbody tr:hover {
-  background: var(--bg-app);
-}
-
-.success-text {
-  color: var(--color-success);
-  font-weight: 600;
-}
-
-.failed-text {
-  color: var(--color-danger);
-  font-weight: 600;
-}
-
-.badge {
-  display: inline-block;
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: var(--color-accent-soft);
-  color: var(--color-accent-hover);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.rate-badge {
-  display: inline-block;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.rate-excellent { background: var(--success-soft); color: var(--color-success); }
-.rate-good { background: var(--color-warning-soft); color: var(--color-warning); }
-.rate-fair { background: var(--color-warning-soft); color: var(--color-warning); }
-.rate-poor { background: var(--danger-soft); color: var(--color-danger); }
-
-.failure-list {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.failure-item {
-  background: var(--bg-well);
-  border: 1px solid var(--border);
-  border: 1px solid var(--danger);
-  border-radius: var(--radius);
-  padding: 0.95rem;
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.failure-main {
-  min-width: 0;
-}
-
-.failure-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.35rem;
-}
-
-.failure-title strong {
-  color: var(--text-strong);
-  overflow-wrap: anywhere;
-}
-
-.owner-tag {
-  color: var(--text-faint);
-  background: var(--color-paper-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-pill);
-  padding: 0.15rem 0.5rem;
-  font-size: var(--text-xs);
-}
-
-.failure-message {
-  color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 760px;
-}
-
-.info-text {
-  font-size: 16px;
-  margin-bottom: 12px;
-  color: var(--text-faint);
-}
-
-.info-text strong {
-  font-size: 20px;
-  color: var(--color-accent-hover);
-}
-
-.empty {
-  text-align: center;
-  padding: 40px;
-  color: var(--text-muted);
-}
-
-.muted {
-  color: var(--text-muted);
-  font-size: 14px;
-}
-
-@media (max-width: 768px) {
-  .statistics-panel { padding: 1rem; }
-  .toolbar { justify-content: flex-start; }
-  .date-range,
-  .date-input,
-  .user-filter { width: 100%; }
-  .date-range { flex-direction: column; align-items: stretch; }
-  .date-range .date-input { width: 100%; }
-  .date-separator { text-align: center; }
-  .date-range button { flex: 1; width: 100%; }
-  .overview-grid { grid-template-columns: 1fr; }
-  .insight-grid { grid-template-columns: 1fr; }
-  .failure-item { display: grid; }
-  .failure-item button { width: 100%; }
-  .failure-message { white-space: normal; max-width: none; }
-  .stats-table { min-width: 0; }
-  .stats-table thead { display: none; }
-  .stats-table,
-  .stats-table tbody,
-  .stats-table tr,
-  .stats-table td { display: block; width: 100%; }
-  .stats-table tr { padding: var(--space-xs) 0; border-bottom: 1px solid var(--color-rule); }
-  .stats-table td { display: grid; grid-template-columns: minmax(5rem, 0.7fr) minmax(0, 1fr); gap: var(--space-sm); padding: var(--space-2xs) 0; text-align: end; }
-  .stats-table td::before { content: attr(data-label); color: var(--color-muted); text-align: start; font-weight: 500; }
-}
-</style>
+<style scoped src="./StatisticsPanel.css"></style>

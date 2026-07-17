@@ -1,5 +1,5 @@
 <template>
-  <div id="app" ref="appRoot">
+  <div id="app">
     <a class="skip-link" href="#main-content">跳到主要内容</a>
 
     <!-- 离线提示条 -->
@@ -124,9 +124,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted, watch, type Component } from 'vue'
-import { gsap } from 'gsap'
-import { ScrollTrigger } from 'gsap/ScrollTrigger'
+import { ref, computed, nextTick, onMounted, onUnmounted, type Component } from 'vue'
 import AccountPanel from './components/AccountPanel.vue'
 import CheckinRunsPanel from './components/CheckinRunsPanel.vue'
 import StatisticsPanel from './components/StatisticsPanel.vue'
@@ -136,8 +134,6 @@ import AdminUserPanel from './components/AdminUserPanel.vue'
 import { AUTH_EXPIRED_EVENT, apiUrl, request, responseData } from './utils/api'
 import { showToast } from './utils/toast'
 
-gsap.registerPlugin(ScrollTrigger)
-const motionAllowed = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
 interface AppUser {
   id: string
   username: string
@@ -187,14 +183,9 @@ const serverOk = ref<boolean | null>(null)
 const serverTime = ref('')
 const isOnline = ref(navigator.onLine)
 const panelRegion = ref<HTMLElement | null>(null)
-const appRoot = ref<HTMLElement | null>(null)
 let serverTimeOffset = 0 // 服务器时间与本地时间的差值（毫秒）
 let hoverTimer: ReturnType<typeof setInterval> | null = null
 let serverTimeSyncTimer: ReturnType<typeof setInterval> | null = null
-let loginMotionContext: gsap.Context | null = null
-let panelMotionContext: gsap.Context | null = null
-let panelObserver: MutationObserver | null = null
-let panelRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const isAdmin = computed(() => {
   return currentUser.value?.role === 'ADMIN' || currentUser.value?.role === 'SUPER_ADMIN'
@@ -235,83 +226,6 @@ const selectView = (view: ViewName) => {
   if (currentView.value === view) return
   currentView.value = view
   void nextTick(() => panelRegion.value?.focus())
-}
-
-const animateLogin = async () => {
-  await nextTick()
-  if (!motionAllowed || !appRoot.value || isLoggedIn.value) return
-  loginMotionContext?.revert()
-  loginMotionContext = gsap.context(() => {
-    const intro = appRoot.value?.querySelector('.login-intro')
-    const form = appRoot.value?.querySelector('.login-form')
-    if (!intro || !form) return
-    gsap.from([intro, form], {
-      opacity: 0,
-      y: 24,
-      duration: 0.8,
-      stagger: 0.12,
-      ease: 'power3.out',
-      clearProps: 'transform',
-    })
-    gsap.from('.login-copy h1', {
-      x: -18,
-      opacity: 0,
-      duration: 0.9,
-      delay: 0.14,
-      ease: 'power3.out',
-    })
-  }, appRoot.value)
-}
-
-const animatePanel = async () => {
-  await nextTick()
-  if (!motionAllowed || !appRoot.value || !isLoggedIn.value || !panelRegion.value) return
-  panelObserver?.disconnect()
-  if (panelRefreshTimer) clearTimeout(panelRefreshTimer)
-  panelMotionContext?.revert()
-  panelMotionContext = gsap.context(() => {
-    const panel = panelRegion.value
-    if (!panel) return
-
-    const cards = gsap.utils.toArray<HTMLElement>(
-      '.account-card, .run-card, .summary-card, .stat-card, .insight-item, .notification-card, .settings-form, .chart-section, .table-section, .failure-section, .info-section, .user-card'
-    )
-    if (cards.length) {
-      gsap.set(cards, { opacity: 0, y: 18 })
-      ScrollTrigger.batch(cards, {
-        interval: 0.08,
-        batchMax: 10,
-        onEnter: (batch) => gsap.to(batch, { opacity: 1, y: 0, duration: 0.62, stagger: 0.06, ease: 'power3.out', overwrite: true }),
-        onEnterBack: (batch) => gsap.to(batch, { opacity: 1, y: 0, duration: 0.48, stagger: 0.04, ease: 'power2.out', overwrite: true }),
-      })
-    }
-
-    const heading = appRoot.value?.querySelector('.workspace-heading')
-    if (heading) {
-      gsap.to(heading, {
-        opacity: 0.55,
-        y: -10,
-        ease: 'none',
-        scrollTrigger: {
-          trigger: panel,
-          start: 'top top+=96',
-          end: '+=320',
-          scrub: true,
-        },
-      })
-    }
-  }, panelRegion.value)
-
-  panelObserver = new MutationObserver((mutations) => {
-    if (!mutations.some((mutation) => mutation.addedNodes.length > 0)) return
-    if (panelRefreshTimer) clearTimeout(panelRefreshTimer)
-    panelRefreshTimer = setTimeout(() => {
-      panelRefreshTimer = null
-      void animatePanel()
-    }, 120)
-  })
-  panelObserver.observe(panelRegion.value, { childList: true, subtree: true })
-  ScrollTrigger.refresh()
 }
 
 const login = async () => {
@@ -444,20 +358,6 @@ onMounted(() => {
   window.addEventListener('online', handleOnline)
   window.addEventListener('offline', handleOffline)
   window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
-  void animateLogin()
-})
-
-watch([isLoggedIn, authChecking], ([loggedIn, checking]) => {
-  if (checking) return
-  if (loggedIn) {
-    void animatePanel()
-    return
-  }
-  void animateLogin()
-})
-
-watch(currentView, () => {
-  if (isLoggedIn.value) void animatePanel()
 })
 
 onUnmounted(() => {
@@ -467,10 +367,6 @@ onUnmounted(() => {
   window.removeEventListener('online', handleOnline)
   window.removeEventListener('offline', handleOffline)
   window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
-  loginMotionContext?.revert()
-  panelMotionContext?.revert()
-  panelObserver?.disconnect()
-  if (panelRefreshTimer) clearTimeout(panelRefreshTimer)
 })
 </script>
 

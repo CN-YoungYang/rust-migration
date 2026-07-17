@@ -34,9 +34,6 @@ pub struct StatisticsResponse {
     /// 站点统计
     #[serde(rename = "siteStats")]
     site_stats: Vec<SiteStats>,
-    /// 余额变化趋势（最近30天）
-    #[serde(rename = "balanceTrend")]
-    balance_trend: Vec<BalanceTrend>,
     /// 最近失败记录
     #[serde(rename = "recentFailures")]
     recent_failures: Vec<RecentFailure>,
@@ -53,12 +50,24 @@ pub struct Overview {
     /// 今日签到成功数
     #[serde(rename = "todaySuccess")]
     today_success: i64,
+    /// 今日已签到数
+    #[serde(rename = "todayAlreadyChecked")]
+    today_already_checked: i64,
     /// 今日签到失败数
     #[serde(rename = "todayFailed")]
     today_failed: i64,
+    /// 今日等待执行数
+    #[serde(rename = "todayPending")]
+    today_pending: i64,
+    /// 今日总执行数
+    #[serde(rename = "todayTotal")]
+    today_total: i64,
     /// 总签到次数（时间范围内）
     #[serde(rename = "totalRuns")]
     total_runs: i64,
+    /// 已完成签到次数（用于判断成功率是否有样本）
+    #[serde(rename = "completedRuns")]
+    completed_runs: i64,
     /// 签到成功率（时间范围内）
     #[serde(rename = "successRate")]
     success_rate: f64,
@@ -78,6 +87,8 @@ pub struct DailyStats {
     /// 已签到次数（包含 already_checked）
     #[serde(rename = "alreadyChecked")]
     already_checked: i64,
+    /// 等待执行次数
+    pending: i64,
     /// 总次数
     total: i64,
     /// 成功率
@@ -98,22 +109,19 @@ pub struct SiteStats {
     total_runs: i64,
     /// 成功次数
     success: i64,
+    /// 已签到次数
+    #[serde(rename = "alreadyChecked")]
+    already_checked: i64,
     /// 失败次数
     failed: i64,
+    /// 等待执行次数
+    pending: i64,
     /// 成功率
     #[serde(rename = "successRate")]
     success_rate: f64,
     /// 平均响应时间（毫秒）
     #[serde(rename = "avgDuration")]
-    avg_duration: f64,
-}
-
-#[derive(Serialize)]
-pub struct BalanceTrend {
-    /// 日期 (YYYY-MM-DD)
-    date: String,
-    /// 总余额（美元，500000 quota = $1）
-    balance: f64,
+    avg_duration: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -222,16 +230,12 @@ pub async fn get_statistics(
     let site_stats =
         calculate_site_stats(&state.db, owner_id, start_datetime, end_datetime).await?;
 
-    // 计算余额趋势（最近30天）
-    let balance_trend = calculate_balance_trend(&state.db, owner_id).await?;
-
     let recent_failures = calculate_recent_failures(&state.db, owner_id).await?;
 
     Ok(crate::routes::data(StatisticsResponse {
         overview,
         daily_trend,
         site_stats,
-        balance_trend,
         recent_failures,
     }))
 }
@@ -259,29 +263,14 @@ async fn calculate_overview(
 
     // 今日签到统计
     let today_start = local_day_start(Local::now().date_naive())?;
+    let today_end = local_day_end(Local::now().date_naive())?;
 
     let sql = format!(
         "SELECT
-            SUM(CASE WHEN status IN ('success', 'already_checked') THEN 1 ELSE 0 END) as success,
-            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
-         FROM CheckinRun cr
-         JOIN CheckinAccount ca ON cr.accountId = ca.id
-         WHERE cr.createdAt >= ?{}",
-        if owner_id.is_some() {
-            " AND ca.ownerId = ?"
-        } else {
-            ""
-        }
-    );
-    let mut query = sqlx::query_as::<_, (Option<i64>, Option<i64>)>(&sql).bind(today_start);
-    if let Some(owner_id) = owner_id {
-        query = query.bind(owner_id);
-    }
-    let (today_success, today_failed) = query.fetch_one(db).await?;
-
-    // 总签到次数和成功率（请求时间范围内）
-    let sql = format!(
-        "SELECT COUNT(*) as total, SUM(CASE WHEN status IN ('success', 'already_checked') THEN 1 ELSE 0 END) as success
+            SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success,
+            SUM(CASE WHEN status = 'already_checked' THEN 1 ELSE 0 END) as already_checked,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending
          FROM CheckinRun cr
          JOIN CheckinAccount ca ON cr.accountId = ca.id
          WHERE cr.createdAt >= ? AND cr.createdAt <= ?{}",
@@ -291,15 +280,44 @@ async fn calculate_overview(
             ""
         }
     );
-    let mut query = sqlx::query_as::<_, (i64, Option<i64>)>(&sql)
+    let mut query = sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>, Option<i64>)>(&sql)
+        .bind(today_start)
+        .bind(today_end);
+    if let Some(owner_id) = owner_id {
+        query = query.bind(owner_id);
+    }
+    let (today_success, today_already_checked, today_failed, today_pending) =
+        query.fetch_one(db).await?;
+    let today_success = today_success.unwrap_or(0);
+    let today_already_checked = today_already_checked.unwrap_or(0);
+    let today_failed = today_failed.unwrap_or(0);
+    let today_pending = today_pending.unwrap_or(0);
+
+    // 总签到次数和成功率（请求时间范围内）
+    let sql = format!(
+        "SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN status IN ('success', 'already_checked', 'failed') THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN status IN ('success', 'already_checked') THEN 1 ELSE 0 END) as success
+         FROM CheckinRun cr
+         JOIN CheckinAccount ca ON cr.accountId = ca.id
+         WHERE cr.createdAt >= ? AND cr.createdAt <= ?{}",
+        if owner_id.is_some() {
+            " AND ca.ownerId = ?"
+        } else {
+            ""
+        }
+    );
+    let mut query = sqlx::query_as::<_, (i64, Option<i64>, Option<i64>)>(&sql)
         .bind(start)
         .bind(end);
     if let Some(owner_id) = owner_id {
         query = query.bind(owner_id);
     }
-    let (total_runs, success_count) = query.fetch_one(db).await?;
-    let success_rate = if total_runs > 0 {
-        success_count.unwrap_or(0) as f64 / total_runs as f64 * 100.0
+    let (total_runs, completed_runs, success_count) = query.fetch_one(db).await?;
+    let completed_runs = completed_runs.unwrap_or(0);
+    let success_rate = if completed_runs > 0 {
+        success_count.unwrap_or(0) as f64 / completed_runs as f64 * 100.0
     } else {
         0.0
     };
@@ -319,9 +337,13 @@ async fn calculate_overview(
     Ok(Overview {
         total_accounts,
         enabled_accounts,
-        today_success: today_success.unwrap_or(0),
-        today_failed: today_failed.unwrap_or(0),
+        today_success,
+        today_already_checked,
+        today_failed,
+        today_pending,
+        today_total: today_success + today_already_checked + today_failed + today_pending,
         total_runs,
+        completed_runs,
         success_rate,
         total_balance,
     })
@@ -339,6 +361,7 @@ async fn calculate_daily_trend(
             SUM(CASE WHEN cr.status = 'success' THEN 1 ELSE 0 END) as success,
             SUM(CASE WHEN cr.status = 'failed' THEN 1 ELSE 0 END) as failed,
             SUM(CASE WHEN cr.status = 'already_checked' THEN 1 ELSE 0 END) as already_checked,
+            SUM(CASE WHEN cr.status = 'pending' THEN 1 ELSE 0 END) as pending,
             COUNT(*) as total
          FROM CheckinRun cr
          JOIN CheckinAccount ca ON cr.accountId = ca.id
@@ -352,7 +375,7 @@ async fn calculate_daily_trend(
         }
     );
 
-    let mut query = sqlx::query_as::<_, (String, i64, i64, i64, i64)>(&sql)
+    let mut query = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64)>(&sql)
         .bind(start)
         .bind(end);
     if let Some(owner_id) = owner_id {
@@ -363,9 +386,10 @@ async fn calculate_daily_trend(
 
     Ok(rows
         .into_iter()
-        .map(|(date, success, failed, already_checked, total)| {
-            let success_rate = if total > 0 {
-                (success + already_checked) as f64 / total as f64 * 100.0
+        .map(|(date, success, failed, already_checked, pending, total)| {
+            let completed = success + already_checked + failed;
+            let success_rate = if completed > 0 {
+                (success + already_checked) as f64 / completed as f64 * 100.0
             } else {
                 0.0
             };
@@ -374,6 +398,7 @@ async fn calculate_daily_trend(
                 success,
                 failed,
                 already_checked,
+                pending,
                 total,
                 success_rate,
             }
@@ -392,9 +417,14 @@ async fn calculate_site_stats(
             ca.siteType,
             COUNT(DISTINCT ca.id) as accountCount,
             COUNT(cr.id) as totalRuns,
-            SUM(CASE WHEN cr.status IN ('success', 'already_checked') THEN 1 ELSE 0 END) as success,
+            SUM(CASE WHEN cr.status = 'success' THEN 1 ELSE 0 END) as success,
+            SUM(CASE WHEN cr.status = 'already_checked' THEN 1 ELSE 0 END) as already_checked,
             SUM(CASE WHEN cr.status = 'failed' THEN 1 ELSE 0 END) as failed,
-            AVG(COALESCE(cr.durationMs, 0)) as avgDuration
+            SUM(CASE WHEN cr.status = 'pending' THEN 1 ELSE 0 END) as pending,
+            AVG(CASE
+                WHEN cr.status IN ('success', 'already_checked', 'failed')
+                THEN cr.durationMs
+            END) as avgDuration
          FROM CheckinAccount ca
          LEFT JOIN CheckinRun cr ON ca.id = cr.accountId
             AND cr.createdAt >= ? AND cr.createdAt <= ?
@@ -408,10 +438,21 @@ async fn calculate_site_stats(
         }
     );
 
-    let mut query =
-        sqlx::query_as::<_, (String, i64, i64, Option<i64>, Option<i64>, Option<f64>)>(&sql)
-            .bind(start)
-            .bind(end);
+    let mut query = sqlx::query_as::<
+        _,
+        (
+            String,
+            i64,
+            i64,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<f64>,
+        ),
+    >(&sql)
+    .bind(start)
+    .bind(end);
     if let Some(owner_id) = owner_id {
         query = query.bind(owner_id);
     }
@@ -421,11 +462,23 @@ async fn calculate_site_stats(
     Ok(rows
         .into_iter()
         .map(
-            |(site_type, account_count, total_runs, success, failed, avg_duration)| {
+            |(
+                site_type,
+                account_count,
+                total_runs,
+                success,
+                already_checked,
+                failed,
+                pending,
+                avg_duration,
+            )| {
                 let success = success.unwrap_or(0);
+                let already_checked = already_checked.unwrap_or(0);
                 let failed = failed.unwrap_or(0);
-                let success_rate = if total_runs > 0 {
-                    success as f64 / total_runs as f64 * 100.0
+                let pending = pending.unwrap_or(0);
+                let completed = success + already_checked + failed;
+                let success_rate = if completed > 0 {
+                    (success + already_checked) as f64 / completed as f64 * 100.0
                 } else {
                     0.0
                 };
@@ -434,43 +487,15 @@ async fn calculate_site_stats(
                     account_count,
                     total_runs,
                     success,
+                    already_checked,
                     failed,
+                    pending,
                     success_rate,
-                    avg_duration: avg_duration.unwrap_or(0.0),
+                    avg_duration,
                 }
             },
         )
         .collect())
-}
-
-async fn calculate_balance_trend(
-    db: &sqlx::SqlitePool,
-    owner_id: Option<&str>,
-) -> Result<Vec<BalanceTrend>> {
-    // 由于没有历史余额记录，这里返回当前余额快照
-    // 未来可以考虑在每次签到后记录余额变化到单独的表
-    let owner_filter = if owner_id.is_some() {
-        " AND ownerId = ?"
-    } else {
-        ""
-    };
-    let sql = format!(
-        "SELECT SUM(COALESCE(lastBalance, 0)) FROM CheckinAccount WHERE enabled = 1{}",
-        owner_filter
-    );
-    let mut query = sqlx::query_as::<_, (Option<f64>,)>(&sql);
-    if let Some(owner_id) = owner_id {
-        query = query.bind(owner_id);
-    }
-    let (total_quota,) = query.fetch_one(db).await?;
-    let balance = total_quota.unwrap_or(0.0) / 500000.0;
-
-    // 返回今天的余额快照
-    let today = Local::now().format("%Y-%m-%d").to_string();
-    Ok(vec![BalanceTrend {
-        date: today,
-        balance,
-    }])
 }
 
 async fn calculate_recent_failures(
@@ -536,7 +561,7 @@ async fn calculate_recent_failures(
 
 #[cfg(test)]
 mod tests {
-    use super::{calculate_recent_failures, resolve_owner_filter};
+    use super::{calculate_recent_failures, calculate_site_stats, resolve_owner_filter};
     use crate::{error::AppError, models::AppUser};
     use chrono::Utc;
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
@@ -755,5 +780,43 @@ mod tests {
         assert!(failures
             .iter()
             .all(|failure| failure.account_id == "account-a"));
+    }
+
+    #[tokio::test]
+    async fn site_statistics_keep_success_and_already_checked_separate() {
+        let pool = test_pool().await;
+        insert_user(&pool, "user-a", "alice").await;
+        insert_account(&pool, "account-a", "user-a", "Alice API").await;
+
+        let now = Utc::now();
+        insert_run(&pool, "run-success", "account-a", "success", "ok", now).await;
+        insert_run(
+            &pool,
+            "run-already",
+            "account-a",
+            "already_checked",
+            "already",
+            now,
+        )
+        .await;
+        insert_run(&pool, "run-pending", "account-a", "pending", "wait", now).await;
+        insert_run(&pool, "run-failed", "account-a", "failed", "fail", now).await;
+
+        let stats = calculate_site_stats(
+            &pool,
+            Some("user-a"),
+            now - chrono::Duration::minutes(1),
+            now + chrono::Duration::minutes(1),
+        )
+        .await
+        .expect("site statistics should load");
+
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].total_runs, 4);
+        assert_eq!(stats[0].success, 1);
+        assert_eq!(stats[0].already_checked, 1);
+        assert_eq!(stats[0].pending, 1);
+        assert_eq!(stats[0].failed, 1);
+        assert!((stats[0].success_rate - 66.666_666_666_7).abs() < 0.000_001);
     }
 }
