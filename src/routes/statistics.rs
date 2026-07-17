@@ -208,7 +208,7 @@ pub async fn get_statistics(
             "开始日期不能晚于结束日期".into(),
         ));
     }
-    if (end_date - start_date).num_days() > 180 {
+    if (end_date - start_date).num_days() >= 180 {
         return Err(crate::error::AppError::Validation(
             "统计查询范围不能超过 180 天".into(),
         ));

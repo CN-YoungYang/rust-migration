@@ -1,9 +1,9 @@
 <template>
-  <section class="statistics-panel">
+  <section ref="panelRoot" class="statistics-panel">
     <div class="panel-header">
       <div>
         <h2>数据统计</h2>
-        <p class="panel-subtitle">{{ selectedUserName }} · {{ rangeLabel }}</p>
+        <p class="panel-subtitle">{{ resultUserName }} · {{ resultRangeLabel }}</p>
       </div>
       <div class="toolbar">
         <label v-if="isAdmin" class="filter-field">
@@ -20,7 +20,7 @@
           <label class="filter-field"><span>开始日期</span><input v-model="startDate" type="date" class="date-input" :disabled="loading" /></label>
           <span class="date-separator">至</span>
           <label class="filter-field"><span>结束日期</span><input v-model="endDate" type="date" class="date-input" :disabled="loading" /></label>
-          <button class="primary" @click="loadStatistics" :disabled="loading || dateRangeInvalid">
+          <button class="primary" @click="loadStatistics" :disabled="loading || dateRangeInvalid || dateRangeTooLong">
             {{ loading ? '查询中...' : '查询' }}
           </button>
           <button v-for="days in [7, 30, 90]" :key="days" @click="applyRange(days)" :disabled="loading" :aria-pressed="isActiveRange(days)" :class="{ selected: isActiveRange(days) }">{{ days }}天</button>
@@ -29,6 +29,7 @@
     </div>
 
     <div v-if="dateRangeInvalid" class="validation-box" role="alert">开始日期不能晚于结束日期。</div>
+    <div v-else-if="dateRangeTooLong" class="validation-box" role="alert">统计查询范围不能超过180天。</div>
 
     <p v-if="loading && !statistics" class="empty" role="status" aria-live="polite">正在加载统计数据...</p>
     <div v-if="loadError" class="load-error" role="alert">
@@ -47,7 +48,7 @@
         <div :class="{ warning: statistics.overview.todayFailed > 0 }">
           <dt>区间成功率</dt>
           <dd>{{ statistics.overview.completedRuns > 0 ? statistics.overview.successRate.toFixed(1) : '—' }}<small v-if="statistics.overview.completedRuns > 0">%</small></dd>
-          <p>共执行 {{ statistics.overview.totalRuns }} 次</p>
+          <p>按已完成记录计算 · 总执行 {{ statistics.overview.totalRuns }} 次</p>
         </div>
         <div>
           <dt>启用账户</dt>
@@ -84,10 +85,16 @@
                 type="button"
                 class="bar-group"
                 :class="{ selected: selectedTrendDay?.date === day.date }"
+                :data-trend-date="day.date"
+                :tabindex="selectedTrendDay?.date === day.date ? 0 : -1"
                 :aria-label="trendAriaLabel(day)"
                 :aria-pressed="selectedTrendDay?.date === day.date"
                 @focus="activeTrendDate = day.date"
                 @click="activeTrendDate = day.date"
+                @keydown.left.prevent="moveTrendFocus(day.date, -1)"
+                @keydown.right.prevent="moveTrendFocus(day.date, 1)"
+                @keydown.home.prevent="moveTrendFocus(day.date, -dailyTrendSeries.length)"
+                @keydown.end.prevent="moveTrendFocus(day.date, dailyTrendSeries.length)"
               >
                 <div class="bar-stack" aria-hidden="true">
                   <div v-if="day.success > 0" class="bar success" :style="{ height: getTrendHeight(day.success) + '%' }"></div>
@@ -117,7 +124,7 @@
         </div>
       </div>
 
-      <div class="table-section" tabindex="0" aria-label="站点统计表，可横向滚动">
+      <div class="table-section">
         <h3>站点统计</h3>
         <table v-if="statistics.siteStats.length > 0" class="stats-table">
           <caption class="sr-only">按站点类型汇总的账户数、签到结果、成功率和平均耗时</caption>
@@ -187,7 +194,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, nextTick, onMounted, watch } from 'vue'
 import { apiUrl, authHeaders, request, responseData } from '../utils/api'
 import { showToast } from '../utils/toast'
 import type { CurrentUser } from '../types'
@@ -251,20 +258,34 @@ const endDate = ref('')
 const selectedUserId = ref('')
 const activeTrendDate = ref('')
 const loadError = ref('')
+const panelRoot = ref<HTMLElement | null>(null)
+const appliedQuery = ref({ startDate: '', endDate: '', userName: '' })
 let requestSeq = 0
 
 const selectedUserName = computed(() => {
-  if (!props.isAdmin || !selectedUserId.value) return '全部用户'
+  if (!props.isAdmin) return props.currentUser?.username ? `${props.currentUser.username}（我的数据）` : '我的数据'
+  if (!selectedUserId.value) return '全部用户'
   return allUsers.value.find((user) => user.id === selectedUserId.value)?.username || '指定用户'
 })
 
-const rangeLabel = computed(() => {
+const inputRangeLabel = computed(() => {
   if (!startDate.value || !endDate.value) return '默认时间范围'
   return `${startDate.value} 至 ${endDate.value}`
 })
 
+const resultUserName = computed(() => statistics.value ? appliedQuery.value.userName : selectedUserName.value)
+const resultRangeLabel = computed(() => {
+  if (!statistics.value) return inputRangeLabel.value
+  return `${appliedQuery.value.startDate} 至 ${appliedQuery.value.endDate}`
+})
+
 const dateRangeInvalid = computed(() => {
   return Boolean(startDate.value && endDate.value && startDate.value > endDate.value)
+})
+
+const dateRangeTooLong = computed(() => {
+  if (!startDate.value || !endDate.value || dateRangeInvalid.value) return false
+  return inclusiveDayCount(startDate.value, endDate.value) > 180
 })
 
 const enabledRatio = computed(() => {
@@ -277,11 +298,11 @@ const maxDailyTotal = computed(() => {
 })
 
 const dailyTrendSeries = computed<Statistics['dailyTrend']>(() => {
-  if (!statistics.value || !startDate.value || !endDate.value) return []
+  if (!statistics.value || !appliedQuery.value.startDate || !appliedQuery.value.endDate) return []
   const byDate = new Map(statistics.value.dailyTrend.map((day) => [day.date, day]))
   const series: Statistics['dailyTrend'] = []
-  const cursor = new Date(`${startDate.value}T00:00:00`)
-  const end = new Date(`${endDate.value}T00:00:00`)
+  const cursor = new Date(`${appliedQuery.value.startDate}T00:00:00`)
+  const end = new Date(`${appliedQuery.value.endDate}T00:00:00`)
 
   while (cursor <= end) {
     const date = formatDateInput(cursor)
@@ -340,6 +361,12 @@ function isActiveRange(days: number): boolean {
   return endDate.value === today && Math.round((end.getTime() - start.getTime()) / 86400000) + 1 === days
 }
 
+function inclusiveDayCount(start: string, end: string): number {
+  const startDateTime = new Date(`${start}T00:00:00`)
+  const endDateTime = new Date(`${end}T00:00:00`)
+  return Math.round((endDateTime.getTime() - startDateTime.getTime()) / 86400000) + 1
+}
+
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -348,8 +375,9 @@ function formatDateInput(date: Date): string {
 }
 
 function formatDate(dateStr: string): string {
-  const [, month, day] = dateStr.split('-')
-  return `${month}/${day}`
+  const [year, month, day] = dateStr.split('-')
+  const crossesYear = appliedQuery.value.startDate.slice(0, 4) !== appliedQuery.value.endDate.slice(0, 4)
+  return crossesYear ? `${year}/${month}/${day}` : `${month}/${day}`
 }
 
 function getTrendHeight(value: number): number {
@@ -359,6 +387,18 @@ function getTrendHeight(value: number): number {
 
 function completedCount(item: { success: number; alreadyChecked: number; failed: number }): number {
   return item.success + item.alreadyChecked + item.failed
+}
+
+function moveTrendFocus(date: string, offset: number) {
+  const currentIndex = dailyTrendSeries.value.findIndex((day) => day.date === date)
+  if (currentIndex < 0) return
+  const nextIndex = Math.max(0, Math.min(dailyTrendSeries.value.length - 1, currentIndex + offset))
+  const nextDate = dailyTrendSeries.value[nextIndex]?.date
+  if (!nextDate) return
+  activeTrendDate.value = nextDate
+  void nextTick(() => {
+    panelRoot.value?.querySelector<HTMLElement>(`[data-trend-date="${nextDate}"]`)?.focus()
+  })
 }
 
 function trendAriaLabel(day: Statistics['dailyTrend'][number]): string {
@@ -378,6 +418,15 @@ async function loadStatistics() {
     showToast('开始日期不能晚于结束日期', 'error')
     return
   }
+  if (dateRangeTooLong.value) {
+    showToast('统计查询范围不能超过180天', 'error')
+    return
+  }
+  const requestedQuery = {
+    startDate: startDate.value,
+    endDate: endDate.value,
+    userName: selectedUserName.value,
+  }
   const seq = ++requestSeq
   loadError.value = ''
   loading.value = true
@@ -392,6 +441,8 @@ async function loadStatistics() {
     const data = await responseData<Statistics>(response)
     if (seq === requestSeq) {
       statistics.value = data
+      appliedQuery.value = requestedQuery
+      activeTrendDate.value = data.dailyTrend.at(-1)?.date || requestedQuery.endDate
     }
   } catch (error) {
     if (seq === requestSeq) {

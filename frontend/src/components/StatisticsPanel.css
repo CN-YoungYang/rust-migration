@@ -336,7 +336,7 @@
   .failure-item button { width: auto; }
 }
 
-@media (min-width: 60rem) {
+@media (min-width: 75rem) {
   .stats-table { display: table; min-width: 45rem; }
   .stats-table thead { display: table-header-group; }
   .stats-table tbody { display: table-row-group; }

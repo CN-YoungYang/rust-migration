@@ -90,6 +90,14 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
+button.primary:focus-visible,
+.btn-primary:focus-visible,
+.btn-execute:focus-visible,
+.status-btn.active:focus-visible {
+  outline-color: var(--color-accent-ink);
+  box-shadow: 0 0 0 3px var(--color-focus);
+}
+
 /* ── 共享占位：空状态 / 加载态，组件可直接 class 复用 ── */
 .empty-state,
 .loading-state {
