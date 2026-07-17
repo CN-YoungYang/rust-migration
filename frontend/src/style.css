@@ -4,7 +4,7 @@
  */
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html { scroll-behavior: smooth; overflow-x: clip; }
+html { scroll-behavior: smooth; overflow-x: clip; scrollbar-gutter: stable; }
 ::selection { background: var(--accent-soft); color: var(--text-strong); }
 
 /* 暖白编辑式主题：低对比结构线、少量语义色、无重阴影。 */

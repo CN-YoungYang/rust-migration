@@ -200,8 +200,9 @@
       <p v-if="accounts.length === 0" class="empty" role="status">暂无账户，可使用右上角“新增账户”开始配置。</p>
     </div>
 
-    <div v-if="showForm" class="modal" role="presentation" @click.self="closeForm" @keydown.escape="closeForm">
-      <form v-focus-trap class="modal-content" role="dialog" aria-modal="true" aria-labelledby="account-form-title" tabindex="-1" @submit.prevent="submitForm">
+    <Teleport to="body">
+      <div v-if="showForm" class="modal" role="presentation" @click.self="closeForm" @keydown.escape="closeForm">
+        <form v-focus-trap class="modal-content" role="dialog" aria-modal="true" aria-labelledby="account-form-title" tabindex="-1" @submit.prevent="submitForm">
         <h3 id="account-form-title">{{ editingId ? '编辑账户' : '新增账户' }}</h3>
         <label>名称<input v-model="form.name" required /></label>
         <label>站点类型
@@ -235,11 +236,11 @@
           </button>
           <button type="button" @click="closeForm" :disabled="formSubmitting">取消</button>
         </div>
-      </form>
-    </div>
+        </form>
+      </div>
 
-    <div v-if="showImportDialog" class="modal" role="presentation" @click.self="closeImportDialog" @keydown.escape="closeImportDialog">
-      <div v-focus-trap class="modal-content import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title" tabindex="-1">
+      <div v-if="showImportDialog" class="modal" role="presentation" @click.self="closeImportDialog" @keydown.escape="closeImportDialog">
+        <div v-focus-trap class="modal-content import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title" tabindex="-1">
         <h3 id="import-dialog-title">批量导入账户</h3>
         <p class="muted">支持 CSV 格式，需包含 header 行</p>
 
@@ -281,8 +282,9 @@
             {{ importing ? '导入中...' : '开始导入' }}
           </button>
         </div>
+        </div>
       </div>
-    </div>
+    </Teleport>
   </section>
 </template>
 
@@ -1028,7 +1030,7 @@ button.ghost:hover:not(:disabled) { background: var(--bg-elevated); }
 button.danger { background: var(--color-danger-soft); color: var(--color-danger); }
 button.danger:hover:not(:disabled) { background: var(--color-danger-soft); }
 .empty { color: var(--color-muted); text-align: center; padding: 2rem; }
-.modal { position: fixed; inset: 0; background: var(--color-overlay); display: flex; align-items: center; justify-content: center; z-index: 20; padding: 1rem; }
+.modal { position: fixed; inset: 0; background: var(--color-overlay); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 1rem; }
 .modal-content { width: min(560px, 92vw); max-height: 90vh; overflow: auto; background: var(--bg-card); border: 1px solid var(--border-input); border-radius: var(--radius); padding: 1.5rem; display: grid; gap: .8rem; }
 .modal-content h3 { color: var(--text-strong); }
 label { display: grid; gap: .35rem; color: var(--text); }

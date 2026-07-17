@@ -7,8 +7,7 @@ export function confirmDialogKeyAction(key: string): ConfirmDialogKeyAction {
 }
 
 export function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {
-  const existing = Array.from(document.querySelectorAll('.toast'))
-  existing.slice(0, Math.max(0, existing.length - 2)).forEach((item) => item.remove())
+  document.querySelectorAll('.toast').forEach((item) => item.remove())
 
   const toast = document.createElement('div')
   toast.className = `toast toast-${type}`
@@ -26,10 +25,9 @@ export function showToast(message: string, type: 'success' | 'error' | 'info' = 
     padding: 0.85rem 1rem;
     border: 1px solid transparent;
     border-radius: var(--radius);
-    color: white;
+    color: var(--color-ink);
     font-weight: 500;
     z-index: 9999;
-    animation: slideIn 0.3s ease;
     max-width: 400px;
     width: max-content;
     word-break: break-word;
@@ -37,14 +35,17 @@ export function showToast(message: string, type: 'success' | 'error' | 'info' = 
   `
 
   if (type === 'success') {
-    toast.style.background = '#065f46'
-    toast.style.borderColor = '#10b981'
+    toast.style.background = 'var(--color-success-soft)'
+    toast.style.borderColor = 'var(--color-success)'
+    toast.style.color = 'var(--color-success)'
   } else if (type === 'error') {
-    toast.style.background = '#991b1b'
-    toast.style.borderColor = '#ef4444'
+    toast.style.background = 'var(--color-danger-soft)'
+    toast.style.borderColor = 'var(--color-danger)'
+    toast.style.color = 'var(--color-danger)'
   } else {
-    toast.style.background = '#1e40af'
-    toast.style.borderColor = '#3b82f6'
+    toast.style.background = 'var(--color-accent-soft)'
+    toast.style.borderColor = 'var(--color-accent)'
+    toast.style.color = 'var(--color-accent-hover)'
   }
 
   const text = document.createElement('span')
@@ -63,7 +64,7 @@ export function showToast(message: string, type: 'success' | 'error' | 'info' = 
     border: 0;
     border-radius: 4px;
     background: transparent;
-    color: white;
+    color: currentColor;
     font-size: 1.25rem;
     line-height: 1;
   `
@@ -72,13 +73,11 @@ export function showToast(message: string, type: 'success' | 'error' | 'info' = 
   const dismiss = () => {
     if (dismissed) return
     dismissed = true
-    toast.style.animation = 'slideOut 0.3s ease'
-    window.setTimeout(() => toast.remove(), 300)
+    toast.remove()
   }
 
   closeButton.addEventListener('click', dismiss)
   toast.append(text, closeButton)
-  document.body.appendChild(toast)
 
   if (window.innerWidth < 640) {
     toast.style.left = '16px'
@@ -86,6 +85,8 @@ export function showToast(message: string, type: 'success' | 'error' | 'info' = 
     toast.style.maxWidth = 'none'
     toast.style.width = 'auto'
   }
+
+  document.body.appendChild(toast)
 
   window.setTimeout(dismiss, type === 'error' ? 7000 : 4500)
 }
@@ -102,7 +103,7 @@ export function confirmAction(message: string): Promise<boolean> {
     overlay.style.cssText = `
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.72);
+      background: var(--color-overlay);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -137,12 +138,12 @@ export function confirmAction(message: string): Promise<boolean> {
     const cancelButton = document.createElement('button')
     cancelButton.type = 'button'
     cancelButton.textContent = '取消'
-    cancelButton.style.cssText = 'border: 0; border-radius: 6px; min-height: 40px; padding: 0.5rem 1rem; color: white; background: #475569; cursor: pointer;'
+    cancelButton.style.cssText = 'border: 1px solid var(--color-rule-strong); border-radius: var(--radius-input); min-height: 40px; padding: 0.5rem 1rem; color: var(--color-ink-2); background: var(--color-paper-3); cursor: pointer;'
 
     const okButton = document.createElement('button')
     okButton.type = 'button'
     okButton.textContent = '确认'
-    okButton.style.cssText = 'border: 0; border-radius: 6px; min-height: 40px; padding: 0.5rem 1rem; color: white; background: #b91c1c; cursor: pointer;'
+    okButton.style.cssText = 'border: 1px solid var(--color-accent); border-radius: var(--radius-input); min-height: 40px; padding: 0.5rem 1rem; color: var(--color-accent-ink); background: var(--color-accent); cursor: pointer;'
 
     const cleanup = (result: boolean) => {
       if (settled) return

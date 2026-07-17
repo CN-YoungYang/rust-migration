@@ -71,8 +71,9 @@
       </div>
     </div>
 
-    <div v-if="editingUser" class="modal" role="presentation" @click.self="editingUser = null" @keydown.escape="editingUser = null">
-      <div v-focus-trap class="modal-content" role="dialog" aria-modal="true" aria-labelledby="edit-user-title" tabindex="-1">
+    <Teleport to="body">
+      <div v-if="editingUser" class="modal" role="presentation" @click.self="editingUser = null" @keydown.escape="editingUser = null">
+        <div v-focus-trap class="modal-content" role="dialog" aria-modal="true" aria-labelledby="edit-user-title" tabindex="-1">
         <h3 id="edit-user-title">编辑用户</h3>
         <form @submit.prevent="updateUser">
           <div class="form-group">
@@ -110,8 +111,9 @@
             <button type="button" @click="editingUser = null" class="btn-cancel" :disabled="saving">取消</button>
           </div>
         </form>
+        </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -459,7 +461,7 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 2000;
 }
 
 .modal-content {
