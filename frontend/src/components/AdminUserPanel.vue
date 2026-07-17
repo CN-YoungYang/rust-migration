@@ -6,11 +6,11 @@
       <h3 id="create-user-title">创建新用户</h3>
       <div class="form-group">
         <label for="new-user-username">用户名</label>
-        <input id="new-user-username" v-model="newUser.username" type="text" autocomplete="username" required />
+        <input id="new-user-username" v-model="newUser.username" type="text" autocomplete="username" required :aria-invalid="createSubmitted && createUsernameInvalid" aria-describedby="create-user-error" />
       </div>
       <div class="form-group">
         <label for="new-user-password">密码（至少 8 位）</label>
-        <input id="new-user-password" v-model="newUser.password" type="password" autocomplete="new-password" required minlength="8" />
+        <input id="new-user-password" v-model="newUser.password" type="password" autocomplete="new-password" required minlength="8" :aria-invalid="createSubmitted && createPasswordInvalid" aria-describedby="create-user-error" />
       </div>
       <div class="form-group">
         <label for="new-user-role">角色</label>
@@ -32,6 +32,7 @@
       <button type="submit" class="btn-primary" :disabled="creating" :data-state="creating ? 'loading' : undefined">
         {{ creating ? '创建中...' : '创建用户' }}
       </button>
+      <p id="create-user-error" class="field-error-slot" :class="{ 'is-empty': !createErrorMessage }" :role="createErrorMessage ? 'alert' : undefined">{{ createErrorMessage || '\u00a0' }}</p>
     </form>
 
     <div class="user-list" :aria-busy="loading">
@@ -72,7 +73,7 @@
     </div>
 
     <Teleport to="body">
-      <div v-if="editingUser" class="modal" role="presentation" @click.self="editingUser = null" @keydown.escape="editingUser = null">
+      <div v-if="editingUser" class="modal" role="presentation" @click.self="closeEditModal" @keydown.escape="closeEditModal">
         <div v-focus-trap class="modal-content" role="dialog" aria-modal="true" aria-labelledby="edit-user-title" tabindex="-1">
         <h3 id="edit-user-title">编辑用户</h3>
         <form @submit.prevent="updateUser">
@@ -82,11 +83,11 @@
           </div>
           <div class="form-group">
             <label for="edit-user-password">新密码（留空则不修改，至少 8 位）</label>
-            <input id="edit-user-password" v-model="editingUser.password" type="password" autocomplete="new-password" minlength="8" />
+            <input id="edit-user-password" v-model="editingUser.password" type="password" autocomplete="new-password" minlength="8" :aria-invalid="editSubmitted && editPasswordInvalid" aria-describedby="edit-user-error" />
           </div>
           <div class="form-group">
             <label for="edit-user-role">角色</label>
-            <select id="edit-user-role" v-model="editingUser.role" required>
+            <select id="edit-user-role" v-model="editingUser.role" required :aria-invalid="editSubmitted && editRoleInvalid" aria-describedby="edit-user-error">
               <option value="USER">普通用户</option>
               <option v-if="isSuperAdmin()" value="ADMIN">管理员</option>
             </select>
@@ -108,8 +109,9 @@
             <button type="submit" class="btn-primary" :disabled="saving" :data-state="saving ? 'loading' : undefined">
               {{ saving ? '保存中...' : '保存' }}
             </button>
-            <button type="button" @click="editingUser = null" class="btn-cancel" :disabled="saving">取消</button>
+            <button type="button" @click="closeEditModal" class="btn-cancel" :disabled="saving">取消</button>
           </div>
+          <p id="edit-user-error" class="field-error-slot" :class="{ 'is-empty': !editErrorMessage }" :role="editErrorMessage ? 'alert' : undefined">{{ editErrorMessage || '\u00a0' }}</p>
         </form>
         </div>
       </div>
@@ -118,8 +120,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { apiUrl, authHeaders, request, responseData } from '../utils/api'
+import { computed, ref, onMounted } from 'vue'
+import { apiUrl, request, responseData } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
 import { vFocusTrap } from '../utils/dialogFocus'
 import type { CurrentUser } from '../types'
@@ -143,6 +145,8 @@ const users = ref<User[]>([])
 const loading = ref(false)
 const creating = ref(false)
 const saving = ref(false)
+const createSubmitted = ref(false)
+const editSubmitted = ref(false)
 const newUser = ref({
   username: '',
   password: '',
@@ -151,6 +155,24 @@ const newUser = ref({
   note: ''
 })
 const editingUser = ref<User | null>(null)
+
+const createErrorMessage = computed(() => {
+  if (!createSubmitted.value) return ''
+  if (!newUser.value.username.trim()) return '请输入用户名。'
+  if (newUser.value.password.length < 8) return '密码至少需要 8 位。'
+  return ''
+})
+const createUsernameInvalid = computed(() => !newUser.value.username.trim())
+const createPasswordInvalid = computed(() => newUser.value.password.length < 8)
+
+const editErrorMessage = computed(() => {
+  if (!editSubmitted.value || !editingUser.value) return ''
+  if (!editingUser.value.role) return '请选择角色。'
+  if (editingUser.value.password && editingUser.value.password.length < 8) return '新密码至少需要 8 位。'
+  return ''
+})
+const editRoleInvalid = computed(() => !editingUser.value?.role)
+const editPasswordInvalid = computed(() => Boolean(editingUser.value?.password) && (editingUser.value?.password?.length || 0) < 8)
 
 const isSuperAdmin = () => props.currentUser?.role === 'SUPER_ADMIN'
 
@@ -184,9 +206,7 @@ const formatDateTime = (value: string | null | undefined) => {
 const fetchUsers = async () => {
   loading.value = true
   try {
-    const res = await request(apiUrl('/admin/users'), {
-      headers: authHeaders()
-    })
+    const res = await request(apiUrl('/admin/users'))
     users.value = await responseData<User[]>(res)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '加载用户失败', 'error')
@@ -197,15 +217,17 @@ const fetchUsers = async () => {
 
 const createUser = async () => {
   if (creating.value) return
+  createSubmitted.value = true
+  if (createErrorMessage.value) return
   creating.value = true
   try {
     await request(apiUrl('/admin/users'), {
       method: 'POST',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newUser.value)
     })
     newUser.value = { username: '', password: '', role: 'USER', enabled: true, note: '' }
-    showToast('用户已创建', 'success')
+    createSubmitted.value = false
     await fetchUsers()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '创建用户失败', 'error')
@@ -216,12 +238,21 @@ const createUser = async () => {
 
 const editUser = (user: User) => {
   if (!canManage(user)) return
+  editSubmitted.value = false
   editingUser.value = { ...user, password: ''}
+}
+
+const closeEditModal = () => {
+  if (saving.value) return
+  editSubmitted.value = false
+  editingUser.value = null
 }
 
 const updateUser = async () => {
   if (!editingUser.value) return
   if (saving.value) return
+  editSubmitted.value = true
+  if (editErrorMessage.value) return
   saving.value = true
   const payload: Record<string, unknown> = {
     role: editingUser.value.role,
@@ -233,11 +264,10 @@ const updateUser = async () => {
   try {
     await request(apiUrl(`/admin/users/${editingUser.value.id}`), {
       method: 'PUT',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
     editingUser.value = null
-    showToast('用户已更新', 'success')
     await fetchUsers()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '更新用户失败', 'error')
@@ -251,11 +281,7 @@ const deleteUser = async (id: string) => {
   if (!user || !canManage(user)) return
   if (!(await confirmAction('确定要删除此用户吗？'))) return
   try {
-    await request(apiUrl(`/admin/users/${id}`), {
-      method: 'DELETE',
-      headers: authHeaders()
-    })
-    showToast('用户已删除', 'success')
+    await request(apiUrl(`/admin/users/${id}`), { method: 'DELETE' })
     await fetchUsers()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '删除用户失败', 'error')
@@ -269,59 +295,59 @@ onMounted(fetchUsers)
 .admin-user-panel {
   max-width: 1200px;
   margin: 0 auto;
-  padding: clamp(1rem, 2.5vw, 2.25rem) 0 3rem;
+  padding: clamp(var(--space-sm), 2.5vw, var(--space-lg)) 0 var(--space-xl);
 }
 
 h2 {
   color: var(--text-strong);
-  margin-bottom: 2rem;
+  margin-bottom: var(--space-lg);
 }
 
 h3 {
   color: var(--text-strong);
-  margin-bottom: 1rem;
+  margin-bottom: var(--space-sm);
 }
 
 .create-form {
   background: var(--bg-card);
-  border: 1px solid var(--border);
-  padding: 1.5rem;
-  border-radius: var(--radius);
-  margin-bottom: 2rem;
+   border: var(--rule-thin) solid var(--border);
+  padding: var(--space-md);
+  border-radius: var(--radius-card);
+  margin-bottom: var(--space-lg);
   box-shadow: var(--shadow-card);
 }
 
 .form-group {
-  margin-bottom: 1rem;
+  margin-bottom: var(--space-sm);
 }
 
 .form-group label {
   display: block;
   color: var(--text);
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--space-2xs);
 }
 
 .form-group input[type="text"],
 .form-group input[type="password"],
 .form-group select {
   width: 100%;
-  padding: 0.6rem;
+  padding: var(--space-2xs);
   background: var(--bg-well);
-  border: 1px solid var(--border-input);
-  border-radius: 6px;
+   border: var(--rule-thin) solid var(--border-input);
+  border-radius: var(--radius-input);
   color: var(--text-strong);
 }
 
 .form-group input[type="checkbox"] {
-  margin-right: 0.5rem;
+  margin-right: var(--space-2xs);
 }
 
 .btn-primary {
   background: var(--accent);
   color: var(--color-accent-ink);
   border: none;
-  padding: 0.5rem 1.5rem;
-  border-radius: 6px;
+  padding: var(--space-2xs) var(--space-md);
+  border-radius: var(--radius-input);
   cursor: pointer;
 }
 
@@ -331,21 +357,21 @@ h3 {
 
 .user-list {
   background: var(--bg-card);
-  border: 1px solid var(--border);
-  padding: 1.5rem;
-  border-radius: var(--radius);
+   border: var(--rule-thin) solid var(--border);
+  padding: var(--space-md);
+  border-radius: var(--radius-card);
 }
 
 .user-card {
   background: var(--bg-app);
-  border: 1px solid var(--border);
-  padding: 1rem;
-  border-radius: var(--radius);
-  margin-bottom: 0.75rem;
+   border: var(--rule-thin) solid var(--border);
+  padding: var(--space-sm);
+  border-radius: var(--radius-card);
+  margin-bottom: var(--space-xs);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1rem;
+  gap: var(--space-sm);
   transition: background-color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out);
 }
 
@@ -356,21 +382,21 @@ h3 {
 
 .user-info {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2xs);
   align-items: center;
   color: var(--text-strong);
 }
 
 .user-main {
   display: grid;
-  gap: 0.55rem;
+  gap: var(--space-2xs);
   min-width: 0;
 }
 
 .user-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.55rem 1rem;
+  gap: var(--space-2xs) var(--space-sm);
   color: var(--text-muted);
   font-size: var(--text-meta);
 }
@@ -386,12 +412,12 @@ h3 {
 
 .disabled-hint {
   color: var(--warn);
-  font-size: 0.85rem;
+  font-size: var(--text-xs);
   margin: 0;
 }
 
 .badge {
-  padding: 0.25rem 0.5rem;
+  padding: var(--space-3xs) var(--space-2xs);
   border-radius: var(--radius-pill);
   font-size: var(--text-xs);
   font-weight: bold;
@@ -419,25 +445,24 @@ h3 {
 
 .user-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2xs);
 }
 
 .btn-edit {
   background: var(--success);
   color: var(--color-accent-ink);
   border: none;
-  padding: 0.25rem 0.75rem;
-  border-radius: 6px;
+  padding: var(--space-3xs) var(--space-xs);
+  border-radius: var(--radius-input);
   cursor: pointer;
 }
 
 .btn-delete {
   background: var(--color-danger-soft);
   color: var(--color-danger);
-  color: var(--color-accent-ink);
   border: none;
-  padding: 0.25rem 0.75rem;
-  border-radius: 6px;
+  padding: var(--space-3xs) var(--space-xs);
+  border-radius: var(--radius-input);
   cursor: pointer;
 }
 
@@ -453,50 +478,49 @@ h3 {
 
 .modal {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  inset: 0;
   background: var(--color-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2000;
+  z-index: var(--z-modal);
+  padding: var(--space-sm);
 }
 
 .modal-content {
   background: var(--bg-card);
-  border: 1px solid var(--border-input);
-  padding: 2rem;
-  border-radius: var(--radius);
-  width: 90%;
-  max-width: 500px;
+   border: var(--rule-thin) solid var(--border-input);
+  padding: var(--space-lg);
+  border-radius: var(--radius-card);
+  width: min(100%, 31.25rem);
+  max-height: min(90dvh, 44rem);
+  overflow: auto;
 }
 
 .modal-actions {
   display: flex;
-  gap: 1rem;
-  margin-top: 1rem;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
 }
 
 .btn-cancel {
   background: var(--color-paper-3);
-  color: var(--color-accent-ink);
+  color: var(--color-ink-2);
   border: none;
-  padding: 0.5rem 1.5rem;
-  border-radius: 6px;
+  padding: var(--space-2xs) var(--space-md);
+  border-radius: var(--radius-input);
   cursor: pointer;
 }
 
 .loading-hint {
   color: var(--color-muted);
   text-align: center;
-  padding: 1.5rem;
+  padding: var(--space-md);
 }
 
 .user-note {
   color: var(--color-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-xs);
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -505,10 +529,10 @@ h3 {
 }
 
 @media (max-width: 768px) {
-  .admin-user-panel { padding: 1rem; }
+  .admin-user-panel { padding: var(--space-sm); }
   .user-card { align-items: flex-start; flex-direction: column; }
   .user-info { flex-wrap: wrap; }
-  .user-stats { display: grid; gap: 0.35rem; }
+  .user-stats { display: grid; gap: var(--space-3xs); }
   .user-actions { width: 100%; }
   .user-actions button { flex: 1; }
 }

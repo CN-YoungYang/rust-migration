@@ -45,6 +45,9 @@
   --text-nav: 0.875rem;
   --text-body: 1rem;
   --text-meta: 0.8125rem;
+  --text-summary: 1.4rem;
+  --text-login-heading: clamp(2rem, 4vw, 3rem);
+  --text-login-display: clamp(2.75rem, 6vw, 5.5rem);
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
@@ -58,4 +61,15 @@
   --radius-pill: 999px;
   --rule-thin: 1px;
   --shadow-float: 0 16px 40px oklch(20% 0.025 255 / 0.1);
+
+  --z-nav: 30;
+  --z-banner: 1000;
+  --z-skip-link: 1100;
+  --z-modal: 2000;
+  --z-toast: 2100;
+  --banner-height: 3.25rem;
+  --nav-sticky-top: 0px;
+  --nav-width: 15.5rem;
+  --size-nav-mark: 0.42rem;
+  --radius-mark: 2px;
 }

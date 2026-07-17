@@ -1,14 +1,4 @@
-import { API_BASE } from '../config'
-
 export const AUTH_EXPIRED_EVENT = 'ai-hub:auth-expired'
-
-export function getToken(): string {
-  return ''
-}
-
-export function authHeaders(): Record<string, string> {
-  return {}
-}
 
 function readCookie(name: string): string {
   const prefix = `${name}=`
@@ -69,5 +59,5 @@ export async function responseData<T>(response: Response): Promise<T> {
 }
 
 export function apiUrl(path: string): string {
-  return `${API_BASE}${path}`
+  return `/api${path}`
 }

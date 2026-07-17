@@ -1,10 +1,10 @@
 # AI Hub Rust 前端
 
-这是 `rust-migration/` 的 Vue 3 + Vite + TypeScript 前端。界面采用暖白编辑式工作台，动效使用 GSAP + ScrollTrigger，并保持低资源部署目标。
+这是 `rust-migration/` 的 Vue 3 + Vite + TypeScript 前端。界面采用中文工作台布局和原生 CSS 动效，并保持低资源部署目标。
 
 ## 功能页面
 
-- `App.vue`：登录、会话检查、响应式侧边导航、在线状态和 GSAP 动效生命周期。
+- `App.vue`：登录、会话检查、响应式侧边导航和在线状态。
 - `AccountPanel.vue`：账户管理、筛选、分组、多选、批量操作、CSV 导入导出。
 - `CheckinRunsPanel.vue`：签到记录、筛选、失败重试、摘要复制、记录清理。
 - `StatisticsPanel.vue`：统计概览、趋势、站点统计、最近失败。
@@ -36,11 +36,9 @@ npm run build
 
 ## 视觉与动效约定
 
-- 全局主题令牌位于 `src/style.css`，使用暖白背景、低对比结构线和少量语义色。
-- `App.vue` 负责登录入场和面板级 ScrollTrigger；面板数据异步插入后会自动重新绑定卡片显现动画。
-- 动画上下文在面板切换和组件卸载时清理，避免重复触发与悬挂监听器。
-- `prefers-reduced-motion: reduce` 时跳过 GSAP 动画，并保留完整的静态交互。
-- 不在业务面板内重复创建 GSAP 实例；需要新增动效时优先复用应用级上下文和现有 CSS 状态。
+- 全局设计令牌位于 `tokens.css`，基础规则位于 `src/style.css`，工作台规则位于 `src/workbench.css`。
+- 动效仅使用短时 CSS 过渡，不引入 JavaScript 动画运行时。
+- `prefers-reduced-motion: reduce` 时关闭非必要动效，并保留完整交互。
 
 ## API 约定
 

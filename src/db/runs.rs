@@ -335,21 +335,6 @@ pub async fn cleanup_checkin_data(
     })
 }
 
-/// Cleanup old check-in runs globally, keeping only the latest N records.
-pub async fn cleanup_checkin_runs(db: &SqlitePool, keep_latest: usize) -> Result<u64> {
-    Ok(cleanup_checkin_data(db, keep_latest, None, false)
-        .await?
-        .deleted_runs)
-}
-
-/// Batch query today's run count per account, returns accountId -> count mapping.
-/// More efficient than per-account COUNT (single SQL replaces N queries).
-pub async fn count_runs_today_batch(
-    db: &SqlitePool,
-) -> Result<std::collections::HashMap<String, i32>> {
-    count_runs_today_for_accounts(db, &[]).await
-}
-
 /// Batch query today's run count for selected accounts. Empty account_ids means all accounts.
 pub async fn count_runs_today_for_accounts(
     db: &SqlitePool,

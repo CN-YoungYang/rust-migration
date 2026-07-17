@@ -57,7 +57,7 @@ curl http://localhost:3000/api/health
 
 ## 技术栈
 
-- **后端：** Rust + Axum 0.7 + SQLite/sqlx + tokio-cron-scheduler + ring + bcrypt
+- **后端：** Rust + Axum 0.7 + SQLite/sqlx + Tokio + ring + bcrypt
 - **前端：** Vue 3 + TypeScript + Vite
 - **部署：** Docker 多阶段构建，非 root 用户运行
 

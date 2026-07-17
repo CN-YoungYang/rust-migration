@@ -19,10 +19,6 @@ body {
   background: var(--color-paper-2);
 }
 
-#app::before {
-  display: none;
-}
-
 h1,
 h2,
 h3 {
@@ -78,7 +74,7 @@ a:focus-visible {
 }
 
 .workspace-shell {
-  grid-template-columns: 15.5rem minmax(0, 1fr);
+  grid-template-columns: var(--nav-width) minmax(0, 1fr);
   background: var(--color-paper-2);
 }
 
@@ -247,6 +243,7 @@ a:focus-visible {
 .panel-region select,
 .panel-region textarea {
   min-width: 0;
+  min-height: 2.75rem;
   padding: 0 var(--space-xs);
   outline: 2px solid transparent;
   outline-offset: 1px;
@@ -545,6 +542,18 @@ a:focus-visible {
   padding-block: var(--space-lg);
 }
 
+.login-page > *,
+.login-intro,
+.login-copy,
+.login-form {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.login-copy > p:last-child {
+  overflow-wrap: anywhere;
+}
+
 .login-intro {
   padding: var(--space-lg) 0;
   border-top: var(--rule-thin) solid var(--color-rule);
@@ -554,7 +563,7 @@ a:focus-visible {
 .login-copy h1 {
   max-width: 13ch;
   color: var(--color-ink);
-  font: 700 clamp(2.75rem, 6vw, 5.5rem) / 1.02 var(--font-display);
+  font: 700 var(--text-login-display) / 1.02 var(--font-display);
   letter-spacing: -0.02em;
 }
 
@@ -562,6 +571,15 @@ a:focus-visible {
 .login-heading p,
 .login-footnote {
   color: var(--color-muted);
+}
+
+.login-form .login-heading p,
+.login-form .login-footnote {
+  color: var(--color-rule-strong);
+}
+
+.login-form .error {
+  color: var(--color-danger-soft);
 }
 
 .login-capabilities {
@@ -609,6 +627,10 @@ a:focus-visible {
   background: var(--color-ink-2);
   color: var(--color-paper);
   border-color: var(--color-muted);
+}
+
+.login-form input::placeholder {
+  color: var(--color-rule-strong);
 }
 
 .login-form .btn-primary {
@@ -679,7 +701,7 @@ a:focus-visible {
   }
 
   .brand {
-    padding-inline-end: 7rem;
+    padding-inline-end: calc(var(--space-3xl) + var(--space-sm));
   }
 
   .panel-region .panel-header,

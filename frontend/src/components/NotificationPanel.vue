@@ -13,7 +13,7 @@
       <div class="form-row">
         <label>
           通知类型
-          <select v-model="form.notifyType" :disabled="Boolean(form.id)">
+          <select v-model="form.notifyType" :disabled="Boolean(form.id)" :aria-invalid="invalidFields.notifyType" aria-describedby="notification-validation">
             <option value="webhook">Webhook</option>
             <option value="telegram">Telegram</option>
             <option value="email">邮件</option>
@@ -32,7 +32,7 @@
         </label>
         <label>
           连续失败阈值
-          <input v-model.number="form.failureThreshold" type="number" min="1" max="100" />
+          <input v-model.number="form.failureThreshold" type="number" min="1" max="100" :aria-invalid="invalidFields.failureThreshold" aria-describedby="notification-validation" />
         </label>
       </div>
 
@@ -43,14 +43,14 @@
         </label>
         <label>
           余额阈值（美元）
-          <input v-model.number="form.balanceThreshold" type="number" min="0" step="0.01" />
+          <input v-model.number="form.balanceThreshold" type="number" min="0" step="0.01" :aria-invalid="invalidFields.balanceThreshold" aria-describedby="notification-validation" />
         </label>
       </div>
 
       <template v-if="form.notifyType === 'webhook'">
         <label>
           Webhook URL
-          <input v-model.trim="form.webhookUrl" type="url" />
+          <input v-model.trim="form.webhookUrl" type="url" :aria-invalid="invalidFields.webhookUrl" aria-describedby="notification-validation" />
         </label>
         <div class="form-row">
           <label>
@@ -62,7 +62,7 @@
           </label>
           <label>
             Headers JSON
-            <input v-model.trim="form.webhookHeaders" placeholder='{"X-Token":"..."}' />
+            <input v-model.trim="form.webhookHeaders" placeholder='{"X-Token":"..."}' :aria-invalid="invalidFields.webhookHeaders" aria-describedby="notification-validation" />
           </label>
         </div>
       </template>
@@ -70,11 +70,11 @@
       <template v-if="form.notifyType === 'telegram'">
         <label>
           Bot Token
-          <input v-model.trim="form.telegramBotToken" type="password" autocomplete="new-password" />
+          <input v-model.trim="form.telegramBotToken" type="password" autocomplete="new-password" :aria-invalid="invalidFields.telegramBotToken" aria-describedby="notification-validation" />
         </label>
         <label>
           Chat ID
-          <input v-model.trim="form.telegramChatId" />
+          <input v-model.trim="form.telegramChatId" :aria-invalid="invalidFields.telegramChatId" aria-describedby="notification-validation" />
         </label>
       </template>
 
@@ -82,29 +82,29 @@
         <div class="form-row">
           <label>
             SMTP 主机
-            <input v-model.trim="form.emailSmtpHost" />
+            <input v-model.trim="form.emailSmtpHost" :aria-invalid="invalidFields.emailSmtpHost" aria-describedby="notification-validation" />
           </label>
           <label>
             SMTP 端口
-            <input v-model.number="form.emailSmtpPort" type="number" min="1" max="65535" />
+            <input v-model.number="form.emailSmtpPort" type="number" min="1" max="65535" :aria-invalid="invalidFields.emailSmtpPort" aria-describedby="notification-validation" />
           </label>
         </div>
         <label>
           SMTP 用户名
-          <input v-model.trim="form.emailSmtpUser" />
+          <input v-model.trim="form.emailSmtpUser" :aria-invalid="invalidFields.emailSmtpUser" aria-describedby="notification-validation" />
         </label>
         <label>
           SMTP 密码
-          <input v-model.trim="form.emailSmtpPassword" type="password" autocomplete="new-password" />
+          <input v-model.trim="form.emailSmtpPassword" type="password" autocomplete="new-password" :aria-invalid="invalidFields.emailSmtpPassword" aria-describedby="notification-validation" />
         </label>
         <div class="form-row">
           <label>
             发件人
-            <input v-model.trim="form.emailFrom" type="email" />
+            <input v-model.trim="form.emailFrom" type="email" :aria-invalid="invalidFields.emailFrom" aria-describedby="notification-validation" />
           </label>
           <label>
             收件人
-            <input v-model.trim="form.emailTo" />
+            <input v-model.trim="form.emailTo" :aria-invalid="invalidFields.emailTo" aria-describedby="notification-validation" />
           </label>
         </div>
       </template>
@@ -125,9 +125,7 @@
         </div>
       </div>
 
-      <div v-if="validationErrors.length > 0" class="validation-box" role="alert">
-        <p v-for="error in validationErrors" :key="error">{{ error }}</p>
-      </div>
+      <p id="notification-validation" class="field-error-slot" :class="{ 'is-empty': validationErrors.length === 0 }" :role="validationErrors.length > 0 ? 'alert' : undefined">{{ validationErrors[0] || '\u00a0' }}</p>
 
       <div class="form-actions">
         <button type="submit" class="primary" :disabled="saving || validationErrors.length > 0" :data-state="saving ? 'loading' : undefined">
@@ -170,7 +168,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { apiUrl, authHeaders, request, responseData } from '../utils/api'
+import { apiUrl, request, responseData } from '../utils/api'
 import { confirmAction, showToast } from '../utils/toast'
 
 interface NotificationConfig {
@@ -251,6 +249,26 @@ const validationErrors = computed(() => {
   }
 
   return errors
+})
+
+const invalidFields = computed(() => {
+  const value = form.value
+  const port = value.emailSmtpPort ?? 0
+  return {
+    notifyType: !value.notifyType,
+    failureThreshold: (value.failureThreshold ?? 1) < 1 || (value.failureThreshold ?? 1) > 100,
+    balanceThreshold: value.onBalanceLow && (value.balanceThreshold ?? -1) < 0,
+    webhookUrl: value.notifyType === 'webhook' && (!value.webhookUrl?.trim() || !isHttpUrl(value.webhookUrl)),
+    webhookHeaders: value.notifyType === 'webhook' && Boolean(value.webhookHeaders?.trim() && validateHeadersJson(value.webhookHeaders)),
+    telegramBotToken: value.notifyType === 'telegram' && !value.id && !value.telegramBotToken?.trim(),
+    telegramChatId: value.notifyType === 'telegram' && !value.telegramChatId?.trim(),
+    emailSmtpHost: value.notifyType === 'email' && !value.emailSmtpHost?.trim(),
+    emailSmtpPort: value.notifyType === 'email' && (port < 1 || port > 65535),
+    emailSmtpUser: value.notifyType === 'email' && !value.emailSmtpUser?.trim(),
+    emailSmtpPassword: value.notifyType === 'email' && !value.id && !value.emailSmtpPassword?.trim(),
+    emailFrom: value.notifyType === 'email' && !value.emailFrom?.trim(),
+    emailTo: value.notifyType === 'email' && !value.emailTo?.trim(),
+  }
 })
 
 const formTriggerSummary = computed(() => {
@@ -349,7 +367,7 @@ function buildPayload() {
 async function loadConfigs() {
   loading.value = true
   try {
-    const response = await request(apiUrl('/notifications'), { headers: authHeaders() })
+    const response = await request(apiUrl('/notifications'))
     configs.value = await responseData<NotificationConfig[]>(response)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '加载通知配置失败', 'error')
@@ -360,7 +378,6 @@ async function loadConfigs() {
 
 async function saveConfig() {
   if (validationErrors.value.length > 0) {
-    showToast(validationErrors.value[0], 'error')
     return
   }
   saving.value = true
@@ -368,10 +385,9 @@ async function saveConfig() {
     const id = form.value.id
     await request(apiUrl(id ? `/notifications/${id}` : '/notifications'), {
       method: id ? 'PUT' : 'POST',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(buildPayload())
     })
-    showToast('通知配置已保存', 'success')
     cancelEdit()
     await loadConfigs()
   } catch (error) {
@@ -385,8 +401,7 @@ async function testConfig(config: NotificationConfig) {
   testingId.value = config.id
   try {
     const response = await request(apiUrl(`/notifications/${config.id}/test`), {
-      method: 'POST',
-      headers: authHeaders()
+      method: 'POST'
     })
     const result = await responseData<{ success: boolean; message?: string }>(response)
     const message = result.message || '测试完成'
@@ -398,7 +413,7 @@ async function testConfig(config: NotificationConfig) {
         testedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
       }
     }
-    showToast(message, result.success ? 'success' : 'error')
+    if (!result.success) showToast(message, 'error')
   } catch (error) {
     const message = error instanceof Error ? error.message : '测试通知失败'
     testResults.value = {
@@ -419,10 +434,8 @@ async function deleteConfig(id: string) {
   if (!(await confirmAction('确定要删除此通知配置吗？'))) return
   try {
     await request(apiUrl(`/notifications/${id}`), {
-      method: 'DELETE',
-      headers: authHeaders()
+      method: 'DELETE'
     })
-    showToast('通知配置已删除', 'success')
     await loadConfigs()
   } catch (error) {
     showToast(error instanceof Error ? error.message : '删除通知配置失败', 'error')
@@ -433,28 +446,28 @@ onMounted(loadConfigs)
 </script>
 
 <style scoped>
-.notification-panel { max-width: 1000px; margin: 0 auto; padding: clamp(1rem, 2.5vw, 2.25rem) 0 3rem; }
-.panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.5rem; }
+.notification-panel { max-width: 1000px; margin: 0 auto; padding: clamp(var(--space-sm), 2.5vw, var(--space-lg)) 0 var(--space-xl); }
+.panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-sm); margin-bottom: var(--space-md); }
 h2, h3 { color: var(--text-strong); }
-.panel-subtitle { color: var(--text-muted); font-size: var(--text-meta); margin-top: 0.25rem; }
+.panel-subtitle { color: var(--text-muted); font-size: var(--text-meta); margin-top: var(--space-3xs); }
 .notification-form,
 .notification-card {
   background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1.25rem;
+  border: var(--rule-thin) solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--space-md);
 }
-.notification-form { display: grid; gap: 1rem; margin-bottom: 1.5rem; }
-.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-label { color: var(--text); display: grid; gap: 0.4rem; }
+.notification-form { display: grid; gap: var(--space-sm); margin-bottom: var(--space-md); }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm); }
+label { color: var(--text); display: grid; gap: var(--space-2xs); }
 .switch-row { align-content: center; grid-template-columns: auto 1fr; align-items: center; }
 input,
 select {
   color: var(--text-strong);
   background: var(--bg-well);
-  border: 1px solid var(--border-input);
-  border-radius: 4px;
-  padding: 0.55rem;
+  border: var(--rule-thin) solid var(--border-input);
+  border-radius: var(--radius-input);
+  padding: var(--space-2xs);
 }
 input:focus-visible,
 select:focus-visible {
@@ -466,73 +479,73 @@ button:focus-visible {
   outline-offset: 2px;
 }
 .form-actions,
-.actions { display: flex; gap: 0.75rem; align-items: center; }
+.actions { display: flex; gap: var(--space-xs); align-items: center; }
 .preview-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
+  gap: var(--space-xs);
 }
 .preview-grid div {
   background: var(--bg-well);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.85rem;
+  border: var(--rule-thin) solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--space-xs);
   display: grid;
-  gap: 0.35rem;
+  gap: var(--space-3xs);
 }
 .preview-grid span {
   color: var(--text-muted);
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
 }
 .preview-grid strong {
   color: var(--text-strong);
-  font-size: 0.92rem;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 .validation-box {
-  border: 1px solid var(--color-danger);
+  border: var(--rule-thin) solid var(--color-danger);
   background: var(--color-danger-soft);
   color: var(--color-danger);
-  border-radius: var(--radius);
-  padding: 0.85rem 1rem;
+  border-radius: var(--radius-card);
+  padding: var(--space-xs) var(--space-sm);
   display: grid;
-  gap: 0.35rem;
+  gap: var(--space-3xs);
 }
-.notification-list { display: grid; gap: 1rem; }
-.notification-card { display: flex; justify-content: space-between; gap: 1rem; transition: border-color var(--dur-short) var(--ease-out), background-color var(--dur-short) var(--ease-out); }
+.notification-list { display: grid; gap: var(--space-sm); }
+.notification-card { display: flex; justify-content: space-between; gap: var(--space-sm); transition: border-color var(--dur-short) var(--ease-out), background-color var(--dur-short) var(--ease-out); }
 .notification-card:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
 .config-main { min-width: 0; }
-.title-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
-.badge { background: var(--success-soft); color: var(--color-success); border-radius: var(--radius-pill); padding: 0.15rem 0.5rem; font-size: var(--text-xs); }
+.title-row { display: flex; align-items: center; gap: var(--space-2xs); margin-bottom: var(--space-2xs); }
+.badge { background: var(--success-soft); color: var(--color-success); border-radius: var(--radius-pill); padding: var(--space-3xs) var(--space-2xs); font-size: var(--text-xs); }
 .badge.disabled { background: var(--color-paper-3); color: var(--color-muted); }
-.muted { color: var(--text-muted); margin: 0.25rem 0; overflow-wrap: anywhere; }
-.note { color: var(--color-warning); margin: 0.25rem 0; }
-.test-result { margin-top: 0.4rem; font-size: 0.85rem; }
+.muted { color: var(--text-muted); margin: var(--space-3xs) 0; overflow-wrap: anywhere; }
+.note { color: var(--color-warning); margin: var(--space-3xs) 0; }
+.test-result { margin-top: var(--space-2xs); font-size: var(--text-xs); }
 .test-result.success { color: var(--color-success); }
 .test-result.failed { color: var(--color-danger); }
 button {
   color: var(--text-strong);
   background: var(--border-input);
   border: 0;
-  border-radius: 6px;
-  padding: 0.5rem 0.85rem;
+  border-radius: var(--radius-input);
+  padding: var(--space-2xs) var(--space-xs);
 }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 button.primary,
-.primary { background: var(--accent); }
+.primary { background: var(--accent); color: var(--color-accent-ink); }
 button:hover:not(:disabled) { background: var(--color-paper-2); }
 button.primary:hover:not(:disabled),
 .primary:hover:not(:disabled) { background: var(--accent-hover); }
-button.danger { background: var(--danger); }
+button.danger { background: var(--color-danger-soft); color: var(--color-danger); }
 button.danger:hover:not(:disabled) { background: var(--color-danger-soft); }
-.empty { color: var(--text-muted); text-align: center; padding: 2rem; }
+.empty { color: var(--text-muted); text-align: center; padding: var(--space-lg); }
 
 @media (max-width: 768px) {
-  .notification-panel { padding: 1rem; }
+  .notification-panel { padding: var(--space-sm); }
   .panel-header { display: grid; }
   .panel-header button { width: 100%; }
   .notification-form { grid-template-columns: 1fr; }
-  .form-row { display: flex; flex-direction: column; gap: 1rem; }
+  .form-row { display: flex; flex-direction: column; gap: var(--space-sm); }
   .preview-grid { grid-template-columns: 1fr; }
   .notification-card { display: grid; grid-template-columns: 1fr; }
   .actions { flex-wrap: wrap; }

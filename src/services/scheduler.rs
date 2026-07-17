@@ -4,34 +4,29 @@ use crate::{
 };
 use chrono::{Local, NaiveTime};
 use sqlx::SqlitePool;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio_cron_scheduler::{Job, JobScheduler};
+use std::{sync::Arc, time::Duration};
+use tokio::{sync::Mutex, time::MissedTickBehavior};
 
 pub async fn start_scheduler(db: SqlitePool) {
-    tokio::spawn(async move {
-        if let Err(e) = run_scheduler(db).await {
-            tracing::error!("Scheduler error: {}", e);
-        }
-    });
+    tokio::spawn(run_scheduler(db));
 }
 
-async fn run_scheduler(db: SqlitePool) -> anyhow::Result<()> {
-    let scheduler = JobScheduler::new().await?;
-
+async fn run_scheduler(db: SqlitePool) {
     // 防重复触发：用 Mutex 保证同一时刻只有一个定时签到任务在执行。
-    // 当 cron 每 5 分钟触发时，如果上一轮还没跑完就 try_lock 失败，直接跳过本轮。
     let checkin_lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
 
-    // Checkin job every 5 minutes
-    let db_clone = db.clone();
-    let lock_clone = checkin_lock.clone();
-    scheduler
-        .add(Job::new_async("0 */5 * * * *", move |_uuid, _l| {
-            let db = db_clone.clone();
-            let lock = lock_clone.clone();
-            Box::pin(async move {
-                // try_lock: 获取不到锁说明上一轮还在执行，跳过本轮避免重复签到
+    tracing::info!("Scheduler started");
+
+    let checkin_db = db.clone();
+    let checkin_task = async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(5 * 60));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            let db = checkin_db.clone();
+            let lock = checkin_lock.clone();
+            tokio::spawn(async move {
                 let _guard = match lock.try_lock() {
                     Ok(guard) => guard,
                     Err(_) => {
@@ -42,27 +37,21 @@ async fn run_scheduler(db: SqlitePool) -> anyhow::Result<()> {
                 if let Err(e) = check_and_run_scheduled_checkins(&db).await {
                     tracing::error!("Scheduled checkin error: {}", e);
                 }
-            })
-        })?)
-        .await?;
+            });
+        }
+    };
 
-    // Run cleanup every 10 minutes
-    let db_clone = db.clone();
-    scheduler
-        .add(Job::new_async("0 */10 * * * *", move |_uuid, _l| {
-            let db = db_clone.clone();
-            Box::pin(async move {
-                cleanup_old_runs(&db).await;
-            })
-        })?)
-        .await?;
+    let cleanup_task = async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(10 * 60));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            cleanup_old_runs(&db).await;
+        }
+    };
 
-    scheduler.start().await?;
-    tracing::info!("Scheduler started");
-
-    // Keep task alive
-    std::future::pending::<()>().await;
-    Ok(())
+    tokio::join!(checkin_task, cleanup_task);
 }
 
 async fn cleanup_old_runs(db: &SqlitePool) {
@@ -70,7 +59,7 @@ async fn cleanup_old_runs(db: &SqlitePool) {
         Ok(s) => s.cleanup_keep_latest.max(0) as usize,
         Err(_) => 500, // fallback
     };
-    if let Err(e) = db::cleanup_checkin_runs(db, keep_latest).await {
+    if let Err(e) = db::cleanup_checkin_data(db, keep_latest, None, false).await {
         tracing::warn!("Run cleanup error: {}", e);
     }
 }
@@ -101,7 +90,9 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
     let today_local = Local::now().date_naive();
 
     // 批量查询今日各账户签到次数，避免逐账户 COUNT
-    let mut today_counts = db::count_runs_today_batch(db).await.unwrap_or_default();
+    let mut today_counts = db::count_runs_today_for_accounts(db, &[])
+        .await
+        .unwrap_or_default();
 
     // 防判定：打乱执行顺序，避免每次按固定顺序签到
     use rand::seq::SliceRandom;

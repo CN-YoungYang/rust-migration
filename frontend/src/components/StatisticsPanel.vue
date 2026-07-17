@@ -17,9 +17,9 @@
           </select>
         </label>
         <div class="date-range" role="group" aria-label="统计日期范围">
-          <label class="filter-field"><span>开始日期</span><input v-model="startDate" type="date" class="date-input" :disabled="loading" /></label>
+          <label class="filter-field"><span>开始日期</span><input v-model="startDate" type="date" class="date-input" :disabled="loading" :aria-invalid="Boolean(dateValidationMessage)" aria-describedby="statistics-date-error" /></label>
           <span class="date-separator">至</span>
-          <label class="filter-field"><span>结束日期</span><input v-model="endDate" type="date" class="date-input" :disabled="loading" /></label>
+          <label class="filter-field"><span>结束日期</span><input v-model="endDate" type="date" class="date-input" :disabled="loading" :aria-invalid="Boolean(dateValidationMessage)" aria-describedby="statistics-date-error" /></label>
           <button class="primary" @click="loadStatistics" :disabled="loading || dateRangeInvalid || dateRangeTooLong">
             {{ loading ? '查询中...' : '查询' }}
           </button>
@@ -28,8 +28,7 @@
       </div>
     </div>
 
-    <div v-if="dateRangeInvalid" class="validation-box" role="alert">开始日期不能晚于结束日期。</div>
-    <div v-else-if="dateRangeTooLong" class="validation-box" role="alert">统计查询范围不能超过180天。</div>
+    <p id="statistics-date-error" class="field-error-slot" :class="{ 'is-empty': !dateValidationMessage }" :role="dateValidationMessage ? 'alert' : undefined">{{ dateValidationMessage || '\u00a0' }}</p>
 
     <p v-if="loading && !statistics" class="empty" role="status" aria-live="polite">正在加载统计数据...</p>
     <div v-if="loadError" class="load-error" role="alert">
@@ -195,7 +194,7 @@
 
 <script setup lang="ts">
 import { computed, ref, nextTick, onMounted, watch } from 'vue'
-import { apiUrl, authHeaders, request, responseData } from '../utils/api'
+import { apiUrl, request, responseData } from '../utils/api'
 import { showToast } from '../utils/toast'
 import type { CurrentUser } from '../types'
 import { useUsers } from '../composables/useUsers'
@@ -286,6 +285,12 @@ const dateRangeInvalid = computed(() => {
 const dateRangeTooLong = computed(() => {
   if (!startDate.value || !endDate.value || dateRangeInvalid.value) return false
   return inclusiveDayCount(startDate.value, endDate.value) > 180
+})
+
+const dateValidationMessage = computed(() => {
+  if (dateRangeInvalid.value) return '开始日期不能晚于结束日期。'
+  if (dateRangeTooLong.value) return '统计查询范围不能超过180天。'
+  return ''
 })
 
 const enabledRatio = computed(() => {
@@ -437,7 +442,7 @@ async function loadStatistics() {
     if (props.isAdmin && selectedUserId.value) params.append('userId', selectedUserId.value)
 
     const url = apiUrl(`/statistics?${params.toString()}`)
-    const response = await request(url, { headers: authHeaders() })
+    const response = await request(url)
     const data = await responseData<Statistics>(response)
     if (seq === requestSeq) {
       statistics.value = data

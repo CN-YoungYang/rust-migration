@@ -20,7 +20,7 @@
     </div>
     <p v-else-if="loading" class="loading-state" role="status" aria-live="polite">正在加载设置...</p>
 
-    <form v-else class="settings-form" :aria-busy="saving" @submit.prevent="saveSettings">
+    <form v-else class="settings-form" :aria-busy="saving" @submit.prevent="saveSettings" @input="saved = false" @change="saved = false">
       <div class="form-group">
         <label for="settings-enabled">启用自动签到</label>
         <label class="switch">
@@ -32,11 +32,11 @@
       <div class="form-row">
         <div class="form-group">
           <label for="settings-window-start">签到窗口开始</label>
-          <input id="settings-window-start" v-model="settings.windowStart" type="time" required />
+          <input id="settings-window-start" v-model="settings.windowStart" type="time" required :aria-invalid="invalidFields.windowStart" aria-describedby="settings-validation" />
         </div>
         <div class="form-group">
           <label for="settings-window-end">签到窗口结束</label>
-          <input id="settings-window-end" v-model="settings.windowEnd" type="time" required />
+          <input id="settings-window-end" v-model="settings.windowEnd" type="time" required :aria-invalid="invalidFields.windowEnd" aria-describedby="settings-validation" />
         </div>
       </div>
 
@@ -50,31 +50,29 @@
 
       <div class="form-group">
         <label for="settings-max-attempts">每天最大尝试次数</label>
-        <input id="settings-max-attempts" v-model.number="settings.maxAttemptsPerDay" type="number" min="1" max="100" />
+        <input id="settings-max-attempts" v-model.number="settings.maxAttemptsPerDay" type="number" min="1" max="100" :aria-invalid="invalidFields.maxAttemptsPerDay" aria-describedby="settings-validation" />
       </div>
 
       <div class="form-row">
         <div class="form-group">
           <label for="settings-delay-min">批量/定时签到最小延迟（秒）</label>
-          <input id="settings-delay-min" v-model.number="settings.batchDelayMin" type="number" min="0" max="600" />
+          <input id="settings-delay-min" v-model.number="settings.batchDelayMin" type="number" min="0" max="600" :aria-invalid="invalidFields.batchDelayMin" aria-describedby="settings-validation" />
         </div>
         <div class="form-group">
           <label for="settings-delay-max">批量/定时签到最大延迟（秒）</label>
-          <input id="settings-delay-max" v-model.number="settings.batchDelayMax" type="number" min="0" max="600" />
+          <input id="settings-delay-max" v-model.number="settings.batchDelayMax" type="number" min="0" max="600" :aria-invalid="invalidFields.batchDelayMax" aria-describedby="settings-validation" />
         </div>
       </div>
 
       <div class="form-group">
         <label for="settings-cleanup-latest">清理记录时保留最新条数</label>
-        <input id="settings-cleanup-latest" v-model.number="settings.cleanupKeepLatest" type="number" min="0" max="10000" />
+        <input id="settings-cleanup-latest" v-model.number="settings.cleanupKeepLatest" type="number" min="0" max="10000" :aria-invalid="invalidFields.cleanupKeepLatest" aria-describedby="settings-validation" />
       </div>
 
-      <div v-if="validationErrors.length > 0" class="validation-box" role="alert">
-        <p v-for="error in validationErrors" :key="error">{{ error }}</p>
-      </div>
+      <p id="settings-validation" class="field-error-slot" :class="{ 'is-empty': validationErrors.length === 0 }" :role="validationErrors.length > 0 ? 'alert' : undefined">{{ validationErrors[0] || '\u00a0' }}</p>
 
-    <button type="submit" class="btn-primary" :disabled="saving || validationErrors.length > 0" :data-state="saving ? 'loading' : undefined">
-        {{ saving ? '保存中...' : '保存设置' }}
+    <button type="submit" class="btn-primary" :disabled="saving || validationErrors.length > 0" :data-state="saving ? 'loading' : (saved ? 'success' : undefined)">
+        {{ saving ? '保存中...' : (saved ? '已保存' : '保存设置') }}
       </button>
     </form>
 
@@ -104,7 +102,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
-import { apiUrl, authHeaders, request, responseData } from '../utils/api'
+import { apiUrl, request, responseData } from '../utils/api'
 import { showToast } from '../utils/toast'
 
 interface Settings {
@@ -133,6 +131,7 @@ const settings = ref<Settings>({
 const loading = ref(true)
 const loadError = ref('')
 const saving = ref(false)
+const saved = ref(false)
 
 const settingsStatusText = computed(() => {
   if (loading.value) return '正在加载设置...'
@@ -142,6 +141,12 @@ const settingsStatusText = computed(() => {
 
 const validationErrors = computed(() => {
   const errors: string[] = []
+  if (minutesOf(settings.value.windowStart) === null) {
+    errors.push('签到窗口开始时间格式无效。')
+  }
+  if (minutesOf(settings.value.windowEnd) === null) {
+    errors.push('签到窗口结束时间格式无效。')
+  }
   if (settings.value.maxAttemptsPerDay < 1 || settings.value.maxAttemptsPerDay > 100) {
     errors.push('每天最大尝试次数必须在 1 到 100 之间。')
   }
@@ -159,6 +164,15 @@ const validationErrors = computed(() => {
   }
   return errors
 })
+
+const invalidFields = computed(() => ({
+  windowStart: minutesOf(settings.value.windowStart) === null,
+  windowEnd: minutesOf(settings.value.windowEnd) === null,
+  maxAttemptsPerDay: settings.value.maxAttemptsPerDay < 1 || settings.value.maxAttemptsPerDay > 100,
+  batchDelayMin: settings.value.batchDelayMin < 0 || settings.value.batchDelayMin > settings.value.batchDelayMax,
+  batchDelayMax: settings.value.batchDelayMax < 0 || settings.value.batchDelayMax > 600 || settings.value.batchDelayMax < settings.value.batchDelayMin,
+  cleanupKeepLatest: settings.value.cleanupKeepLatest < 0 || settings.value.cleanupKeepLatest > 10000,
+}))
 
 const delaySummary = computed(() => {
   if (settings.value.batchDelayMin === 0 && settings.value.batchDelayMax === 0) {
@@ -201,9 +215,7 @@ const fetchSettings = async () => {
   loading.value = true
   loadError.value = ''
   try {
-    const response = await request(apiUrl('/settings'), {
-      headers: authHeaders()
-    })
+    const response = await request(apiUrl('/settings'))
     settings.value = await responseData<Settings>(response)
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : '加载设置失败'
@@ -215,18 +227,17 @@ const fetchSettings = async () => {
 
 const saveSettings = async () => {
   if (validationErrors.value.length > 0) {
-    showToast(validationErrors.value[0], 'error')
     return
   }
   saving.value = true
   try {
     const response = await request(apiUrl('/settings'), {
       method: 'PUT',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings.value)
     })
     settings.value = await responseData<Settings>(response)
-    showToast('设置已保存', 'success')
+    saved.value = true
   } catch (error) {
     showToast(error instanceof Error ? error.message : '保存设置失败', 'error')
   } finally {
@@ -238,43 +249,43 @@ onMounted(fetchSettings)
 </script>
 
 <style scoped>
-.settings-panel { max-width: 860px; margin: 0 auto; padding: clamp(1rem, 2.5vw, 2.25rem) 0 3rem; }
-.panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
-h2 { color: var(--text-strong); margin-bottom: 0.25rem; }
+.settings-panel { max-width: 860px; margin: 0 auto; padding: clamp(var(--space-sm), 2.5vw, var(--space-lg)) 0 var(--space-xl); }
+.panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-sm); margin-bottom: var(--space-md); flex-wrap: wrap; }
+h2 { color: var(--text-strong); margin-bottom: var(--space-3xs); }
 .panel-subtitle { color: var(--text-muted); font-size: var(--text-meta); }
-h3 { color: var(--text-strong); margin-bottom: 1rem; }
-.status-strip { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.status-pill { border-radius: var(--radius-pill); padding: 0.3rem 0.65rem; background: var(--border-strong); color: var(--text-faint); font-size: var(--text-meta); }
+h3 { color: var(--text-strong); margin-bottom: var(--space-sm); }
+.status-strip { display: flex; gap: var(--space-2xs); flex-wrap: wrap; }
+.status-pill { border-radius: var(--radius-pill); padding: var(--space-3xs) var(--space-xs); background: var(--border-strong); color: var(--text-faint); font-size: var(--text-meta); }
 .status-pill.enabled { background: var(--success-soft); color: var(--color-success); }
 .status-pill.disabled { background: var(--danger-soft); color: var(--color-danger); }
-.settings-form { background: var(--bg-card); border: 1px solid var(--border); padding: 2rem; border-radius: var(--radius); margin-bottom: 2rem; box-shadow: var(--shadow-card); }
-.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-.form-group { margin-bottom: 1.5rem; }
-.form-group label { display: block; color: var(--text); margin-bottom: 0.5rem; font-weight: 500; }
-.form-group input[type="time"], .form-group input[type="number"] { width: 100%; padding: 0.6rem; background: var(--bg-well); border: 1px solid var(--border-input); border-radius: 6px; color: var(--text-strong); }
+.settings-form { background: var(--bg-card); border: var(--rule-thin) solid var(--border); padding: var(--space-lg); border-radius: var(--radius-card); margin-bottom: var(--space-lg); box-shadow: var(--shadow-card); }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm); }
+.form-group { margin-bottom: var(--space-md); }
+.form-group label { display: block; color: var(--text); margin-bottom: var(--space-2xs); font-weight: 500; }
+.form-group input[type="time"], .form-group input[type="number"] { width: 100%; padding: var(--space-2xs); background: var(--bg-well); border: var(--rule-thin) solid var(--border-input); border-radius: var(--radius-input); color: var(--text-strong); }
 .switch { position: relative; display: inline-block; width: 50px; height: 24px; }
 .switch input { opacity: 0; width: 0; height: 0; }
-.slider { position: absolute; cursor: pointer; inset: 0; background-color: var(--color-rule-strong); transition: background-color var(--dur-short) var(--ease-out); border-radius: 24px; }
+.slider { position: absolute; cursor: pointer; inset: 0; background-color: var(--color-rule-strong); transition: background-color var(--dur-short) var(--ease-out); border-radius: var(--radius-pill); }
 .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: var(--color-paper); transition: transform var(--dur-short) var(--ease-out); border-radius: 50%; }
 input:checked + .slider { background-color: var(--accent); }
 input:checked + .slider:before { transform: translateX(26px); }
 input:focus-visible + .slider { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.btn-primary { background: var(--accent); color: var(--color-accent-ink); border: none; padding: 0.75rem 1.5rem; border-radius: 6px; cursor: pointer; font-size: 1rem; font-weight: 600; }
+.btn-primary { background: var(--accent); color: var(--color-accent-ink); border: none; padding: var(--space-xs) var(--space-md); border-radius: var(--radius-input); cursor: pointer; font-size: var(--text-md); font-weight: 600; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
-.validation-box { border: 1px solid var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); border-radius: var(--radius); padding: 0.85rem 1rem; margin-bottom: 1rem; display: grid; gap: 0.35rem; }
+.validation-box { border: var(--rule-thin) solid var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); border-radius: var(--radius-card); padding: var(--space-xs) var(--space-sm); margin-bottom: var(--space-sm); display: grid; gap: var(--space-3xs); }
 .load-error { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
-.load-error button { border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-elevated); color: var(--text-strong); padding: 0.45rem 0.8rem; }
-.info-section { background: var(--bg-card); border: 1px solid var(--border); padding: 1.5rem; border-radius: var(--radius); }
-.policy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
-.policy-grid div { background: var(--bg-well); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.9rem; display: grid; gap: 0.35rem; }
-.policy-grid span { color: var(--text-muted); font-size: 0.85rem; }
-.policy-grid strong { color: var(--text-strong); font-size: 0.95rem; overflow-wrap: anywhere; }
+.load-error button { border: var(--rule-thin) solid var(--border-strong); border-radius: var(--radius-input); background: var(--bg-elevated); color: var(--text-strong); padding: var(--space-2xs) var(--space-xs); }
+.info-section { background: var(--bg-card); border: var(--rule-thin) solid var(--border); padding: var(--space-md); border-radius: var(--radius-card); }
+.policy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-sm); }
+.policy-grid div { background: var(--bg-well); border: var(--rule-thin) solid var(--border); border-radius: var(--radius-card); padding: var(--space-sm); display: grid; gap: var(--space-3xs); }
+.policy-grid span { color: var(--text-muted); font-size: var(--text-xs); }
+.policy-grid strong { color: var(--text-strong); font-size: var(--text-sm); overflow-wrap: anywhere; }
 
 @media (max-width: 768px) {
-  .settings-panel { padding: 1rem; }
+  .settings-panel { padding: var(--space-sm); }
   .form-row { grid-template-columns: 1fr; }
-  .settings-form { padding: 1rem; }
+  .settings-form { padding: var(--space-sm); }
   .policy-grid { grid-template-columns: 1fr; }
 }
 </style>

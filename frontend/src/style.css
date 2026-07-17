@@ -48,7 +48,6 @@ html { scroll-behavior: smooth; overflow-x: clip; scrollbar-gutter: stable; }
   --pale-orange-text: var(--color-warning);
 
   --focus-ring: var(--color-focus);
-  --radius: var(--radius-card);
   --shadow-card: none;
   --shadow-modal: var(--shadow-float);
 }
@@ -66,7 +65,7 @@ body {
 }
 
 h1, h2, h3 { color: var(--text-strong); letter-spacing: -0.035em; text-wrap: balance; }
-p { text-wrap: pretty; }
+p { overflow-wrap: anywhere; }
 
 .sr-only {
   position: absolute;
@@ -81,6 +80,22 @@ p { text-wrap: pretty; }
 }
 
 button, input, select, textarea { font: inherit; }
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+}
+input:not([type="checkbox"]):not([type="radio"]):hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--border-hover);
+}
+input:not([type="checkbox"]):not([type="radio"]):active:not(:disabled),
+select:active:not(:disabled),
+textarea:active:not(:disabled) {
+  background: var(--color-paper-3);
+}
 button { cursor: pointer; transition: background-color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out), transform var(--dur-short) var(--ease-out); }
 button:focus-visible,
 input:focus-visible,
@@ -90,6 +105,29 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-muted);
+  opacity: 1;
+}
+
+.field-error-slot {
+  min-height: 1lh;
+  margin: var(--space-3xs) 0 0;
+  color: var(--color-danger);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.field-error-slot.is-empty { visibility: hidden; }
+
 button.primary:focus-visible,
 .btn-primary:focus-visible,
 .btn-execute:focus-visible,
@@ -98,13 +136,79 @@ button.primary:focus-visible,
   box-shadow: 0 0 0 3px var(--color-focus);
 }
 
+.toast {
+  position: fixed;
+  inset-block-start: var(--space-sm);
+  inset-inline-end: var(--space-sm);
+  z-index: var(--z-toast);
+  width: max-content;
+  max-width: min(25rem, calc(100% - var(--space-lg)));
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  border: var(--rule-thin) solid transparent;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-float);
+  color: var(--color-ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.toast-success { background: var(--color-success-soft); border-color: var(--color-success); color: var(--color-success); }
+.toast-error { background: var(--color-danger-soft); border-color: var(--color-danger); color: var(--color-danger); }
+.toast-info { background: var(--color-accent-soft); border-color: var(--color-accent); color: var(--color-accent-hover); }
+.toast__message { flex: 1; min-width: 0; }
+.toast__close {
+  flex: 0 0 auto;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  margin: calc(var(--space-3xs) * -1) calc(var(--space-3xs) * -1) calc(var(--space-3xs) * -1) 0;
+  border: 0;
+  border-radius: var(--radius-input);
+  background: transparent;
+  color: currentColor;
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+.toast__close:hover { background: var(--color-paper); }
+
+.confirm-dialog {
+  width: min(26rem, calc(100% - var(--space-lg)));
+  max-height: min(90dvh, 36rem);
+  padding: 0;
+  overflow: auto;
+  color: var(--color-ink-2);
+  background: var(--color-paper);
+  border: var(--rule-thin) solid var(--color-rule-strong);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-float);
+}
+.confirm-dialog::backdrop { background: var(--color-overlay); }
+.confirm-dialog__form { display: grid; gap: var(--space-md); padding: var(--space-md); }
+.confirm-dialog__message { margin: 0; color: var(--color-ink-2); overflow-wrap: anywhere; }
+.confirm-dialog__actions { display: flex; justify-content: flex-end; gap: var(--space-2xs); }
+.confirm-dialog__button {
+  min-height: 2.75rem;
+  padding-inline: var(--space-sm);
+  color: var(--color-ink-2);
+  background: var(--color-paper-3);
+  border: var(--rule-thin) solid var(--color-rule-strong);
+  border-radius: var(--radius-input);
+  font-weight: 650;
+  white-space: nowrap;
+}
+.confirm-dialog__button:hover { background: var(--color-paper-2); }
+.confirm-dialog__button--danger { color: var(--color-danger); background: var(--color-danger-soft); border-color: var(--color-danger); }
+.confirm-dialog__button--danger:hover { background: var(--color-danger-soft); }
+
 /* ── 共享占位：空状态 / 加载态，组件可直接 class 复用 ── */
 .empty-state,
 .loading-state {
   text-align: center;
-  padding: 3rem 1rem;
+  padding: var(--space-xl) var(--space-sm);
   color: var(--text-muted);
-  font-size: 0.95rem;
+  font-size: var(--text-sm);
 }
 
 /* The workspace shell owns the visible page title; panel titles stay available
