@@ -774,7 +774,7 @@ button:disabled,
 .failure-item {
   background: var(--bg-well);
   border: 1px solid var(--border);
-  border-left: 4px solid var(--danger);
+  border: 1px solid var(--danger);
   border-radius: var(--radius);
   padding: 0.95rem;
   display: flex;

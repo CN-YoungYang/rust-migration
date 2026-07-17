@@ -712,12 +712,12 @@ select, input { background: var(--bg-well); color: #fff; border: 1px solid var(-
 .group-header strong { color: #e5e7eb; font-size: 1rem; }
 .group-header .muted { font-size: 0.8rem; }
 .self-tag { background: var(--accent); border-radius: var(--radius-pill); padding: 0.05rem 0.45rem; margin-left: 0.4rem; font-size: 0.7rem; color: #fff; font-weight: normal; }
-.run-card { background: var(--bg-card); padding: 1.2rem; border-radius: var(--radius); border: 1px solid var(--border); border-left: 4px solid #64748b; transition: background-color 0.16s ease, border-color 0.16s ease; display: flex; justify-content: space-between; gap: 1rem; }
+.run-card { background: var(--bg-card); padding: 1.2rem; border-radius: var(--radius); border: 1px solid var(--border); transition: background-color 0.16s ease, border-color 0.16s ease; display: flex; justify-content: space-between; gap: 1rem; }
 .run-card:hover { background: #151f2f; border-color: var(--border-strong); }
-.run-card.success { border-left-color: var(--success); }
-.run-card.failed { border-left-color: var(--danger); }
-.run-card.already_checked { border-left-color: var(--accent-border); }
-.run-card.pending { border-left-color: var(--warn); }
+.run-card.success .badge { background: var(--success-soft); }
+.run-card.failed .badge { background: var(--danger-soft); }
+.run-card.already_checked .badge { background: var(--accent-soft); }
+.run-card.pending .badge { background: var(--warn-soft); }
 .run-info .account-name { color: #fff; font-size: 1.1rem; font-weight: bold; }
 .run-info { display: flex; flex-direction: column; gap: 0.5rem; }
 .run-title { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
