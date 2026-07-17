@@ -479,7 +479,7 @@ onUnmounted(() => {
   position: relative;
   min-height: 100dvh;
   background: var(--bg-base);
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 #app::before {
   content: '';
@@ -490,7 +490,7 @@ onUnmounted(() => {
   top: -18rem;
   z-index: 0;
   pointer-events: none;
-  border: 1px solid rgba(28, 27, 24, 0.06);
+  border: 1px solid var(--color-rule);
   border-radius: 50%;
 }
 .skip-link {
@@ -501,10 +501,10 @@ onUnmounted(() => {
   padding: 0.65rem 0.9rem;
   border-radius: 6px;
   background: var(--text-strong);
-  color: #fff;
+  color: var(--color-accent-ink);
   font-weight: 600;
   transform: translateY(-180%);
-  transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform var(--dur-short) var(--ease-out);
 }
 .skip-link:focus { transform: translateY(0); }
 .offline-banner {
@@ -547,12 +547,12 @@ onUnmounted(() => {
   flex: 0 0 auto;
   border-radius: 8px;
   background: var(--text-strong);
-  color: #fff;
+  color: var(--color-accent-ink);
   font: 700 0.72rem/1 var(--font-mono);
   letter-spacing: 0.08em;
 }
-.navbar h1 { color: var(--text-strong); font-size: 1.05rem; letter-spacing: -0.02em; white-space: nowrap; }
-.brand p { margin-top: 0.1rem; color: var(--text-muted); font-size: 0.76rem; }
+.navbar h1 { color: var(--text-strong); font-size: var(--text-nav); letter-spacing: -0.02em; white-space: nowrap; }
+.brand p { margin-top: 0.1rem; color: var(--text-muted); font-size: var(--text-meta); }
 .nav-links { display: grid; gap: 0.35rem; }
 .nav-links button {
   width: 100%;
@@ -586,7 +586,7 @@ onUnmounted(() => {
 .user-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.65rem; padding: 0.65rem; }
 .user-avatar { width: 2rem; height: 2rem; display: grid; place-items: center; border-radius: 6px; background: var(--pale-blue); color: var(--pale-blue-text); font-weight: 700; }
 .user-meta { min-width: 0; display: grid; }
-.user-meta strong { overflow: hidden; color: var(--text-strong); font-size: 0.8rem; text-overflow: ellipsis; white-space: nowrap; }
+.user-meta strong { overflow: hidden; color: var(--text-strong); font-size: var(--text-meta); text-overflow: ellipsis; white-space: nowrap; }
 .btn-logout { background: transparent; color: var(--danger); border: 0; padding: 0.35rem; font-size: 0.74rem; }
 .btn-logout:hover:not(:disabled) { background: var(--danger-soft); }
 .container { width: 100%; max-width: 1520px; margin: 0 auto; padding: clamp(1.25rem, 3vw, 3rem); }
@@ -612,7 +612,7 @@ onUnmounted(() => {
 .login-copy { max-width: 58rem; }
 .login-copy h1 { max-width: 15ch; margin: 1.25rem 0 1.5rem; font: 500 clamp(3rem, 6vw, 6.8rem)/0.94 var(--font-editorial); color: var(--text-strong); letter-spacing: -0.055em; text-wrap: balance; }
 .login-copy > p:last-child { max-width: 47rem; color: var(--text-muted); font-size: clamp(1rem, 1.5vw, 1.18rem); line-height: 1.75; }
-.login-capabilities { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.login-capabilities { display: grid; grid-template-columns: minmax(0, 1.25fr) repeat(2, minmax(0, 0.875fr)); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .login-capabilities span { padding: 1rem 0; color: var(--text); font: 600 0.76rem/1.4 var(--font-mono); letter-spacing: 0.05em; }
 .login-capabilities span + span { padding-left: 1rem; border-left: 1px solid var(--border); }
 .login-form { align-self: center; background: var(--bg-card); border: 1px solid var(--border); padding: clamp(1.75rem, 4vw, 3rem); border-radius: 12px; width: 100%; max-width: 30rem; box-shadow: var(--shadow-modal); }
@@ -622,10 +622,10 @@ onUnmounted(() => {
 .login-heading p { max-width: 32ch; color: var(--text-muted); font-size: 0.92rem; }
 .form-group { margin-bottom: 1rem; }
 .form-group label { display: block; margin-bottom: 0.45rem; color: var(--text); font-size: 0.82rem; font-weight: 600; }
-.form-group input { width: 100%; padding: 0.82rem 0.9rem; background: var(--bg-well); border: 1px solid var(--border-input); border-radius: 6px; color: var(--text-strong); font-size: 0.95rem; transition: border-color 220ms ease, background-color 220ms ease, box-shadow 220ms ease; }
+.form-group input { width: 100%; padding: 0.82rem 0.9rem; background: var(--bg-well); border: 1px solid var(--border-input); border-radius: 6px; color: var(--text-strong); font-size: 0.95rem; transition: background-color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out); }
 .form-group input:hover:not(:disabled) { border-color: var(--border-hover); }
 .form-group input:focus { background: var(--bg-well); border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-soft); }
-.btn-primary { width: 100%; background: var(--accent); color: #fff; border: 1px solid var(--accent-border); padding: 0.82rem; border-radius: 6px; cursor: pointer; font-size: 0.95rem; font-weight: 700; box-shadow: none; }
+.btn-primary { width: 100%; background: var(--accent); color: var(--color-accent-ink); border: 1px solid var(--accent-border); padding: 0.82rem; border-radius: 6px; cursor: pointer; font-size: 0.95rem; font-weight: 700; box-shadow: none; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-primary:disabled { opacity: 0.65; cursor: not-allowed; }
 .error { color: var(--danger); margin-top: 1rem; text-align: left; font-size: 0.85rem; }

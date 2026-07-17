@@ -130,7 +130,7 @@
       </div>
 
       <div class="form-actions">
-        <button type="submit" class="primary" :disabled="saving || validationErrors.length > 0">
+        <button type="submit" class="primary" :disabled="saving || validationErrors.length > 0" :data-state="saving ? 'loading' : undefined">
           {{ saving ? '保存中...' : '保存' }}
         </button>
         <button type="button" @click="cancelEdit" :disabled="saving">取消</button>
@@ -436,7 +436,7 @@ onMounted(loadConfigs)
 .notification-panel { max-width: 1000px; margin: 0 auto; padding: clamp(1rem, 2.5vw, 2.25rem) 0 3rem; }
 .panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.5rem; }
 h2, h3 { color: var(--text-strong); }
-.panel-subtitle { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }
+.panel-subtitle { color: var(--text-muted); font-size: var(--text-meta); margin-top: 0.25rem; }
 .notification-form,
 .notification-card {
   background: var(--bg-card);
@@ -490,26 +490,26 @@ button:focus-visible {
   overflow-wrap: anywhere;
 }
 .validation-box {
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  background: rgba(239, 68, 68, 0.08);
-  color: #fca5a5;
+  border: 1px solid var(--color-danger);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
   border-radius: var(--radius);
   padding: 0.85rem 1rem;
   display: grid;
   gap: 0.35rem;
 }
 .notification-list { display: grid; gap: 1rem; }
-.notification-card { display: flex; justify-content: space-between; gap: 1rem; transition: border-color 0.16s ease, background-color 0.16s ease; }
+.notification-card { display: flex; justify-content: space-between; gap: 1rem; transition: border-color var(--dur-short) var(--ease-out), background-color var(--dur-short) var(--ease-out); }
 .notification-card:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
 .config-main { min-width: 0; }
 .title-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
-.badge { background: var(--success-soft); color: #6ee7b7; border-radius: var(--radius-pill); padding: 0.15rem 0.5rem; font-size: 0.75rem; }
-.badge.disabled { background: #6b7280; color: #fff; }
+.badge { background: var(--success-soft); color: var(--color-success); border-radius: var(--radius-pill); padding: 0.15rem 0.5rem; font-size: var(--text-xs); }
+.badge.disabled { background: var(--color-paper-3); color: var(--color-muted); }
 .muted { color: var(--text-muted); margin: 0.25rem 0; overflow-wrap: anywhere; }
-.note { color: #fbbf24; margin: 0.25rem 0; }
+.note { color: var(--color-warning); margin: 0.25rem 0; }
 .test-result { margin-top: 0.4rem; font-size: 0.85rem; }
-.test-result.success { color: #34d399; }
-.test-result.failed { color: #f87171; }
+.test-result.success { color: var(--color-success); }
+.test-result.failed { color: var(--color-danger); }
 button {
   color: var(--text-strong);
   background: var(--border-input);
@@ -520,11 +520,11 @@ button {
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 button.primary,
 .primary { background: var(--accent); }
-button:hover:not(:disabled) { background: #4b5563; }
+button:hover:not(:disabled) { background: var(--color-paper-2); }
 button.primary:hover:not(:disabled),
 .primary:hover:not(:disabled) { background: var(--accent-hover); }
 button.danger { background: var(--danger); }
-button.danger:hover:not(:disabled) { background: #b91c1c; }
+button.danger:hover:not(:disabled) { background: var(--color-danger-soft); }
 .empty { color: var(--text-muted); text-align: center; padding: 2rem; }
 
 @media (max-width: 768px) {

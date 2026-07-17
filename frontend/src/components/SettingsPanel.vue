@@ -73,7 +73,7 @@
         <p v-for="error in validationErrors" :key="error">{{ error }}</p>
       </div>
 
-      <button type="submit" class="btn-primary" :disabled="saving || validationErrors.length > 0">
+    <button type="submit" class="btn-primary" :disabled="saving || validationErrors.length > 0" :data-state="saving ? 'loading' : undefined">
         {{ saving ? '保存中...' : '保存设置' }}
       </button>
     </form>
@@ -241,12 +241,12 @@ onMounted(fetchSettings)
 .settings-panel { max-width: 860px; margin: 0 auto; padding: clamp(1rem, 2.5vw, 2.25rem) 0 3rem; }
 .panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
 h2 { color: var(--text-strong); margin-bottom: 0.25rem; }
-.panel-subtitle { color: var(--text-muted); font-size: 0.9rem; }
+.panel-subtitle { color: var(--text-muted); font-size: var(--text-meta); }
 h3 { color: var(--text-strong); margin-bottom: 1rem; }
 .status-strip { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.status-pill { border-radius: var(--radius-pill); padding: 0.3rem 0.65rem; background: var(--border-strong); color: var(--text-faint); font-size: 0.8rem; }
-.status-pill.enabled { background: var(--success-soft); color: #34d399; }
-.status-pill.disabled { background: var(--danger-soft); color: #f87171; }
+.status-pill { border-radius: var(--radius-pill); padding: 0.3rem 0.65rem; background: var(--border-strong); color: var(--text-faint); font-size: var(--text-meta); }
+.status-pill.enabled { background: var(--success-soft); color: var(--color-success); }
+.status-pill.disabled { background: var(--danger-soft); color: var(--color-danger); }
 .settings-form { background: var(--bg-card); border: 1px solid var(--border); padding: 2rem; border-radius: var(--radius); margin-bottom: 2rem; box-shadow: var(--shadow-card); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .form-group { margin-bottom: 1.5rem; }
@@ -254,15 +254,15 @@ h3 { color: var(--text-strong); margin-bottom: 1rem; }
 .form-group input[type="time"], .form-group input[type="number"] { width: 100%; padding: 0.6rem; background: var(--bg-well); border: 1px solid var(--border-input); border-radius: 6px; color: var(--text-strong); }
 .switch { position: relative; display: inline-block; width: 50px; height: 24px; }
 .switch input { opacity: 0; width: 0; height: 0; }
-.slider { position: absolute; cursor: pointer; inset: 0; background-color: #475569; transition: 0.3s; border-radius: 24px; }
-.slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: 0.3s; border-radius: 50%; }
+.slider { position: absolute; cursor: pointer; inset: 0; background-color: var(--color-rule-strong); transition: background-color var(--dur-short) var(--ease-out); border-radius: 24px; }
+.slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: var(--color-paper); transition: transform var(--dur-short) var(--ease-out); border-radius: 50%; }
 input:checked + .slider { background-color: var(--accent); }
 input:checked + .slider:before { transform: translateX(26px); }
 input:focus-visible + .slider { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.btn-primary { background: var(--accent); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; cursor: pointer; font-size: 1rem; font-weight: 600; }
+.btn-primary { background: var(--accent); color: var(--color-accent-ink); border: none; padding: 0.75rem 1.5rem; border-radius: 6px; cursor: pointer; font-size: 1rem; font-weight: 600; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
-.validation-box { border: 1px solid rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.08); color: #fca5a5; border-radius: var(--radius); padding: 0.85rem 1rem; margin-bottom: 1rem; display: grid; gap: 0.35rem; }
+.validation-box { border: 1px solid var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); border-radius: var(--radius); padding: 0.85rem 1rem; margin-bottom: 1rem; display: grid; gap: 0.35rem; }
 .load-error { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 .load-error button { border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-elevated); color: var(--text-strong); padding: 0.45rem 0.8rem; }
 .info-section { background: var(--bg-card); border: 1px solid var(--border); padding: 1.5rem; border-radius: var(--radius); }

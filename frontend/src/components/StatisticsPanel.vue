@@ -147,17 +147,17 @@
           </thead>
           <tbody>
             <tr v-for="site in statistics.siteStats" :key="site.siteType">
-              <td><span class="badge">{{ site.siteType }}</span></td>
-              <td>{{ site.accountCount }}</td>
-              <td>{{ site.totalRuns }}</td>
-              <td class="success-text">{{ site.success }}</td>
-              <td class="failed-text">{{ site.failed }}</td>
-              <td>
+              <td data-label="站点类型"><span class="badge">{{ site.siteType }}</span></td>
+              <td data-label="账户数">{{ site.accountCount }}</td>
+              <td data-label="总签到">{{ site.totalRuns }}</td>
+              <td data-label="成功" class="success-text">{{ site.success }}</td>
+              <td data-label="失败" class="failed-text">{{ site.failed }}</td>
+              <td data-label="成功率">
                 <span class="rate-badge" :class="getRateClass(site.successRate)">
                   {{ site.successRate.toFixed(1) }}%
                 </span>
               </td>
-              <td>{{ site.avgDuration.toFixed(0) }}ms</td>
+              <td data-label="平均耗时">{{ site.avgDuration.toFixed(0) }}ms</td>
             </tr>
           </tbody>
         </table>
@@ -437,7 +437,7 @@ watch(() => props.isAdmin, (isAdmin) => {
 
 .panel-subtitle {
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: var(--text-meta);
   margin-top: 0.25rem;
 }
 
@@ -466,7 +466,7 @@ watch(() => props.isAdmin, (isAdmin) => {
   border: 1px solid var(--border-input);
   border-radius: 6px;
   background: var(--bg-well);
-  color: #fff;
+  color: var(--color-accent-ink);
   font-size: 14px;
 }
 
@@ -479,7 +479,7 @@ button {
   border-radius: 6px;
   padding: 8px 12px;
   background: var(--border-input);
-  color: #fff;
+  color: var(--color-accent-ink);
   cursor: pointer;
 }
 
@@ -499,9 +499,9 @@ button:disabled,
 }
 
 .validation-box {
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  color: #fca5a5;
+  background: var(--color-danger-soft);
+  border: 1px solid var(--color-danger);
+  color: var(--color-danger);
   border-radius: var(--radius);
   padding: 0.85rem 1rem;
   margin-bottom: 1rem;
@@ -526,7 +526,7 @@ button:disabled,
 }
 
 .stat-card.warning {
-  border-color: rgba(239, 68, 68, 0.45);
+  border-color: var(--color-danger);
 }
 
 .stat-mark {
@@ -537,8 +537,8 @@ button:disabled,
   border: 1px solid var(--border);
   display: grid;
   place-items: center;
-  color: #93c5fd;
-  font-size: 0.8rem;
+  color: var(--color-accent-hover);
+  font-size: var(--text-meta);
   font-weight: 600;
 }
 
@@ -631,9 +631,9 @@ button:disabled,
   border-radius: 2px;
 }
 
-.dot.success { background: #4caf50; }
-.dot.failed { background: #f44336; }
-.dot.already { background: #ff9800; }
+.dot.success { background: var(--color-success); }
+.dot.failed { background: var(--color-danger); }
+.dot.already { background: var(--color-warning); }
 
 .bar-chart {
   display: flex;
@@ -667,7 +667,7 @@ button:disabled,
 .bar {
   width: 100%;
   border-radius: 2px 2px 0 0;
-  transition: opacity 0.2s;
+  transition: opacity var(--dur-short) var(--ease-out);
   cursor: default;
   min-height: 2px;
 }
@@ -682,26 +682,26 @@ button:disabled,
   border-radius: 4px;
 }
 
-.bar.success { background: #4caf50; }
-.bar.failed { background: #f44336; }
-.bar.already { background: #ff9800; }
+.bar.success { background: var(--color-success); }
+.bar.failed { background: var(--color-danger); }
+.bar.already { background: var(--color-warning); }
 
 .bar-label {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin-top: 8px;
   white-space: nowrap;
 }
 
 .bar-value {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
-  color: #e5e7eb;
+  color: var(--color-ink-2);
   margin-top: 4px;
 }
 
 .bar-rate {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
@@ -709,7 +709,7 @@ button:disabled,
   width: 100%;
   min-width: 720px;
   border-collapse: collapse;
-  color: #e5e7eb;
+  color: var(--color-ink-2);
 }
 
 .stats-table th {
@@ -734,12 +734,12 @@ button:disabled,
 }
 
 .success-text {
-  color: #34d399;
+  color: var(--color-success);
   font-weight: 600;
 }
 
 .failed-text {
-  color: #f87171;
+  color: var(--color-danger);
   font-weight: 600;
 }
 
@@ -747,8 +747,8 @@ button:disabled,
   display: inline-block;
   padding: 4px 8px;
   border-radius: 4px;
-  background: #1e3a8a;
-  color: #dbeafe;
+  background: var(--color-accent-soft);
+  color: var(--color-accent-hover);
   font-size: 12px;
   font-weight: 600;
 }
@@ -761,10 +761,10 @@ button:disabled,
   font-weight: 600;
 }
 
-.rate-excellent { background: var(--success-soft); color: #34d399; }
-.rate-good { background: rgba(245, 158, 11, 0.18); color: #fbbf24; }
-.rate-fair { background: rgba(249, 115, 22, 0.18); color: #fb923c; }
-.rate-poor { background: var(--danger-soft); color: #f87171; }
+.rate-excellent { background: var(--success-soft); color: var(--color-success); }
+.rate-good { background: var(--color-warning-soft); color: var(--color-warning); }
+.rate-fair { background: var(--color-warning-soft); color: var(--color-warning); }
+.rate-poor { background: var(--danger-soft); color: var(--color-danger); }
 
 .failure-list {
   display: grid;
@@ -801,11 +801,11 @@ button:disabled,
 
 .owner-tag {
   color: var(--text-faint);
-  background: #1e293b;
+  background: var(--color-paper-3);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-pill);
   padding: 0.15rem 0.5rem;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
 }
 
 .failure-message {
@@ -824,7 +824,7 @@ button:disabled,
 
 .info-text strong {
   font-size: 20px;
-  color: #93c5fd;
+  color: var(--color-accent-hover);
 }
 
 .empty {
@@ -853,5 +853,14 @@ button:disabled,
   .failure-item { display: grid; }
   .failure-item button { width: 100%; }
   .failure-message { white-space: normal; max-width: none; }
+  .stats-table { min-width: 0; }
+  .stats-table thead { display: none; }
+  .stats-table,
+  .stats-table tbody,
+  .stats-table tr,
+  .stats-table td { display: block; width: 100%; }
+  .stats-table tr { padding: var(--space-xs) 0; border-bottom: 1px solid var(--color-rule); }
+  .stats-table td { display: grid; grid-template-columns: minmax(5rem, 0.7fr) minmax(0, 1fr); gap: var(--space-sm); padding: var(--space-2xs) 0; text-align: end; }
+  .stats-table td::before { content: attr(data-label); color: var(--color-muted); text-align: start; font-weight: 500; }
 }
 </style>

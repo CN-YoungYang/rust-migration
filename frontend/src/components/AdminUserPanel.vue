@@ -29,7 +29,7 @@
         <label for="new-user-note">备注</label>
         <input id="new-user-note" v-model="newUser.note" type="text" placeholder="可选，方便管理员标识用户" />
       </div>
-      <button type="submit" class="btn-primary" :disabled="creating">
+      <button type="submit" class="btn-primary" :disabled="creating" :data-state="creating ? 'loading' : undefined">
         {{ creating ? '创建中...' : '创建用户' }}
       </button>
     </form>
@@ -104,7 +104,7 @@
             <input id="edit-user-note" v-model="editingUser.note" type="text" placeholder="可选，方便管理员标识用户" />
           </div>
           <div class="modal-actions">
-            <button type="submit" class="btn-primary" :disabled="saving">
+            <button type="submit" class="btn-primary" :disabled="saving" :data-state="saving ? 'loading' : undefined">
               {{ saving ? '保存中...' : '保存' }}
             </button>
             <button type="button" @click="editingUser = null" class="btn-cancel" :disabled="saving">取消</button>
@@ -316,7 +316,7 @@ h3 {
 
 .btn-primary {
   background: var(--accent);
-  color: white;
+  color: var(--color-accent-ink);
   border: none;
   padding: 0.5rem 1.5rem;
   border-radius: 6px;
@@ -344,11 +344,11 @@ h3 {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
-  transition: background-color 0.16s ease, border-color 0.16s ease;
+  transition: background-color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out);
 }
 
 .user-card:hover {
-  background: #151f2f;
+  background: var(--color-paper-2);
   border-color: var(--border-strong);
 }
 
@@ -370,16 +370,16 @@ h3 {
   flex-wrap: wrap;
   gap: 0.55rem 1rem;
   color: var(--text-muted);
-  font-size: 0.86rem;
+  font-size: var(--text-meta);
 }
 
 .user-stats b {
-  color: #e5e7eb;
+  color: var(--color-ink);
 }
 
 .user-stats .danger,
 .user-stats .danger b {
-  color: #f87171;
+  color: var(--color-danger);
 }
 
 .disabled-hint {
@@ -391,27 +391,27 @@ h3 {
 .badge {
   padding: 0.25rem 0.5rem;
   border-radius: var(--radius-pill);
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   font-weight: bold;
 }
 
 .badge.user {
   background: var(--border-strong);
-  color: #dbeafe;
+  color: var(--color-accent-hover);
 }
 
 .badge.admin {
-  background: rgba(245, 158, 11, 0.18);
-  color: #fbbf24;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
 }
 
 .badge.super_admin {
   background: var(--danger-soft);
-  color: #f87171;
+  color: var(--color-danger);
 }
 
 .badge.disabled {
-  background: #475569;
+  background: var(--color-paper-3);
   color: var(--text-faint);
 }
 
@@ -422,7 +422,7 @@ h3 {
 
 .btn-edit {
   background: var(--success);
-  color: white;
+  color: var(--color-accent-ink);
   border: none;
   padding: 0.25rem 0.75rem;
   border-radius: 6px;
@@ -430,8 +430,9 @@ h3 {
 }
 
 .btn-delete {
-  background: #dc2626;
-  color: white;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  color: var(--color-accent-ink);
   border: none;
   padding: 0.25rem 0.75rem;
   border-radius: 6px;
@@ -439,7 +440,7 @@ h3 {
 }
 
 .btn-delete:disabled {
-  background: #475569;
+  background: var(--color-paper-3);
   cursor: not-allowed;
 }
 
@@ -454,7 +455,7 @@ h3 {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--color-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -477,8 +478,8 @@ h3 {
 }
 
 .btn-cancel {
-  background: #475569;
-  color: white;
+  background: var(--color-paper-3);
+  color: var(--color-accent-ink);
   border: none;
   padding: 0.5rem 1.5rem;
   border-radius: 6px;
@@ -486,13 +487,13 @@ h3 {
 }
 
 .loading-hint {
-  color: #9ca3af;
+  color: var(--color-muted);
   text-align: center;
   padding: 1.5rem;
 }
 
 .user-note {
-  color: #9ca3af;
+  color: var(--color-muted);
   font-size: 0.85rem;
   max-width: 200px;
   overflow: hidden;
