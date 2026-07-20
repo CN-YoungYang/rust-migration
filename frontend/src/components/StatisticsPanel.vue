@@ -322,13 +322,15 @@ const dailyTrendSeries = computed<Statistics['dailyTrend']>(() => {
     })
     cursor.setDate(cursor.getDate() + 1)
   }
-  return series
+  // 倒序：最新日期置于最左（索引 0），让首页/概览先看到当天数据。
+  return series.reverse()
 })
 
 const selectedTrendDay = computed(() => {
   const selected = dailyTrendSeries.value.find((day) => day.date === activeTrendDate.value)
   if (selected) return selected
-  return [...dailyTrendSeries.value].reverse().find((day) => day.total > 0) || dailyTrendSeries.value.at(-1) || null
+  // 倒序数组：索引 0 即最新，从最新往旧找首个有数据的一天作为默认选中。
+  return dailyTrendSeries.value.find((day) => day.total > 0) || dailyTrendSeries.value[0] || null
 })
 
 const highestRiskSite = computed(() => {
