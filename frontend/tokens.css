@@ -70,6 +70,7 @@
   --banner-height: 3.25rem;
   --nav-sticky-top: 0px;
   --nav-width: 15.5rem;
+  --layout-content-max: 95rem;
   --size-nav-mark: 0.42rem;
   --radius-mark: 2px;
 }

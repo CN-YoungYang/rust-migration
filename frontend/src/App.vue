@@ -520,7 +520,7 @@ onUnmounted(() => {
 .error { color: var(--danger); margin-top: var(--space-sm); text-align: left; font-size: var(--text-xs); }
 .login-footnote { margin-top: var(--space-sm); color: var(--text-muted); font-size: var(--text-xs); line-height: 1.6; }
 
-@media (max-width: 980px) {
+@media (max-width: 79.99rem) {
   .workspace-shell { grid-template-columns: 1fr; }
   .navbar { position: sticky; height: auto; padding: var(--space-xs) var(--space-sm); gap: var(--space-xs); border-right: 0; border-bottom: var(--rule-thin) solid var(--border); }
   .workspace-shell.has-offline-banner .navbar { height: auto; }

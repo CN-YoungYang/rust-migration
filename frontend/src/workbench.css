@@ -151,7 +151,8 @@ a:focus-visible {
 }
 
 .container {
-  max-width: 100%;
+  max-width: var(--layout-content-max);
+  margin-inline: auto;
   padding: clamp(var(--space-sm), 2.5vw, var(--space-xl));
 }
 
@@ -192,6 +193,16 @@ a:focus-visible {
   display: grid;
   gap: var(--space-md);
   color: var(--color-ink-2);
+}
+
+.panel-region section[class$="-panel"]:not(.statistics-panel),
+.panel-region .checkin-runs-panel,
+.panel-region .admin-user-panel,
+.panel-region .settings-panel {
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+  padding-inline: 0;
 }
 
 .panel-region .panel-header,
@@ -252,6 +263,12 @@ a:focus-visible {
   border: var(--rule-thin) solid var(--color-rule-strong);
   border-radius: var(--radius-input);
   transition: background-color var(--dur-short) var(--ease-out);
+}
+
+.panel-region input:not([type="checkbox"]):not([type="radio"]),
+.panel-region select,
+.panel-region textarea {
+  -webkit-text-fill-color: currentColor;
 }
 
 .panel-region textarea {
@@ -532,7 +549,7 @@ a:focus-visible {
 }
 
 .auth-container {
-  max-width: 100%;
+  max-width: var(--layout-content-max);
 }
 
 .login-page {
@@ -626,6 +643,7 @@ a:focus-visible {
 .login-form input {
   background: var(--color-ink-2);
   color: var(--color-paper);
+  -webkit-text-fill-color: currentColor;
   border-color: var(--color-muted);
 }
 
@@ -668,7 +686,7 @@ a:focus-visible {
   }
 }
 
-@media (max-width: 59.99rem) {
+@media (max-width: 79.99rem) {
   .workspace-shell {
     grid-template-columns: 1fr;
   }
