@@ -446,6 +446,7 @@ onMounted(loadConfigs)
 </script>
 
 <style scoped>
+/* design-system: design.md · Workbench panel · NotificationPanel */
 .notification-panel { max-width: 1000px; margin: 0 auto; padding: clamp(var(--space-sm), 2.5vw, var(--space-lg)) 0 var(--space-xl); }
 .panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-sm); margin-bottom: var(--space-md); }
 h2, h3 { color: var(--text-strong); }
@@ -540,7 +541,7 @@ button.danger { background: var(--color-danger-soft); color: var(--color-danger)
 button.danger:hover:not(:disabled) { background: var(--color-danger-soft); }
 .empty { color: var(--text-muted); text-align: center; padding: var(--space-lg); }
 
-@media (max-width: 768px) {
+@media (max-width: 47.99rem) {
   .notification-panel { padding: var(--space-sm); }
   .panel-header { display: grid; }
   .panel-header button { width: 100%; }

@@ -292,6 +292,7 @@ onMounted(fetchUsers)
 </script>
 
 <style scoped>
+/* design-system: design.md · Workbench panel · AdminUserPanel */
 .admin-user-panel {
   max-width: 1200px;
   margin: 0 auto;
@@ -528,7 +529,7 @@ h3 {
   cursor: default;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 47.99rem) {
   .admin-user-panel { padding: var(--space-sm); }
   .user-card { align-items: flex-start; flex-direction: column; }
   .user-info { flex-wrap: wrap; }

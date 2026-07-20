@@ -959,6 +959,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* design-system: design.md · Workbench panel · AccountPanel */
 .account-panel { max-width: 1220px; margin: 0 auto; padding: clamp(var(--space-sm), 2.5vw, var(--space-lg)) 0 var(--space-xl); }
 .panel-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-md); flex-wrap: wrap; gap: var(--space-xs); }
 .panel-header h2 { color: var(--text-strong); margin-bottom: var(--space-3xs); }
@@ -1066,13 +1067,10 @@ input, select, textarea { background: var(--bg-well); border: var(--rule-thin) s
 .error-list ul { margin: var(--space-2xs) 0 0; padding-left: var(--space-md); max-height: 200px; overflow-y: auto; }
 .error-list li { color: var(--color-danger); font-size: var(--text-xs); margin: var(--space-3xs) 0; }
 
-@media (max-width: 900px) {
-  .account-card { grid-template-columns: auto minmax(0, 1fr); }
+@media (max-width: 47.99rem) {
+  .account-card { grid-template-columns: auto minmax(0, 1fr); padding: var(--space-sm); }
   .actions { grid-column: 2; justify-content: flex-start; max-width: none; }
   .meta-grid { grid-template-columns: 1fr; }
-}
-
-@media (max-width: 768px) {
   .account-panel { padding: var(--space-sm); }
   .panel-header { align-items: stretch; }
   .header-actions,
@@ -1085,7 +1083,6 @@ input, select, textarea { background: var(--bg-well); border: var(--rule-thin) s
   .selection-count { margin-left: 0; width: 100%; }
   .bulk-toolbar button,
   .actions button { flex: 1; }
-  .account-card { padding: var(--space-sm); }
   .batch-item { grid-template-columns: 1fr; align-items: start; }
   .account-list { grid-template-columns: 1fr; }
 }

@@ -249,6 +249,7 @@ onMounted(fetchSettings)
 </script>
 
 <style scoped>
+/* design-system: design.md · Workbench panel · SettingsPanel */
 .settings-panel { max-width: 860px; margin: 0 auto; padding: clamp(var(--space-sm), 2.5vw, var(--space-lg)) 0 var(--space-xl); }
 .panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-sm); margin-bottom: var(--space-md); flex-wrap: wrap; }
 h2 { color: var(--text-strong); margin-bottom: var(--space-3xs); }
@@ -282,7 +283,7 @@ input:focus-visible + .slider { outline: 2px solid var(--focus-ring); outline-of
 .policy-grid span { color: var(--text-muted); font-size: var(--text-xs); }
 .policy-grid strong { color: var(--text-strong); font-size: var(--text-sm); overflow-wrap: anywhere; }
 
-@media (max-width: 768px) {
+@media (max-width: 47.99rem) {
   .settings-panel { padding: var(--space-sm); }
   .form-row { grid-template-columns: 1fr; }
   .settings-form { padding: var(--space-sm); }

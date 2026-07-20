@@ -662,6 +662,7 @@ watch([filterStatus, filterTriggeredBy, filterStartDate, filterEndDate, filterAc
 </script>
 
 <style scoped>
+/* design-system: design.md · Workbench panel · CheckinRunsPanel */
 .checkin-runs-panel { max-width: 1200px; margin: 0 auto; padding: clamp(var(--space-sm), 2.5vw, var(--space-lg)) 0 var(--space-xl); }
 .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-lg); gap: var(--space-sm); flex-wrap: wrap; }
 .header-actions { display: flex; gap: var(--space-xs); align-items: center; flex-wrap: wrap; }
@@ -742,7 +743,7 @@ button.ghost:hover:not(:disabled) { background: var(--bg-elevated); }
 .load-more button { background: var(--color-paper-3); color: var(--color-ink-2); border: var(--rule-thin) solid var(--color-rule-strong); padding: var(--space-2xs) var(--space-md); border-radius: var(--radius-input); cursor: pointer; }
 .load-more button:hover { background: var(--color-paper-2); color: var(--color-ink); }
 
-@media (max-width: 768px) {
+@media (max-width: 47.99rem) {
   .checkin-runs-panel { padding: var(--space-sm); }
   .header-actions,
   .status-filter,

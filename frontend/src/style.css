@@ -226,7 +226,7 @@ button.primary:focus-visible,
   border: 0;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 47.99rem) {
   button,
   select,
   input:not([type="checkbox"]):not([type="radio"]),
