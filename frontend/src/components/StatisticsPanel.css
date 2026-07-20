@@ -63,8 +63,15 @@
 }
 
 .stats-content {
+  min-width: 0;
   display: grid;
   gap: var(--space-lg);
+}
+
+/* 栅格项默认 min-width:auto，会把 .bar-chart 的 max-content 宽度一路撑到整个面板
+   （工具栏、概览条随之溢出视口）；置 0 让横向滚动只发生在 .plot-scroll 内。 */
+.stats-content > * {
+  min-width: 0;
 }
 
 .summary-strip {
