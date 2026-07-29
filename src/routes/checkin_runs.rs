@@ -6,7 +6,7 @@ use crate::{
     AppState,
 };
 use axum::{
-    extract::{Extension, State},
+    extract::{Extension, Path, State},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -280,6 +280,34 @@ fn resolve_cleanup_owner_scope(
         return Err(AppError::Forbidden);
     }
     Ok(Some(current_user_id.to_string()))
+}
+
+
+/// ?????????????????????????????????????
+pub async fn delete_run(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<crate::models::AppUser>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>> {
+    let run = db::find_run_by_id(&state.db, &id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let account = db::find_account_by_id(&state.db, &run.account_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let is_admin = user.role == "ADMIN" || user.role == "SUPER_ADMIN";
+    if !is_admin && account.owner_id.as_ref() != Some(&user.id) {
+        return Err(AppError::Forbidden);
+    }
+
+    let deleted = db::delete_run(&state.db, &id).await?;
+    if !deleted {
+        return Err(AppError::NotFound);
+    }
+
+    Ok(crate::routes::data(json!({ "success": true, "id": id })))
 }
 
 pub async fn cleanup_runs(

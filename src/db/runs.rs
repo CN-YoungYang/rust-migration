@@ -226,6 +226,26 @@ pub async fn create_run_with_status_update_and_balance(
     Ok(run)
 }
 
+/// Find a single check-in run by id
+pub async fn find_run_by_id(db: &SqlitePool, id: &str) -> Result<Option<CheckinRun>> {
+    let run = sqlx::query_as::<_, CheckinRun>(
+        "SELECT id, accountId, status, message, durationMs, triggeredBy, rawResponse, createdAt FROM CheckinRun WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(db)
+    .await?;
+    Ok(run)
+}
+
+/// Delete a single check-in run by id. Returns true if a row was deleted.
+pub async fn delete_run(db: &SqlitePool, id: &str) -> Result<bool> {
+    let result = sqlx::query("DELETE FROM CheckinRun WHERE id = ?")
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CleanupCheckinDataResult {
     pub deleted_runs: u64,
@@ -660,4 +680,42 @@ mod tests {
         assert_eq!(status.as_deref(), Some("failed"));
         assert_eq!(count_runs(&pool, "acc-1").await, 1);
     }
+    #[tokio::test]
+    async fn delete_run_removes_only_target_record() {
+        let pool = pool_with_account().await;
+        let now = Utc::now();
+        for (run_id, account_id) in [("run-keep", "acc-1"), ("run-del", "acc-1")] {
+            sqlx::query(
+                "INSERT INTO CheckinRun (id, accountId, status, triggeredBy, createdAt)
+                 VALUES (?, ?, 'success', 'manual', ?)",
+            )
+            .bind(run_id)
+            .bind(account_id)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .expect("run should be inserted");
+        }
+
+        let deleted = delete_run(&pool, "run-del")
+            .await
+            .expect("delete should succeed");
+        assert!(deleted);
+        assert_eq!(count_runs(&pool, "acc-1").await, 1);
+
+        let missing = delete_run(&pool, "run-missing")
+            .await
+            .expect("delete missing should succeed");
+        assert!(!missing);
+
+        let found = find_run_by_id(&pool, "run-keep")
+            .await
+            .expect("find should succeed");
+        assert!(found.is_some());
+        let gone = find_run_by_id(&pool, "run-del")
+            .await
+            .expect("find should succeed");
+        assert!(gone.is_none());
+    }
+
 }

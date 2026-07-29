@@ -2,7 +2,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::{
     middleware,
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use sqlx::{
@@ -121,6 +121,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/checkin-runs/cleanup",
             post(routes::checkin_runs::cleanup_runs),
+        )
+        .route(
+            "/api/checkin-runs/{id}",
+            delete(routes::checkin_runs::delete_run),
         )
         .route("/api/statistics", get(routes::statistics::get_statistics))
         .route(

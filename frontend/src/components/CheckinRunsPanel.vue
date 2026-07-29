@@ -162,7 +162,15 @@
             >
               {{ executingAccountId === run.accountId ? '重试中...' : '重试' }}
             </button>
-            <button @click="copyRunSummary(run)">复制摘要</button>
+            <button @click="copyRunSummary(run)" :disabled="actionBusy">复制摘要</button>
+            <button
+              class="btn-delete"
+              :disabled="actionBusy"
+              :data-state="deletingRunId === run.id ? 'loading' : undefined"
+              @click="deleteRun(run)"
+            >
+              {{ deletingRunId === run.id ? '删除中...' : '删除' }}
+            </button>
           </div>
         </div>
       </section>
@@ -243,6 +251,7 @@ const executing = ref(false)
 const executingAccountId = ref('')
 const retryingBatch = ref(false)
 const cleaning = ref(false)
+const deletingRunId = ref('')
 const PAGE_SIZE = 100
 let accountRequestSeq = 0
 let runsRequestSeq = 0
@@ -280,7 +289,7 @@ const statusCounts = computed(() => {
   return counts
 })
 
-const actionBusy = computed(() => executing.value || retryingBatch.value || cleaning.value)
+const actionBusy = computed(() => executing.value || retryingBatch.value || cleaning.value || Boolean(deletingRunId.value))
 
 const accountById = computed(() => {
   return new Map(accounts.value.map((account) => [account.id, account]))
@@ -560,6 +569,26 @@ const cleanupRuns = async () => {
     cleaning.value = false
   }
 }
+const deleteRun = async (run: CheckinRun) => {
+  if (!run?.id || deletingRunId.value) return
+  const name = accountName(run.accountId)
+  if (!(await confirmAction(`确定删除账户「${name}」的这条签到记录吗？此操作不可撤销。`))) return
+
+  deletingRunId.value = run.id
+  try {
+    await request(apiUrl(`/checkin-runs/${encodeURIComponent(run.id)}`), {
+      method: 'DELETE',
+    })
+    showToast('已删除该签到记录', 'success')
+    runs.value = runs.value.filter((item) => item.id !== run.id)
+    await fetchRuns()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '删除签到记录失败', 'error')
+  } finally {
+    deletingRunId.value = ''
+  }
+}
+
 const accountName = (accountId: string) => {
   return accountById.value.get(accountId)?.name || accountId
 }
@@ -736,6 +765,8 @@ button:disabled { background: var(--color-paper-3); cursor: not-allowed; opacity
 .btn-retry:hover:not(:disabled) { background: var(--color-accent-soft); }
 .btn-cleanup { background: var(--color-danger-soft); color: var(--color-danger); }
 .btn-cleanup:hover:not(:disabled) { background: var(--color-danger-soft); }
+.btn-delete { background: var(--color-danger-soft); color: var(--color-danger); }
+.btn-delete:hover:not(:disabled) { background: var(--color-danger-soft); }
 button.ghost { background: transparent; border: var(--rule-thin) solid var(--border-strong); color: var(--text-faint); }
 button.ghost:hover:not(:disabled) { background: var(--bg-elevated); }
 .empty { text-align: center; color: var(--text-muted); padding: var(--space-xl); background: var(--bg-card); border: var(--rule-thin) solid var(--border); border-radius: var(--radius-card); }
