@@ -123,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
             post(routes::checkin_runs::cleanup_runs),
         )
         .route(
-            "/api/checkin-runs/{id}",
+            "/api/checkin-runs/:id",
             delete(routes::checkin_runs::delete_run),
         )
         .route("/api/statistics", get(routes::statistics::get_statistics))
