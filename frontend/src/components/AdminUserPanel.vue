@@ -64,7 +64,7 @@
           <button
             @click="deleteUser(user.id)"
             class="btn-delete"
-            :disabled="!canManage(user)"
+            :disabled="!canManage(user) || user.id === currentUser?.id"
           >
             删除
           </button>
@@ -85,7 +85,11 @@
             <label for="edit-user-password">新密码（留空则不修改，至少 8 位）</label>
             <input id="edit-user-password" v-model="editingUser.password" type="password" autocomplete="new-password" minlength="8" :aria-invalid="editSubmitted && editPasswordInvalid" aria-describedby="edit-user-error" />
           </div>
-          <div class="form-group">
+          <div v-if="editingUser.id === currentUser?.id" class="form-group">
+            <label>角色</label>
+            <input :value="roleText(editingUser.role)" disabled />
+          </div>
+          <div v-else class="form-group">
             <label for="edit-user-role">角色</label>
             <select id="edit-user-role" v-model="editingUser.role" required :aria-invalid="editSubmitted && editRoleInvalid" aria-describedby="edit-user-error">
               <option value="USER">普通用户</option>
@@ -177,8 +181,13 @@ const editPasswordInvalid = computed(() => Boolean(editingUser.value?.password) 
 const isSuperAdmin = () => props.currentUser?.role === 'SUPER_ADMIN'
 
 const canManage = (user: User) => {
-  if (props.currentUser?.role === 'SUPER_ADMIN') return user.role !== 'SUPER_ADMIN'
-  if (props.currentUser?.role === 'ADMIN') return user.role === 'USER'
+  // M14：允许管理员/超管编辑自己的账号（改密码/启停/备注）；角色不可自改
+  if (props.currentUser?.role === 'SUPER_ADMIN') {
+    return user.role !== 'SUPER_ADMIN' || user.id === props.currentUser.id
+  }
+  if (props.currentUser?.role === 'ADMIN') {
+    return user.role === 'USER' || user.id === props.currentUser.id
+  }
   return false
 }
 

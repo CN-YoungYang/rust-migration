@@ -70,7 +70,11 @@
       <template v-if="form.notifyType === 'telegram'">
         <label>
           Bot Token
-          <input v-model.trim="form.telegramBotToken" type="password" autocomplete="new-password" :aria-invalid="invalidFields.telegramBotToken" aria-describedby="notification-validation" />
+          <input v-model.trim="form.telegramBotToken" type="password" autocomplete="new-password" placeholder="留空保持不变" :disabled="clearTelegramToken" :aria-invalid="invalidFields.telegramBotToken" aria-describedby="notification-validation" />
+        </label>
+        <label v-if="form.id" class="clear-option">
+          <input v-model="clearTelegramToken" type="checkbox" />
+          清除已保存的 Bot Token
         </label>
         <label>
           Chat ID
@@ -95,7 +99,11 @@
         </label>
         <label>
           SMTP 密码
-          <input v-model.trim="form.emailSmtpPassword" type="password" autocomplete="new-password" :aria-invalid="invalidFields.emailSmtpPassword" aria-describedby="notification-validation" />
+          <input v-model.trim="form.emailSmtpPassword" type="password" autocomplete="new-password" placeholder="留空保持不变" :disabled="clearSmtpPassword" :aria-invalid="invalidFields.emailSmtpPassword" aria-describedby="notification-validation" />
+        </label>
+        <label v-if="form.id" class="clear-option">
+          <input v-model="clearSmtpPassword" type="checkbox" />
+          清除已保存的 SMTP 密码
         </label>
         <div class="form-row">
           <label>
@@ -194,8 +202,8 @@ interface NotificationConfig {
 }
 
 interface NotificationForm extends Partial<NotificationConfig> {
-  emailSmtpPassword?: string
-  telegramBotToken?: string
+  emailSmtpPassword?: string | null
+  telegramBotToken?: string | null
 }
 
 const configs = ref<NotificationConfig[]>([])
@@ -204,6 +212,9 @@ const saving = ref(false)
 const testingId = ref('')
 const editing = ref(false)
 const form = ref<NotificationForm>(emptyForm())
+// 编辑已有配置时，勾选后发送 null 清空已加密保存的凭证（后端三态清空）
+const clearSmtpPassword = ref(false)
+const clearTelegramToken = ref(false)
 const testResults = ref<Record<string, { success: boolean; message: string; testedAt: string }>>({})
 
 const enabledCount = computed(() => configs.value.filter((config) => config.enabled).length)
@@ -340,23 +351,44 @@ function targetSummary(config: NotificationConfig): string {
 
 function startCreate() {
   form.value = emptyForm()
+  clearSmtpPassword.value = false
+  clearTelegramToken.value = false
   editing.value = true
 }
 
 function startEdit(config: NotificationConfig) {
   form.value = { ...config, emailSmtpPassword: '', telegramBotToken: '' }
+  clearSmtpPassword.value = false
+  clearTelegramToken.value = false
   editing.value = true
 }
 
 function cancelEdit() {
   editing.value = false
   form.value = emptyForm()
+  clearSmtpPassword.value = false
+  clearTelegramToken.value = false
 }
 
 function buildPayload() {
   const raw = { ...form.value }
-  if (!raw.emailSmtpPassword) delete raw.emailSmtpPassword
-  if (!raw.telegramBotToken) delete raw.telegramBotToken
+  // 凭证三态：勾选清除 → null；填写新值 → 新值；留空 → 不发送（保持原值）
+  const smtpPassword = form.value.emailSmtpPassword?.trim()
+  if (clearSmtpPassword.value) {
+    raw.emailSmtpPassword = null
+  } else if (smtpPassword) {
+    raw.emailSmtpPassword = smtpPassword
+  } else {
+    delete raw.emailSmtpPassword
+  }
+  const telegramToken = form.value.telegramBotToken?.trim()
+  if (clearTelegramToken.value) {
+    raw.telegramBotToken = null
+  } else if (telegramToken) {
+    raw.telegramBotToken = telegramToken
+  } else {
+    delete raw.telegramBotToken
+  }
   if (!raw.onBalanceLow) raw.balanceThreshold = null
   if (raw.webhookHeaders !== undefined && !raw.webhookHeaders?.trim()) raw.webhookHeaders = null
   if (raw.note !== undefined && !raw.note?.trim()) raw.note = null
@@ -462,6 +494,8 @@ h2, h3 { color: var(--text-strong); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm); }
 label { color: var(--text); display: grid; gap: var(--space-2xs); }
 .switch-row { align-content: center; grid-template-columns: auto 1fr; align-items: center; }
+.clear-option { display: flex; flex-direction: row; align-items: center; gap: var(--space-2xs); color: var(--text-muted); font-size: var(--text-xs); cursor: pointer; }
+.clear-option input { width: auto; margin: 0; }
 input,
 select {
   color: var(--text-strong);

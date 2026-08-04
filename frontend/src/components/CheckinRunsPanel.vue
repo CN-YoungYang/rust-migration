@@ -68,18 +68,18 @@
       <div class="date-range">
         <input
           v-model="filterStartDate"
-          type="datetime-local"
+          type="date"
           class="filter-input"
-          aria-label="开始时间"
-          placeholder="开始时间"
+          aria-label="开始日期"
+          placeholder="开始日期"
         />
         <span class="date-separator">至</span>
         <input
           v-model="filterEndDate"
-          type="datetime-local"
+          type="date"
           class="filter-input"
-          aria-label="结束时间"
-          placeholder="结束时间"
+          aria-label="结束日期"
+          placeholder="结束日期"
         />
       </div>
       <select v-model="filterAccountId" class="filter-select" aria-label="按账户筛选">
@@ -429,10 +429,10 @@ const fetchRuns = async (append = false) => {
       params.append('triggeredBy', filterTriggeredBy.value)
     }
     if (filterStartDate.value) {
-      params.append('startDate', new Date(filterStartDate.value).toISOString())
+      params.append('startDate', filterStartDate.value)
     }
     if (filterEndDate.value) {
-      params.append('endDate', new Date(filterEndDate.value).toISOString())
+      params.append('endDate', filterEndDate.value)
     }
     if (filterAccountId.value) {
       params.append('accountId', filterAccountId.value)
