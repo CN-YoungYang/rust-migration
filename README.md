@@ -187,6 +187,10 @@ PORT=8080                        # 服务端口
 RUST_LOG=info                    # 日志级别
 TZ=Asia/Shanghai                 # 时区
 CORS_ALLOWED_ORIGINS=http://localhost:5173
+# 反向代理（nginx/负载均衡）部署时，配置代理来源 IP/CIDR（逗号分隔），
+# 使登录限流按真实客户端 IP（X-Forwarded-For）计桶而不是代理 IP。
+# loopback 恒受信任；直连部署留空即可。
+TRUSTED_PROXY_IPS=
 SESSION_TTL_HOURS=24             # 会话有效期
 ADMIN_USERNAME=admin             # 初始管理员用户名
 ADMIN_PASSWORD=YourSecurePassword123!@#  # 初始管理员密码，首次创建管理员时必填
@@ -212,7 +216,7 @@ ADMIN_PASSWORD=YourSecurePassword123!@#  # 初始管理员密码，首次创建�
 说明：
 
 - `batchDelayMin` / `batchDelayMax`：批量和定时签到的账户间随机延迟，单位秒，允许 `0~600`。
-- `cleanupKeepLatest`：调度清理时保留的最新签到记录数，`0` 表示清空全部。
+- `cleanupKeepLatest`：调度清理时**每个账户**保留的最新签到记录数（非全库 Top-N，低活跃账户的历史不会被活跃账户占满配额后清空），`0` 表示清空全部。
 
 ### 1Panel 部署 CORS 配置
 

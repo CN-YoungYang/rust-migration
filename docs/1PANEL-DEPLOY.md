@@ -239,6 +239,8 @@ server {
 }
 ```
 
+> **重要**：使用上述反向代理时，请在容器 `.env` 中配置 `TRUSTED_PROXY_IPS`，否则登录限流会把代理 IP 当作客户端 IP（所有客户端都显示为同一来源，限流退化成按用户名）。Docker 部署下容器看到的是 docker 网桥网关（如 `172.17.0.1`），可设为 `TRUSTED_PROXY_IPS=172.16.0.0/12`（精确 IP 与 CIDR 均支持，逗号分隔，loopback 恒受信任）。直连部署无需设置。
+
 ## 快速检查清单
 
 - [ ] 生成 TOKEN_ENCRYPTION_KEY
