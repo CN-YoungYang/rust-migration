@@ -429,10 +429,10 @@ const fetchRuns = async (append = false) => {
       params.append('triggeredBy', filterTriggeredBy.value)
     }
     if (filterStartDate.value) {
-      params.append('startDate', filterStartDate.value)
+      params.append('startDate', dayBoundary(filterStartDate.value, false))
     }
     if (filterEndDate.value) {
-      params.append('endDate', filterEndDate.value)
+      params.append('endDate', dayBoundary(filterEndDate.value, true))
     }
     if (filterAccountId.value) {
       params.append('accountId', filterAccountId.value)
@@ -622,6 +622,15 @@ const triggerText = (trigger: string) => {
 }
 
 const formatTime = (time: string) => new Date(time).toLocaleString('zh-CN')
+
+// 把日期选择器的 `YYYY-MM-DD` 转成浏览器本地时区的日界 RFC3339 时刻。
+// 记录在界面上按浏览器本地时间显示，筛选也必须用浏览器本地日界，否则
+// 服务器时区与浏览器时区不一致时会筛错日期（回归修复：此前把裸日期字符串
+// 交给后端按服务器时区解释）。后端对含 `T` 的时间戳原样透传，作为绝对时刻比较。
+const dayBoundary = (date: string, atEnd: boolean): string => {
+  const time = atEnd ? 'T23:59:59.999' : 'T00:00:00'
+  return new Date(`${date}${time}`).toISOString()
+}
 
 const batchStatusText = (status: string) => {
   const map: Record<string, string> = {

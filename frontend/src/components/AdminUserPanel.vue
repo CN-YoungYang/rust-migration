@@ -98,11 +98,14 @@
           </div>
           <div class="form-group">
             <label>
-              <input v-model="editingUser.enabled" type="checkbox" />
+              <input v-model="editingUser.enabled" type="checkbox" :disabled="editingUser.id === currentUser?.id" />
               启用
             </label>
             <p v-if="!editingUser.enabled" class="disabled-hint">
               禁用后，该用户的账户不会参与自动签到。
+            </p>
+            <p v-if="editingUser.id === currentUser?.id" class="disabled-hint">
+              不能禁用当前登录账号，防止唯一管理员被禁用后无法恢复。
             </p>
           </div>
           <div class="form-group">
