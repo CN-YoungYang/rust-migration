@@ -14,6 +14,9 @@ pub fn http_client() -> &'static Client {
         Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::none())
+            // 忽略 HTTP_PROXY/HTTPS_PROXY 等环境变量：若部署环境配置了代理，
+            // 本地 IP 的 SSRF 校验会被代理间接绕过（请求经代理转发到内网）。
+            .no_proxy()
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36")
             .build()
             .expect("Failed to create HTTP client")

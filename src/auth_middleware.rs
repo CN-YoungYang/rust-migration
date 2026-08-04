@@ -1,7 +1,7 @@
 use crate::{db, AppState};
 use axum::{
     extract::{Request, State},
-    http::{header, HeaderMap, Method, StatusCode},
+    http::{header, HeaderMap, Method},
     middleware::Next,
     response::Response,
 };
@@ -164,13 +164,13 @@ pub async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     mut request: Request,
     next: Next,
-) -> Result<Response, StatusCode> {
+) -> crate::error::Result<Response> {
     if let Some(token) = session_token_from_headers(request.headers()) {
         if let Ok(Some(entry)) =
             db::find_session_and_renew(&state.db, &token, session_ttl_secs() as i64).await
         {
             if is_csrf_required(request.method()) && !validate_csrf(request.headers(), &entry) {
-                return Err(StatusCode::FORBIDDEN);
+                return Err(crate::error::AppError::Forbidden);
             }
             if let Ok(Some(user)) = db::find_user_by_id(&state.db, &entry.user_id).await {
                 if user.enabled {
@@ -181,10 +181,11 @@ pub async fn auth_middleware(
         }
     }
 
-    Err(StatusCode::UNAUTHORIZED)
+    // 返回 JSON 错误而非裸状态码，保持统一 {error:...} 响应契约（Low-5）
+    Err(crate::error::AppError::Unauthorized)
 }
 
-pub async fn admin_middleware(request: Request, next: Next) -> Result<Response, StatusCode> {
+pub async fn admin_middleware(request: Request, next: Next) -> crate::error::Result<Response> {
     let user = request
         .extensions()
         .get::<crate::models::AppUser>()
@@ -192,7 +193,7 @@ pub async fn admin_middleware(request: Request, next: Next) -> Result<Response, 
 
     match user {
         Some(u) if u.role == "ADMIN" || u.role == "SUPER_ADMIN" => Ok(next.run(request).await),
-        _ => Err(StatusCode::FORBIDDEN),
+        _ => Err(crate::error::AppError::Forbidden),
     }
 }
 

@@ -96,14 +96,14 @@ pub async fn execute_checkin(
     let _guard = match InFlightGuard::try_acquire(account_id) {
         Some(g) => g,
         None => {
-            return create_failed_run(
-                db,
+            // 抢占失败不是真实签到尝试：返回 skipped（不落库），
+            // 避免假失败记录消耗每日尝试预算并污染统计（M6）。
+            return Ok(skipped_run(
                 account_id,
                 "该账户正在签到中，请稍后再试",
                 triggered_by,
                 start,
-            )
-            .await;
+            ));
         }
     };
 
@@ -112,7 +112,7 @@ pub async fn execute_checkin(
         .ok_or(AppError::NotFound)?;
 
     if !account.enabled {
-        return create_failed_run(db, account_id, "账户已禁用", triggered_by, start).await;
+        return Ok(skipped_run(account_id, "账户已禁用", triggered_by, start));
     }
 
     // TOCTOU 重检查：用刚从 DB 取到的最新账户状态再做一次 skip 判断，
@@ -120,8 +120,27 @@ pub async fn execute_checkin(
     if let Some(s) = settings {
         let today_local = chrono::Local::now().date_naive();
         if let Some(reason) = skip_reason_for_batch(&account, s, today_local) {
-            return create_failed_run(db, account_id, reason, triggered_by, start).await;
+            return Ok(skipped_run(account_id, reason, triggered_by, start));
         }
+
+        // M5：在单飞锁内用最新 DB 计数复核每日上限，关闭“调度与手动批量同时通过
+        // 上限检查后各自执行”的竞态。手动单签（settings=None）不受每日上限限制。
+        let today_runs = db::count_runs_today(db, account_id).await?;
+        if today_runs >= s.max_attempts_per_day.max(1) {
+            let msg = format!("已达到今日最大尝试次数 ({})", s.max_attempts_per_day);
+            return Ok(skipped_run(account_id, &msg, triggered_by, start));
+        }
+    }
+
+    // SSRF 执行期复核：base_url 可能在上次配置写入后被 DNS 重绑定到内网，
+    // 发送前再次解析并拒绝私网地址（fail-closed）。自定义签到 URL 已限定与
+    // base_url 同源，因此复核 base_url 的主机即覆盖全部出站地址。
+    if let Err(e) =
+        crate::security::validate_public_http_url_resolved(&account.base_url, "签到地址").await
+    {
+        let msg = e.to_string();
+        tracing::warn!(account_id = %account_id, error = %msg, "签到前 SSRF 复核未通过");
+        return create_failed_run(db, account_id, &msg, triggered_by, start).await;
     }
 
     // 防判定：每次签到使用随机 UA，降低多账户同 IP + 同 UA 的关联指纹。
@@ -352,6 +371,22 @@ async fn create_failed_run(
         None,
     )
     .await
+}
+
+/// 构造一个“已跳过”的签到结果：不落库、不计入每日尝试上限、不触发通知。
+/// 用于抢占、账户禁用、二次重检拦截、达到每日上限等非真实尝试路径（M6），
+/// 与批量/定时前置跳过（status='skipped' 但不写记录）保持同一语义。
+fn skipped_run(account_id: &str, message: &str, triggered_by: &str, start: Instant) -> CheckinRun {
+    CheckinRun {
+        id: uuid::Uuid::new_v4().to_string(),
+        account_id: account_id.to_string(),
+        status: "skipped".to_string(),
+        message: Some(message.to_string()),
+        duration_ms: Some(start.elapsed().as_millis().min(i64::MAX as u128) as i64),
+        triggered_by: triggered_by.to_string(),
+        raw_response: None,
+        created_at: chrono::Utc::now(),
+    }
 }
 
 async fn handle_notifications(

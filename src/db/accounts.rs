@@ -42,7 +42,9 @@ pub async fn list_accounts_filtered(
         }
     }
     if filter.keyword.is_some() {
-        sql.push_str(" AND (name LIKE ? OR baseUrl LIKE ? OR note LIKE ?)");
+        sql.push_str(
+            " AND (name LIKE ? ESCAPE '\\' OR baseUrl LIKE ? ESCAPE '\\' OR note LIKE ? ESCAPE '\\')",
+        );
     }
 
     sql.push_str(" ORDER BY createdAt DESC LIMIT ? OFFSET ?");
@@ -64,7 +66,12 @@ pub async fn list_accounts_filtered(
         }
     }
     if let Some(ref kw) = filter.keyword {
-        let pattern = format!("%{}%", kw);
+        // Low4：转义 LIKE 通配符（\ % _），避免用户输入被当作通配符匹配到意外记录
+        let escaped = kw
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let pattern = format!("%{}%", escaped);
         query = query
             .bind(pattern.clone())
             .bind(pattern.clone())
@@ -160,51 +167,94 @@ pub async fn create_account(db: &SqlitePool, req: &CreateAccountRequest) -> Resu
     Ok(account)
 }
 
-/// Update account details
+/// Update account details.
+///
+/// L2：只更新请求中显式提供的列（None = 保持原值，不写入该列），替代
+/// “先 find 再整行 UPDATE”的读改写。两个并发 PUT 各改不同字段时不会以陈旧
+/// 基线互相覆盖；三态字段 `Some(None)` 清空为 NULL、`Some(Some(v))` 写入 v。
 pub async fn update_account(
     db: &SqlitePool,
     id: &str,
     req: &UpdateAccountRequest,
 ) -> Result<CheckinAccount> {
-    let now = Utc::now();
-    let current = find_account_by_id(db, id)
+    // 校验存在（NotFound），同时避免对不存在账户的空更新
+    find_account_by_id(db, id)
         .await?
         .ok_or(crate::error::AppError::NotFound)?;
 
-    // Three-state handling: None=keep original, Some(None)=clear to NULL, Some(Some(v))=set new value
-    let resolve = |cur: &Option<String>, new: Option<Option<String>>| -> Option<Option<String>> {
-        match new {
-            None => cur.as_ref().map(|s| Some(s.clone())), // Keep original
-            Some(None) => Some(None),                      // Clear to NULL
-            Some(Some(v)) => Some(Some(v)),                // Set new value
-        }
-    };
+    let now = Utc::now();
 
-    let new_user_id = resolve(&current.user_id, req.user_id.clone());
-    let new_access_token_enc = resolve(&current.access_token_enc, req.access_token_enc.clone());
-    let new_cookie_enc = resolve(&current.cookie_enc, req.cookie_enc.clone());
-    let new_custom_checkin_url =
-        resolve(&current.custom_checkin_url, req.custom_checkin_url.clone());
-    let new_note = resolve(&current.note, req.note.clone());
+    let mut sets: Vec<&str> = Vec::new();
+    if req.name.is_some() {
+        sets.push("name = ?");
+    }
+    if req.base_url.is_some() {
+        sets.push("baseUrl = ?");
+    }
+    if req.user_id.is_some() {
+        sets.push("userId = ?");
+    }
+    if req.access_token_enc.is_some() {
+        sets.push("accessTokenEnc = ?");
+    }
+    if req.cookie_enc.is_some() {
+        sets.push("cookieEnc = ?");
+    }
+    if req.custom_checkin_url.is_some() {
+        sets.push("customCheckinUrl = ?");
+    }
+    if req.enabled.is_some() {
+        sets.push("enabled = ?");
+    }
+    if req.retry_enabled.is_some() {
+        sets.push("retryEnabled = ?");
+    }
+    if req.note.is_some() {
+        sets.push("note = ?");
+    }
+    sets.push("updatedAt = ?");
 
-    let account = sqlx::query_as::<_, CheckinAccount>(
-        "UPDATE CheckinAccount SET name = ?, baseUrl = ?, userId = ?, accessTokenEnc = ?, cookieEnc = ?, customCheckinUrl = ?, enabled = ?, retryEnabled = ?, note = ?, updatedAt = ? WHERE id = ? RETURNING *"
-    )
-    .bind(req.name.as_ref().unwrap_or(&current.name))
-    .bind(req.base_url.as_ref().unwrap_or(&current.base_url))
-    .bind(new_user_id.flatten().as_deref())
-    .bind(new_access_token_enc.flatten().as_deref())
-    .bind(new_cookie_enc.flatten().as_deref())
-    .bind(new_custom_checkin_url.flatten().as_deref())
-    .bind(req.enabled.unwrap_or(current.enabled))
-    .bind(req.retry_enabled.unwrap_or(current.retry_enabled))
-    .bind(new_note.flatten().as_deref())
-    .bind(now)
-    .bind(id)
-    .fetch_one(db)
-    .await?;
+    let sql = format!("UPDATE CheckinAccount SET {} WHERE id = ?", sets.join(", "));
+    let mut query = sqlx::query(&sql);
 
-    Ok(account)
+    if let Some(v) = &req.name {
+        query = query.bind(v);
+    }
+    if let Some(v) = &req.base_url {
+        query = query.bind(v);
+    }
+    // 三态文本列：Some(None) 绑定 NULL，Some(Some(v)) 绑定 v
+    if let Some(v) = &req.user_id {
+        query = query.bind(v.as_deref());
+    }
+    if let Some(v) = &req.access_token_enc {
+        query = query.bind(v.as_deref());
+    }
+    if let Some(v) = &req.cookie_enc {
+        query = query.bind(v.as_deref());
+    }
+    if let Some(v) = &req.custom_checkin_url {
+        query = query.bind(v.as_deref());
+    }
+    if let Some(v) = req.enabled {
+        query = query.bind(v);
+    }
+    if let Some(v) = req.retry_enabled {
+        query = query.bind(v);
+    }
+    if let Some(v) = &req.note {
+        query = query.bind(v.as_deref());
+    }
+
+    query = query.bind(now);
+    query = query.bind(id);
+
+    query.execute(db).await?;
+
+    // 更新后重新读取返回最新值（与通知配置更新一致）
+    find_account_by_id(db, id)
+        .await?
+        .ok_or(crate::error::AppError::NotFound)
 }
 
 /// Update account balance
@@ -378,5 +428,118 @@ mod tests {
         assert_eq!(updated.custom_checkin_url, None);
         assert_eq!(updated.note, None);
         assert_eq!(updated.name, "account");
+    }
+
+    #[tokio::test]
+    async fn update_account_writes_only_requested_columns() {
+        let pool = test_pool().await;
+        insert_user(&pool, "active-user", true).await;
+        let now = Utc::now();
+        sqlx::query(
+            "INSERT INTO CheckinAccount (
+                id, name, siteType, baseUrl, userId, ownerId, authType,
+                customCheckinUrl, enabled, retryEnabled, note, createdAt, updatedAt
+             ) VALUES (
+                'account-partial', 'account', 'new-api', 'https://example.com',
+                'user-42', 'active-user', 'access_token', '/api/checkin', 1, 1,
+                'ops note', ?, ?
+             )",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("account should be inserted");
+
+        // L2：只改 name，未提供的 baseUrl / userId / note 等列必须保持原值不被覆盖
+        let updated = update_account(
+            &pool,
+            "account-partial",
+            &UpdateAccountRequest {
+                name: Some("renamed".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("account should be updated");
+
+        assert_eq!(updated.name, "renamed");
+        assert_eq!(updated.base_url, "https://example.com");
+        assert_eq!(updated.user_id.as_deref(), Some("user-42"));
+        assert_eq!(updated.custom_checkin_url.as_deref(), Some("/api/checkin"));
+        assert_eq!(updated.note.as_deref(), Some("ops note"));
+        assert!(updated.enabled);
+        assert!(updated.retry_enabled);
+    }
+
+    #[tokio::test]
+    async fn keyword_search_escapes_like_wildcards() {
+        let pool = test_pool().await;
+        insert_user(&pool, "owner-1", true).await;
+        let now = Utc::now();
+        for (id, name) in [
+            ("a1", "100%"),
+            ("a2", "100X"),
+            ("a3", "free_acct"),
+            ("a4", "freeXacct"),
+        ] {
+            sqlx::query(
+                "INSERT INTO CheckinAccount (
+                    id, name, siteType, baseUrl, ownerId, authType,
+                    enabled, retryEnabled, createdAt, updatedAt
+                 ) VALUES (?, ?, 'new-api', 'https://example.com', 'owner-1', 'access_token', 1, 1, ?, ?)",
+            )
+            .bind(id)
+            .bind(name)
+            .bind(now)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .expect("account should be inserted");
+        }
+
+        // % 被转义为字面量：只命中含 % 的账户，不误匹配 100X
+        let percent = list_accounts_filtered(
+            &pool,
+            &AccountFilter {
+                owner_id: Some("owner-1".to_string()),
+                keyword: Some("100%".to_string()),
+                limit: 100,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("query should succeed");
+        assert_eq!(percent.len(), 1);
+        assert_eq!(percent[0].id, "a1");
+
+        // _ 被转义为字面量：只命中含下划线的账户
+        let underscore = list_accounts_filtered(
+            &pool,
+            &AccountFilter {
+                owner_id: Some("owner-1".to_string()),
+                keyword: Some("_".to_string()),
+                limit: 100,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("query should succeed");
+        assert_eq!(underscore.len(), 1);
+        assert_eq!(underscore[0].id, "a3");
+
+        // 普通关键字不受影响
+        let plain = list_accounts_filtered(
+            &pool,
+            &AccountFilter {
+                owner_id: Some("owner-1".to_string()),
+                keyword: Some("free".to_string()),
+                limit: 100,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("query should succeed");
+        assert_eq!(plain.len(), 2);
     }
 }

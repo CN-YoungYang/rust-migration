@@ -141,7 +141,7 @@ pub struct RecentFailure {
     created_at: DateTime<Utc>,
 }
 
-fn local_day_start(date: NaiveDate) -> Result<DateTime<Utc>> {
+pub fn local_day_start(date: NaiveDate) -> Result<DateTime<Utc>> {
     let naive = date
         .and_hms_opt(0, 0, 0)
         .ok_or_else(|| AppError::Internal("无法计算本地日期开始时间".into()))?;
@@ -152,9 +152,11 @@ fn local_day_start(date: NaiveDate) -> Result<DateTime<Utc>> {
         .ok_or_else(|| AppError::Internal("无法解析本地日期开始时间".into()))
 }
 
-fn local_day_end(date: NaiveDate) -> Result<DateTime<Utc>> {
+/// 本地日期结束时刻。使用 `23:59:59.999` 而非 `23:59:59`，避免漏掉
+/// 当日最后一秒内、带亚秒精度的记录。
+pub fn local_day_end(date: NaiveDate) -> Result<DateTime<Utc>> {
     let naive = date
-        .and_hms_opt(23, 59, 59)
+        .and_hms_milli_opt(23, 59, 59, 999)
         .ok_or_else(|| AppError::Internal("无法计算本地日期结束时间".into()))?;
     naive
         .and_local_timezone(Local)
@@ -561,9 +563,11 @@ async fn calculate_recent_failures(
 
 #[cfg(test)]
 mod tests {
-    use super::{calculate_recent_failures, calculate_site_stats, resolve_owner_filter};
+    use super::{
+        calculate_recent_failures, calculate_site_stats, local_day_end, resolve_owner_filter,
+    };
     use crate::{error::AppError, models::AppUser};
-    use chrono::Utc;
+    use chrono::{NaiveDate, Utc};
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
     fn user(id: &str, role: &str) -> AppUser {
@@ -727,6 +731,18 @@ mod tests {
             resolve_owner_filter(&regular, false, Some("other-id")),
             Err(AppError::Forbidden)
         ));
+    }
+
+    #[test]
+    fn local_day_end_reaches_millisecond_precision_boundary() {
+        // Low1：日界取 23:59:59.999，避免漏掉当日最后一秒带亚秒精度的记录
+        use chrono::{Local, Timelike};
+        let end = local_day_end(NaiveDate::from_ymd_opt(2026, 8, 4).unwrap()).unwrap();
+        let local_end = end.with_timezone(&Local);
+        assert_eq!(local_end.hour(), 23);
+        assert_eq!(local_end.minute(), 59);
+        assert_eq!(local_end.second(), 59);
+        assert_eq!(local_end.nanosecond(), 999_000_000);
     }
 
     #[tokio::test]

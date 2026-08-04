@@ -141,6 +141,21 @@ async fn send_email_notification(
     .await
 }
 
+/// 校验单个 SMTP 信封地址（发件人或收件人），拒绝可注入 SMTP 指令的字符（M2）。
+/// 地址被直接拼入 `MAIL FROM:<{from}>` / `RCPT TO:<{to}>`：`\r\n` 可注入额外
+/// SMTP 指令，`<`/`>` 可提前闭合尖括号改变命令语义，均在此拒绝。
+pub fn validate_smtp_address(value: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        return Err(AppError::Validation("SMTP 邮件地址不能为空".into()));
+    }
+    if value.chars().any(|c| matches!(c, '\r' | '\n' | '<' | '>')) {
+        return Err(AppError::Validation(
+            "SMTP 邮件地址包含非法字符（不允许回车/换行/尖括号）".into(),
+        ));
+    }
+    Ok(())
+}
+
 async fn send_smtp(email: SmtpMessage<'_>) -> Result<()> {
     // 发送前再次按实际解析的 IP 做 SSRF 防护，与 webhook 路径保持一致，
     // 防止配置写入后 DNS 重绑定/TOCTOU 指向内网或元数据地址。
@@ -199,6 +214,13 @@ async fn send_smtp(email: SmtpMessage<'_>) -> Result<()> {
         &[235],
     )
     .await?;
+
+    // M2：信封地址直接拼入 MAIL FROM / RCPT TO 命令，先校验拒绝 CRLF/尖括号注入，
+    // 发件人与逐个收件人（`email.to` 按逗号分隔多收件人）都需通过。
+    validate_smtp_address(email.from)?;
+    for recipient in email.to.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        validate_smtp_address(recipient)?;
+    }
 
     smtp_cmd(
         &mut stream,
@@ -290,15 +312,23 @@ fn validate_smtp_response(response: &str, expected: &[u16]) -> Result<()> {
         .find(|line| line.len() >= 3)
         .and_then(|line| line.get(0..3))
         .and_then(|code| code.parse::<u16>().ok())
-        .ok_or_else(|| AppError::Internal(format!("无法解析 SMTP 响应: {}", response.trim())))?;
+        .ok_or_else(|| {
+            tracing::warn!(response = %response.trim(), "无法解析 SMTP 响应");
+            AppError::Internal("无法解析 SMTP 服务器响应".into())
+        })?;
 
     if expected.contains(&code) {
         Ok(())
     } else {
-        Err(AppError::Internal(format!(
-            "SMTP 返回错误: {}",
-            response.trim()
-        )))
+        tracing::warn!(
+            code,
+            response = %response.trim(),
+            expected = ?expected,
+            "SMTP 服务器返回非预期状态码"
+        );
+        Err(AppError::Internal(
+            "SMTP 服务器返回错误状态码，请检查发件服务器配置".into(),
+        ))
     }
 }
 
@@ -541,5 +571,14 @@ mod tests {
     #[test]
     fn dot_stuff_escapes_lines_starting_with_dot() {
         assert_eq!(dot_stuff("a\n.b\n..c"), "a\r\n..b\r\n...c");
+    }
+
+    #[test]
+    fn validate_smtp_address_rejects_injectable_characters() {
+        assert!(validate_smtp_address("a@b.com").is_ok());
+        assert!(validate_smtp_address("a@b.com\r\nMAIL FROM:<evil@x>").is_err());
+        assert!(validate_smtp_address("<a@b.com>").is_err());
+        assert!(validate_smtp_address("").is_err());
+        assert!(validate_smtp_address("   ").is_err());
     }
 }

@@ -136,10 +136,13 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
 
         // 传入 settings 供 execute_checkin 做 TOCTOU 重检查
         match execute_checkin(db, &account.id, "scheduled", Some(&settings)).await {
-            Ok(_) => {
+            Ok(run) => {
                 tracing::info!("Scheduled checkin completed for account {}", account.id);
-                // 更新内存计数器，避免后续账户因过期计数而超限
-                *today_counts.entry(account.id.clone()).or_insert(0) += 1;
+                // 只对真实尝试（success/failed）累加内存计数，与 DB 计数口径一致；
+                // already_checked/skipped 不计入每日上限（M6）。
+                if db::is_real_attempt(&run.status) {
+                    *today_counts.entry(account.id.clone()).or_insert(0) += 1;
+                }
             }
             Err(e) => tracing::error!("Scheduled checkin failed for account {}: {}", account.id, e),
         }

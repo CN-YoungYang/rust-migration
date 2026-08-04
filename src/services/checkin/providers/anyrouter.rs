@@ -39,6 +39,11 @@ fn is_success_message(message: &str) -> bool {
     lower.contains("success") || message.contains("签到成功")
 }
 
+/// 判断响应文本是否为 HTML 页面（非 JSON），避免把整页当消息或参与关键词判定（M11）
+fn looks_like_html(text: &str) -> bool {
+    text.trim_start().starts_with('<')
+}
+
 fn is_challenge_page(response_text: &str, content_type: Option<&str>) -> bool {
     let ct = content_type.unwrap_or("").to_lowercase();
     let trimmed = response_text.trim().to_lowercase();
@@ -218,12 +223,14 @@ pub async fn checkin(
         ));
     }
 
-    // 尝试解析 JSON，如果失败则将原始文本作为 message
+    // 尝试解析 JSON，如果失败则将原始文本作为 message；
+    // HTML 页面（如反爬挑战页）不作为消息，也不参与关键词判定（M11）
     let payload: Option<serde_json::Value> = serde_json::from_str(&text).ok();
     let response_message = if let Some(ref p) = payload {
         read_message(Some(p))
+    } else if looks_like_html(&text) {
+        String::new()
     } else {
-        // JSON 解析失败，使用原始响应文本
         text.clone()
     };
 
@@ -467,11 +474,77 @@ fn parse_balance_response(
     if let Some(q) = quota {
         Ok(q)
     } else {
-        // 安全截断，避免切断 UTF-8 多字节字符导致 panic
+        // 安全截断，避免切断 UTF-8 多字节字符导致 panic（预览仅入日志，不回显到用户消息）
         let preview: String = text.chars().take(200).collect();
         tracing::error!("Balance field not found in response: {}", preview);
         Err(read_error_message(payload.as_ref())
-            .unwrap_or_else(|| format!("余额请求失败：站点未返回余额字段。响应: {}", preview))
+            .unwrap_or_else(|| "余额请求失败：站点未返回余额字段".to_string())
             .into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_arg1_handles_quotes_and_skips_non_assignment() {
+        assert_eq!(
+            extract_arg1("<script>var arg1='aabbcc';</script>"),
+            Some("aabbcc".to_string())
+        );
+        assert_eq!(
+            extract_arg1("<script>var arg1 = \"1234\";</script>"),
+            Some("1234".to_string())
+        );
+        // 无赋值 / 无引号包裹时不误提取
+        assert_eq!(extract_arg1("var arg1"), None);
+        assert_eq!(extract_arg1("var arg1x='00';"), None);
+    }
+
+    #[test]
+    fn looks_like_html_guards_messages() {
+        assert!(looks_like_html("<html><body>acw_sc__v2</body></html>"));
+        assert!(looks_like_html("<!DOCTYPE html>\n<html>"));
+        assert!(!looks_like_html("{\"success\":true}"));
+        assert!(!looks_like_html("plain text"));
+        assert!(!looks_like_html(""));
+    }
+
+    #[test]
+    fn solve_acw_sc_v2_roundtrips_arg1_reorder_and_xor() {
+        // 构造：目标 hex 40 字符（20 字节），按 INDEXES 反向重排得到 arg1，
+        // 断言求解结果等于 hex ^ KEY 的逐字节异或。锁定重排与异或算法的行为。
+        let hex_target: String = (0..20)
+            .map(|i| format!("{:02x}", (i * 7 + 3) % 256))
+            .collect();
+        assert_eq!(hex_target.len(), 40);
+
+        let mut arg1 = [' '; 40];
+        for (i, _) in hex_target.chars().enumerate() {
+            let target = i + 1;
+            let pos = ACW_SC_V2_INDEXES.iter().position(|&v| v == target).unwrap();
+            arg1[i] = hex_target.chars().nth(pos).unwrap();
+        }
+        let response = format!(
+            "<html>var arg1='{}';</html>",
+            arg1.iter().collect::<String>()
+        );
+
+        let solved = solve_acw_sc_v2(&response).expect("应能求解");
+
+        let hex_bytes = hex_target.as_bytes();
+        let key_bytes = ACW_SC_V2_KEY.as_bytes();
+        let mut expected = String::new();
+        let mut i = 0;
+        while i + 2 <= hex_bytes.len() && i + 2 <= key_bytes.len() {
+            let h =
+                u8::from_str_radix(std::str::from_utf8(&hex_bytes[i..i + 2]).unwrap(), 16).unwrap();
+            let k =
+                u8::from_str_radix(std::str::from_utf8(&key_bytes[i..i + 2]).unwrap(), 16).unwrap();
+            expected.push_str(&format!("{:02x}", h ^ k));
+            i += 2;
+        }
+        assert_eq!(solved, expected);
     }
 }

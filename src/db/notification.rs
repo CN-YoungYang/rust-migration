@@ -132,18 +132,20 @@ pub async fn update_notification(
 
     let now = chrono::Utc::now().to_rfc3339();
 
-    // 加密敏感字段
-    let email_smtp_password = req
-        .email_smtp_password
-        .as_ref()
-        .map(|pwd| crypto::encrypt(pwd))
-        .transpose()?;
+    // 加密敏感字段（三态：缺失=不修改 / null 或空串=清空置 NULL / 值=加密存储）
+    let email_smtp_password = match &req.email_smtp_password {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(pwd)) if pwd.trim().is_empty() => Some(None),
+        Some(Some(pwd)) => Some(Some(crypto::encrypt(pwd)?)),
+    };
 
-    let telegram_bot_token = req
-        .telegram_bot_token
-        .as_ref()
-        .map(|token| crypto::encrypt(token))
-        .transpose()?;
+    let telegram_bot_token = match &req.telegram_bot_token {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(token)) if token.trim().is_empty() => Some(None),
+        Some(Some(token)) => Some(Some(crypto::encrypt(token)?)),
+    };
 
     // 构建动态更新 SQL
     let mut updates = Vec::new();
@@ -233,7 +235,7 @@ pub async fn update_notification(
         q = q.bind(v);
     }
     if let Some(v) = &email_smtp_password {
-        q = q.bind(v);
+        q = q.bind(v.as_deref());
     }
     if let Some(v) = &req.email_from {
         q = q.bind(v);
@@ -251,7 +253,7 @@ pub async fn update_notification(
         q = q.bind(v.as_deref());
     }
     if let Some(v) = &telegram_bot_token {
-        q = q.bind(v);
+        q = q.bind(v.as_deref());
     }
     if let Some(v) = &req.telegram_chat_id {
         q = q.bind(v);
@@ -440,6 +442,29 @@ mod tests {
         }
     }
 
+    fn email_create_request() -> CreateNotificationRequest {
+        CreateNotificationRequest {
+            notify_type: "email".to_string(),
+            enabled: Some(true),
+            on_failure: Some(true),
+            failure_threshold: Some(1),
+            on_balance_low: Some(false),
+            balance_threshold: None,
+            email_smtp_host: Some("smtp.example.com".to_string()),
+            email_smtp_port: Some(465),
+            email_smtp_user: Some("user@example.com".to_string()),
+            email_smtp_password: Some("secret".to_string()),
+            email_from: Some("from@example.com".to_string()),
+            email_to: Some("to@example.com".to_string()),
+            webhook_url: None,
+            webhook_method: None,
+            webhook_headers: None,
+            telegram_bot_token: None,
+            telegram_chat_id: None,
+            note: None,
+        }
+    }
+
     #[tokio::test]
     async fn update_notification_can_clear_nullable_fields() {
         let pool = test_pool().await;
@@ -482,5 +507,71 @@ mod tests {
             updated.webhook_url.as_deref(),
             Some("https://example.com/hook")
         );
+    }
+
+    #[tokio::test]
+    async fn update_notification_can_clear_and_change_encrypted_secrets() {
+        // 本测试走加密路径，需先注入合法的 TOKEN_ENCRYPTION_KEY
+        std::env::set_var(
+            "TOKEN_ENCRYPTION_KEY",
+            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+        );
+        crate::crypto::validate_encryption_key().expect("test encryption key should validate");
+
+        let pool = test_pool().await;
+        let created = create_notification(&pool, "owner-1", &email_create_request())
+            .await
+            .expect("notification should be created");
+        assert!(created.email_smtp_password.is_some());
+
+        // 空串置 NULL：前端清空密码字段
+        let cleared_by_empty = update_notification(
+            &pool,
+            &created.id,
+            "owner-1",
+            &UpdateNotificationRequest {
+                email_smtp_password: Some(Some(String::new())),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("notification should be updated");
+        assert!(cleared_by_empty.email_smtp_password.is_none());
+
+        // 显式 null 清空（telegram 路径同步覆盖）
+        let cleared_by_null = update_notification(
+            &pool,
+            &created.id,
+            "owner-1",
+            &UpdateNotificationRequest {
+                email_smtp_password: Some(None),
+                telegram_bot_token: Some(None),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("notification should be updated");
+        assert!(cleared_by_null.email_smtp_password.is_none());
+        assert!(cleared_by_null.telegram_bot_token.is_none());
+
+        // 新值加密存储，回读可解密
+        let changed = update_notification(
+            &pool,
+            &created.id,
+            "owner-1",
+            &UpdateNotificationRequest {
+                email_smtp_password: Some(Some("new-secret".to_string())),
+                telegram_bot_token: Some(Some("new-token".to_string())),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("notification should be updated");
+        let smtp = crate::crypto::decrypt(changed.email_smtp_password.as_deref().unwrap())
+            .expect("smtp password should decrypt");
+        assert_eq!(smtp, "new-secret");
+        let telegram = crate::crypto::decrypt(changed.telegram_bot_token.as_deref().unwrap())
+            .expect("telegram token should decrypt");
+        assert_eq!(telegram, "new-token");
     }
 }

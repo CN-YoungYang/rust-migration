@@ -79,7 +79,7 @@ pub struct CreateNotificationRequest {
     pub note: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateNotificationRequest {
     pub enabled: Option<bool>,
@@ -95,7 +95,9 @@ pub struct UpdateNotificationRequest {
     pub email_smtp_host: Option<String>,
     pub email_smtp_port: Option<i64>,
     pub email_smtp_user: Option<String>,
-    pub email_smtp_password: Option<String>,
+    // 三态：缺失=不修改 / null 或空串=清空（置 NULL）/ 值=加密存储
+    #[serde(default, deserialize_with = "deserialize_nullable_field")]
+    pub email_smtp_password: Option<Option<String>>,
     pub email_from: Option<String>,
     pub email_to: Option<String>,
 
@@ -106,7 +108,9 @@ pub struct UpdateNotificationRequest {
     pub webhook_headers: Option<Option<String>>,
 
     // Telegram 配置
-    pub telegram_bot_token: Option<String>,
+    // 三态语义同 email_smtp_password
+    #[serde(default, deserialize_with = "deserialize_nullable_field")]
+    pub telegram_bot_token: Option<Option<String>>,
     pub telegram_chat_id: Option<String>,
 
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
@@ -132,16 +136,21 @@ mod tests {
         assert_eq!(missing.balance_threshold, None);
         assert_eq!(missing.webhook_headers, None);
         assert_eq!(missing.note, None);
+        assert_eq!(missing.email_smtp_password, None);
+        assert_eq!(missing.telegram_bot_token, None);
 
-        let cleared: UpdateNotificationRequest =
-            serde_json::from_str(r#"{"balanceThreshold":null,"webhookHeaders":null,"note":null}"#)
-                .unwrap();
+        let cleared: UpdateNotificationRequest = serde_json::from_str(
+            r#"{"balanceThreshold":null,"webhookHeaders":null,"note":null,"emailSmtpPassword":null,"telegramBotToken":null}"#,
+        )
+        .unwrap();
         assert_eq!(cleared.balance_threshold, Some(None));
         assert_eq!(cleared.webhook_headers, Some(None));
         assert_eq!(cleared.note, Some(None));
+        assert_eq!(cleared.email_smtp_password, Some(None));
+        assert_eq!(cleared.telegram_bot_token, Some(None));
 
         let updated: UpdateNotificationRequest = serde_json::from_str(
-            r#"{"balanceThreshold":2.5,"webhookHeaders":"{\"X-Test\":\"1\"}","note":"ops"}"#,
+            r#"{"balanceThreshold":2.5,"webhookHeaders":"{\"X-Test\":\"1\"}","note":"ops","emailSmtpPassword":"smtp-pass","telegramBotToken":"bot-tok"}"#,
         )
         .unwrap();
         assert_eq!(updated.balance_threshold, Some(Some(2.5)));
@@ -150,5 +159,13 @@ mod tests {
             Some(Some(r#"{"X-Test":"1"}"#.to_string()))
         );
         assert_eq!(updated.note, Some(Some("ops".to_string())));
+        assert_eq!(
+            updated.email_smtp_password,
+            Some(Some("smtp-pass".to_string()))
+        );
+        assert_eq!(
+            updated.telegram_bot_token,
+            Some(Some("bot-tok".to_string()))
+        );
     }
 }

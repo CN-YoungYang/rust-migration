@@ -1,6 +1,7 @@
 use super::super::{http_client, BrowserProfile};
 use super::{
-    classify_checkin_status, format_awarded_quota, read_error_message, read_number, CheckinResponse,
+    classify_checkin_status, format_awarded_quota, is_already_checked_message, read_error_message,
+    read_number, CheckinResponse,
 };
 use crate::error::Result;
 
@@ -77,15 +78,26 @@ pub async fn checkin(
     let text = response.text().await?;
 
     if !status_code.is_success() {
-        return Ok((
-            "failed".to_string(),
-            format!("签到请求失败：HTTP {}", status_code),
-            Some(text),
-        ));
+        // 非 2xx 也可能表达"已签到"语义（如 HTTP 400 + `{message:"今日已签"}`），
+        // 命中关键词时升级为 already_checked，避免把已签账户按失败重试（L9）。
+        // 只对 JSON 解析出的 message 做关键词判定，不匹配整段原始响应（M11）。
+        let msg = serde_json::from_str::<CheckinResponse>(&text)
+            .ok()
+            .and_then(|p| p.message)
+            .unwrap_or_default();
+        let (status, message) = if is_already_checked_message(&msg) {
+            ("already_checked", msg)
+        } else if msg.is_empty() {
+            ("failed", format!("签到请求失败：HTTP {}", status_code))
+        } else {
+            ("failed", msg)
+        };
+        return Ok((status.to_string(), message, Some(text)));
     }
 
     let parsed: CheckinResponse = serde_json::from_str(&text).unwrap_or(CheckinResponse {
         success: false,
+        code: None,
         message: Some("响应解析失败".into()),
         data: None,
     });
@@ -94,9 +106,12 @@ pub async fn checkin(
         .message
         .unwrap_or_else(|| "站点未返回消息".to_string());
 
+    // 部分 fork 不返回 success 字段，改用 code=200 表示成功（M10）
+    let success = parsed.success || parsed.code == Some(200);
+
     // 状态判定：已签关键词 > checked_in 标志 > success（与 Next.js 顺序对齐）
     let status = {
-        let base = classify_checkin_status(parsed.success, &message);
+        let base = classify_checkin_status(success, &message);
         if base == "already_checked" || read_checked_in_flag(parsed.data.as_ref()) {
             "already_checked"
         } else {
@@ -193,11 +208,11 @@ pub async fn fetch_balance(
     if let Some(q) = quota {
         Ok(q)
     } else {
-        // 安全截断，避免切断 UTF-8 多字节字符导致 panic
+        // 安全截断，避免切断 UTF-8 多字节字符导致 panic（预览仅入日志，不回显到用户消息）
         let preview: String = text.chars().take(200).collect();
         tracing::error!("Balance field not found in response: {}", preview);
         Err(read_error_message(payload.as_ref())
-            .unwrap_or_else(|| format!("余额请求失败：站点未返回余额字段。响应: {}", preview))
+            .unwrap_or_else(|| "余额请求失败：站点未返回余额字段".to_string())
             .into())
     }
 }

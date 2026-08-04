@@ -71,6 +71,16 @@ pub struct ImportResult {
     errors: Vec<String>,
 }
 
+/// CSV 公式注入防护（CSV injection）：以 `= + - @ \t \r` 开头的单元格会被
+/// Excel/LibreOffice 当作公式执行。导出时给这些值加单引号前缀，阻止恶意值
+/// 在用户本机触发外部请求或命令（如 `=HYPERLINK(...)` / `=cmd|...`）。
+fn csv_safe(value: &str) -> String {
+    match value.trim_start().chars().next() {
+        Some('=' | '+' | '-' | '@' | '\t' | '\r') => format!("'{}", value),
+        _ => value.to_string(),
+    }
+}
+
 async fn validate_import_record(
     record: &ImportAccountRecord,
     line_num: usize,
@@ -135,9 +145,21 @@ pub async fn export_accounts(
 ) -> Result<Response> {
     let is_admin = user.role == "ADMIN" || user.role == "SUPER_ADMIN";
 
-    // 查询账户（管理员看全部，普通用户只看自己的）
+    // 查询账户（管理员导出全部含禁用账户，普通用户只看自己的）
     let accounts = if is_admin {
-        crate::db::list_enabled_accounts(&state.db).await?
+        crate::db::list_accounts_filtered(
+            &state.db,
+            &crate::db::AccountFilter {
+                owner_id: None,
+                site_type: None,
+                enabled: None,
+                last_status: None,
+                keyword: None,
+                limit: 10000,
+                offset: 0,
+            },
+        )
+        .await?
     } else {
         crate::db::list_accounts_filtered(
             &state.db,
@@ -181,14 +203,14 @@ pub async fn export_accounts(
             .unwrap_or_default();
 
         let record = ExportAccountRecord {
-            name: account.name.clone(),
+            name: csv_safe(&account.name),
             site_type: account.site_type.clone(),
-            base_url: account.base_url.clone(),
-            user_id: account.user_id.clone().unwrap_or_default(),
+            base_url: csv_safe(&account.base_url),
+            user_id: csv_safe(account.user_id.as_deref().unwrap_or_default()),
             auth_type: account.auth_type.clone(),
-            access_token,
-            cookie,
-            custom_checkin_url: account.custom_checkin_url.clone().unwrap_or_default(),
+            access_token: csv_safe(&access_token),
+            cookie: csv_safe(&cookie),
+            custom_checkin_url: csv_safe(account.custom_checkin_url.as_deref().unwrap_or_default()),
             enabled: if account.enabled { "true" } else { "false" }.to_string(),
             retry_enabled: if account.retry_enabled {
                 "true"
@@ -196,7 +218,7 @@ pub async fn export_accounts(
                 "false"
             }
             .to_string(),
-            note: account.note.clone().unwrap_or_default(),
+            note: csv_safe(account.note.as_deref().unwrap_or_default()),
         };
 
         wtr.serialize(record)?;
@@ -307,7 +329,9 @@ pub async fn import_accounts(
             Ok(_) => success_count += 1,
             Err(e) => {
                 failed_count += 1;
-                errors.push(format!("第 {} 行：创建账户失败 - {}", line_num, e));
+                tracing::warn!(line_num, error = %e, "CSV 导入创建账户失败");
+                // Low8：不回显 sqlx/DB 内部细节，仅给用户可操作的脱敏提示
+                errors.push(format!("第 {} 行：{}", line_num, e.user_message()));
             }
         }
     }
@@ -317,4 +341,21 @@ pub async fn import_accounts(
         failed: failed_count,
         errors,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::csv_safe;
+
+    #[test]
+    fn csv_safe_neutralizes_formula_prefixes() {
+        assert_eq!(csv_safe("plain"), "plain");
+        assert_eq!(csv_safe("=SUM(A1:A2)"), "'=SUM(A1:A2)");
+        assert_eq!(csv_safe("+cmd|' /C calc'!A0"), "'+cmd|' /C calc'!A0");
+        assert_eq!(csv_safe("-2+3"), "'-2+3");
+        assert_eq!(csv_safe("@import"), "'@import");
+        assert_eq!(csv_safe("  =evil"), "'  =evil");
+        assert_eq!(csv_safe(""), "");
+        assert_eq!(csv_safe("正常文本"), "正常文本");
+    }
 }

@@ -6,8 +6,28 @@ use std::sync::OnceLock;
 
 static ENCRYPTION_KEY: OnceLock<Vec<u8>> = OnceLock::new();
 
+/// 启动期校验 `TOKEN_ENCRYPTION_KEY`：缺失/非法 base64/非 32 字节时启动即失败，
+/// 避免运行时首次加密/解密才 panic。校验通过后把密钥预置进 `OnceLock`，
+/// 后续 `get_encryption_key` 直接复用，不再重复解析。
+pub fn validate_encryption_key() -> Result<()> {
+    let key_str = std::env::var("TOKEN_ENCRYPTION_KEY")
+        .map_err(|_| AppError::Crypto("TOKEN_ENCRYPTION_KEY 未设置".into()))?;
+    let key = general_purpose::STANDARD
+        .decode(&key_str)
+        .map_err(|_| AppError::Crypto("TOKEN_ENCRYPTION_KEY 不是合法 base64".into()))?;
+    if key.len() != 32 {
+        return Err(AppError::Crypto(
+            "TOKEN_ENCRYPTION_KEY 必须解码为 32 字节".into(),
+        ));
+    }
+    let _ = ENCRYPTION_KEY.set(key);
+    Ok(())
+}
+
 fn get_encryption_key() -> Result<&'static Vec<u8>> {
     ENCRYPTION_KEY.get_or_init(|| {
+        // 正常情况下启动时已由 validate_encryption_key 预置；这里保留兜底，
+        // 兼容直接调用 encrypt/decrypt 的场景（如单元测试在 env 就绪时）。
         let key_str = std::env::var("TOKEN_ENCRYPTION_KEY").expect("TOKEN_ENCRYPTION_KEY not set");
         let key = general_purpose::STANDARD
             .decode(&key_str)

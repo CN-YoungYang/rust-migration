@@ -95,11 +95,30 @@ pub async fn delete_session(db: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cleanup_expired_sessions(db: &SqlitePool) -> Result<u64> {
-    let result = sqlx::query("DELETE FROM AppSession WHERE expiresAt <= ?")
-        .bind(Utc::now())
+/// 删除某用户的全部会话。改密后调用，使旧会话失效（防止旧 Cookie 继续有效）。
+pub async fn delete_sessions_for_user(db: &SqlitePool, user_id: &str) -> Result<u64> {
+    let result = sqlx::query("DELETE FROM AppSession WHERE userId = ?")
+        .bind(user_id)
         .execute(db)
         .await?;
+    Ok(result.rows_affected())
+}
+
+/// 清理过期会话。`lastSeenAt` 距今不足 1 分钟的会话被排除，避免与
+/// `find_session_and_renew` 的续期竞态：清理 DELETE 基于快照的旧 `expiresAt`
+/// 可能把刚被续期（expiresAt 已顺延、lastSeenAt 刚更新）的会话删掉（L3）。
+/// 这类刚活跃过的会话即使恰好过期也会在下一次清理时再被评估，至多延迟 5 分钟。
+pub async fn cleanup_expired_sessions(db: &SqlitePool) -> Result<u64> {
+    let now = Utc::now();
+    let result = sqlx::query(
+        "DELETE FROM AppSession
+         WHERE expiresAt <= ?
+           AND lastSeenAt <= ?",
+    )
+    .bind(now)
+    .bind(now - Duration::seconds(60))
+    .execute(db)
+    .await?;
     Ok(result.rows_affected())
 }
 
@@ -174,24 +193,69 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn removes_expired_sessions() {
+    async fn removes_expired_sessions_but_keeps_recently_renewed() {
         let pool = test_pool().await;
         let now = Utc::now();
+        // 已过期且长期未使用（lastSeenAt 超过 1 分钟）：应被清理
         sqlx::query(
             "INSERT INTO AppSession (id, userId, csrfToken, expiresAt, createdAt, lastSeenAt)
              VALUES ('expired', 'u1', 'csrf', ?, ?, ?)",
         )
         .bind(now - Duration::seconds(1))
-        .bind(now)
-        .bind(now)
+        .bind(now - Duration::seconds(3600))
+        .bind(now - Duration::seconds(61))
         .execute(&pool)
         .await
         .expect("expired session should be inserted");
+
+        // 已过期但 1 分钟内刚续期（lastSeenAt 接近 now）：应被排除，避免与续期竞态
+        sqlx::query(
+            "INSERT INTO AppSession (id, userId, csrfToken, expiresAt, createdAt, lastSeenAt)
+             VALUES ('recent-renew', 'u1', 'csrf', ?, ?, ?)",
+        )
+        .bind(now - Duration::seconds(1))
+        .bind(now - Duration::seconds(3600))
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("recently renewed session should be inserted");
 
         let removed = cleanup_expired_sessions(&pool)
             .await
             .expect("cleanup should succeed");
         assert_eq!(removed, 1);
+
+        let (remaining,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM AppSession WHERE id = 'recent-renew'")
+                .fetch_one(&pool)
+                .await
+                .expect("count should succeed");
+        assert_eq!(remaining, 1);
+    }
+
+    #[tokio::test]
+    async fn deletes_all_sessions_for_user() {
+        let pool = test_pool().await;
+        let ttl: u64 = 3600;
+        let s1 = create_session(&pool, "u1", ttl, 100).await.unwrap();
+        let s2 = create_session(&pool, "u1", ttl, 100).await.unwrap();
+        let s3 = create_session(&pool, "u2", ttl, 100).await.unwrap();
+
+        let removed = delete_sessions_for_user(&pool, "u1").await.unwrap();
+        assert_eq!(removed, 2);
+        assert!(find_session_and_renew(&pool, &s1.id, ttl as i64)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(find_session_and_renew(&pool, &s2.id, ttl as i64)
+            .await
+            .unwrap()
+            .is_none());
+        // 其他用户会话不受影响
+        assert!(find_session_and_renew(&pool, &s3.id, ttl as i64)
+            .await
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]

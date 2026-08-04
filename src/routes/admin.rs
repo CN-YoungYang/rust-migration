@@ -49,17 +49,33 @@ fn check_role_assignment(current_user: &AppUser, role: Option<&str>) -> Result<(
     }
 }
 
+/// 按当前用户角色过滤可见用户列表（Low9）。
+/// ADMIN 只能看到 USER 角色与自己的账号，防止枚举同级/上级账号，
+/// 同时保留管理员自改密码（M14）的入口；SUPER_ADMIN 返回全部。
+fn filter_visible_users(current_user_id: &str, role: &str, users: Vec<AppUser>) -> Vec<AppUser> {
+    if role == "ADMIN" {
+        users
+            .into_iter()
+            .filter(|u| u.role == "USER" || u.id == current_user_id)
+            .collect()
+    } else {
+        users
+    }
+}
+
 pub async fn list_users(
     State(state): State<Arc<AppState>>,
     Extension(current_user): Extension<AppUser>,
-    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    axum::extract::Query(_params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Value>> {
-    let mut users = db::list_users(&state.db).await?;
-    // ?scope=all 用于筛选下拉框：返回全部用户（密码哈希已 skip_serializing，安全）
-    // 默认行为：ADMIN 只能看到 USER 角色
-    if current_user.role == "ADMIN" && params.get("scope").map(|s| s.as_str()) != Some("all") {
-        users.retain(|user| user.role == "USER");
-    }
+    // Low9：ADMIN 只能看到 USER 角色与自身（保留自改密码入口）；SUPER_ADMIN 返回全部。
+    // 防止低权管理员枚举同级/上级账号的角色、启停状态与账户统计。
+    // 密码哈希已 skip_serializing，不会经列表泄露。
+    let users = filter_visible_users(
+        &current_user.id,
+        &current_user.role,
+        db::list_users(&state.db).await?,
+    );
     let stats = db::list_user_account_stats(&state.db).await?;
     let data: Vec<Value> = users
         .into_iter()
@@ -117,7 +133,7 @@ pub async fn create_user(
         .await?
         .is_some()
     {
-        return Err(crate::error::AppError::Validation("用户名已存在".into()));
+        return Err(crate::error::AppError::Conflict("用户名已存在".into()));
     }
 
     let password_hash = hash_password(&payload.password)?;
@@ -143,11 +159,38 @@ pub async fn update_user(
         .await?
         .ok_or(crate::error::AppError::NotFound)?;
 
-    check_admin_permission(&current_user, &existing)?;
-    check_role_assignment(&current_user, payload.role.as_deref())?;
+    let is_self = existing.id == current_user.id;
+    if is_self {
+        // M14：允许管理员修改自己的资料/密码（原 check_admin_permission 禁止同级管理，
+        // 导致管理员改不了自己）。自改不允许变更角色，防止升权或降级越界。
+        if let Some(role) = payload.role.as_deref() {
+            if role != existing.role {
+                return Err(crate::error::AppError::Forbidden);
+            }
+        }
+    } else {
+        check_admin_permission(&current_user, &existing)?;
+        check_role_assignment(&current_user, payload.role.as_deref())?;
+    }
 
-    if existing.role == "SUPER_ADMIN" && payload.role.as_deref() != Some("SUPER_ADMIN") {
+    if existing.role == "SUPER_ADMIN" && payload.role.as_deref().is_some_and(|r| r != "SUPER_ADMIN")
+    {
         return Err(crate::error::AppError::Forbidden);
+    }
+
+    // M13：改用户名前预查唯一性，避免撞 DB UNIQUE 约束直接 500
+    if let Some(new_username) = payload.username.as_deref() {
+        if new_username != existing.username {
+            if new_username.trim().is_empty() {
+                return Err(crate::error::AppError::Validation("用户名不能为空".into()));
+            }
+            if db::find_user_by_username(&state.db, new_username)
+                .await?
+                .is_some()
+            {
+                return Err(crate::error::AppError::Conflict("用户名已存在".into()));
+            }
+        }
     }
 
     let password_hash = if let Some(pwd) = &payload.password {
@@ -171,6 +214,11 @@ pub async fn update_user(
         payload.note.as_deref(),
     )
     .await?;
+
+    // Low10：改密后删除该用户全部会话，旧 Cookie 立即失效
+    if password_hash.is_some() {
+        db::delete_sessions_for_user(&state.db, &id).await?;
+    }
 
     let user = db::find_user_by_id(&state.db, &id)
         .await?
@@ -204,4 +252,46 @@ pub struct CreateUserRequest {
     pub role: Option<String>,
     pub enabled: Option<bool>,
     pub note: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::filter_visible_users;
+    use crate::models::AppUser;
+    use chrono::Utc;
+
+    fn user(id: &str, role: &str) -> AppUser {
+        let now = Utc::now();
+        AppUser {
+            id: id.to_string(),
+            username: format!("{id}-name"),
+            password_hash: String::new(),
+            role: role.to_string(),
+            enabled: true,
+            note: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn admin_sees_user_role_and_self_but_not_peer_admins() {
+        let users = vec![
+            user("u1", "USER"),
+            user("me", "ADMIN"),
+            user("other-admin", "ADMIN"),
+            user("s1", "SUPER_ADMIN"),
+        ];
+
+        let visible = filter_visible_users("me", "ADMIN", users.clone());
+        assert_eq!(visible.len(), 2);
+        let ids: Vec<&str> = visible.iter().map(|u| u.id.as_str()).collect();
+        assert!(ids.contains(&"u1"));
+        assert!(ids.contains(&"me"));
+        assert!(!ids.contains(&"other-admin"));
+        assert!(!ids.contains(&"s1"));
+
+        let all = filter_visible_users("root", "SUPER_ADMIN", users);
+        assert_eq!(all.len(), 4);
+    }
 }

@@ -37,6 +37,9 @@ pub struct AppState {
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
+    // 启动期校验加密密钥，缺失/非法立即失败，避免运行时首次加密才报错
+    crate::crypto::validate_encryption_key()?;
+
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
             std::env::var("RUST_LOG").unwrap_or_else(|_| "warn".into()),
@@ -51,6 +54,10 @@ async fn main() -> anyhow::Result<()> {
         .foreign_keys(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
         .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
+        // 清理任务等长写事务会短暂阻塞其他写者；默认 busy_timeout 仅 5 秒，
+        // 网络签到已成功正要写库时可能撞上“database is locked”导致记录丢失，
+        // 故调大到 30 秒。
+        .busy_timeout(std::time::Duration::from_secs(30))
         .pragma("cache_size", "-2000") // 2MB cache
         .pragma("temp_store", "memory");
 
@@ -181,7 +188,12 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("Server listening on {}", listener.local_addr()?);
     tracing::info!("Memory optimized for 1C1G server");
-    axum::serve(listener, app).await?;
+    // ConnectInfo 用于登录接口按真实客户端 IP 限速（M4）
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }

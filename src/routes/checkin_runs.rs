@@ -47,6 +47,14 @@ pub struct BatchCheckinResponse {
     failed: usize,
 }
 
+/// 批量签到请求去重（Low2）：同一账户重复提交只执行一次，保持首次出现顺序。
+fn dedupe_account_ids(ids: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    ids.into_iter()
+        .filter(|id| seen.insert(id.clone()))
+        .collect()
+}
+
 pub async fn list(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<crate::models::AppUser>,
@@ -62,7 +70,7 @@ pub async fn list(
         .get("limit")
         .and_then(|s| s.parse().ok())
         .unwrap_or(100)
-        .min(500);
+        .clamp(1, 500);
     let offset: i32 = params
         .get("offset")
         .and_then(|s| s.parse().ok())
@@ -75,6 +83,11 @@ pub async fn list(
         Some(user.id.as_str())
     };
 
+    // 日期按本地日历日解释（与统计接口一致）：startDate 取当日 00:00，
+    // endDate 取当日 23:59:59.999，避免结束日当天记录因零点边界被整日排除。
+    // 无法按 %Y-%m-%d 解析时回退为原始字符串（兼容旧的 ISO 时间戳入参）。
+    let (start_date, end_date) = resolve_date_bounds(filter_start_date, filter_end_date)?;
+
     let runs = db::list_runs_filtered(
         &state.db,
         &db::RunFilter {
@@ -82,14 +95,39 @@ pub async fn list(
             account_id: filter_account_id.map(|s| s.to_string()),
             status: filter_status.map(|s| s.to_string()),
             triggered_by: filter_triggered_by.map(|s| s.to_string()),
-            start_date: filter_start_date.map(|s| s.to_string()),
-            end_date: filter_end_date.map(|s| s.to_string()),
+            start_date,
+            end_date,
             limit,
             offset,
         },
     )
     .await?;
     Ok(crate::routes::data(runs))
+}
+
+/// 把 `YYYY-MM-DD` 起始/结束日期转换为本地日界的 UTC 时间戳（RFC3339 文本）。
+/// 无法按 `%Y-%m-%d` 解析时回退为原始字符串（兼容旧的 ISO 时间戳入参）。
+fn resolve_date_bounds(
+    start: Option<&str>,
+    end: Option<&str>,
+) -> Result<(Option<String>, Option<String>)> {
+    use chrono::NaiveDate;
+
+    let start_date = match start.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => match NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+            Ok(d) => Some(crate::routes::statistics::local_day_start(d)?.to_rfc3339()),
+            Err(_) => Some(s.to_string()),
+        },
+        None => None,
+    };
+    let end_date = match end.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => match NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+            Ok(d) => Some(crate::routes::statistics::local_day_end(d)?.to_rfc3339()),
+            Err(_) => Some(s.to_string()),
+        },
+        None => None,
+    };
+    Ok((start_date, end_date))
 }
 
 pub async fn execute(
@@ -117,8 +155,18 @@ pub async fn execute_batch(
     Extension(user): Extension<AppUser>,
     Json(payload): Json<BatchCheckinRequest>,
 ) -> Result<Json<Value>> {
-    if payload.account_ids.is_empty() {
+    // Low2 + M15：去重并限制批量数量。同一账户重复提交会导致二次签到（浪费且可能
+    // 产生假失败记录），且 `count_runs_today_for_accounts` / `find_accounts_by_ids` 的
+    // IN 子句占位符受 SQLite 绑定上限约束，故整体封顶 500。
+    let account_ids = dedupe_account_ids(payload.account_ids);
+    if account_ids.is_empty() {
         return Err(AppError::Validation("accountIds 不能为空".into()));
+    }
+    if account_ids.len() > 500 {
+        return Err(AppError::Validation(format!(
+            "accountIds 数量不能超过 500，收到 {} 个（已去重）",
+            account_ids.len()
+        )));
     }
 
     let settings = db::get_settings(&state.db).await?;
@@ -126,7 +174,7 @@ pub async fn execute_batch(
     let is_admin = user.role == "ADMIN" || user.role == "SUPER_ADMIN";
 
     // 批量查询今日各账户签到次数，避免逐账户 COUNT
-    let mut today_counts = db::count_runs_today_for_accounts(&state.db, &payload.account_ids)
+    let mut today_counts = db::count_runs_today_for_accounts(&state.db, &account_ids)
         .await
         .unwrap_or_default();
 
@@ -134,11 +182,11 @@ pub async fn execute_batch(
     let mut to_execute: Vec<(String, String)> = Vec::new(); // (account_id, account_name)
 
     // 批量查询账户，替代逐个 find_account_by_id（N+1 → 1 次查询）
-    let account_map = db::find_accounts_by_ids(&state.db, &payload.account_ids).await?;
+    let account_map = db::find_accounts_by_ids(&state.db, &account_ids).await?;
 
     // 阶段一：校验 + 跳过判断（串行）
     // 权限：任一账户无归属权即整体拒绝，避免部分执行带来的混淆。
-    for account_id in &payload.account_ids {
+    for account_id in &account_ids {
         let account = account_map
             .get(account_id.as_str())
             .ok_or(AppError::NotFound)?;
@@ -207,8 +255,11 @@ pub async fn execute_batch(
         // 传入 settings 供 execute_checkin 做 TOCTOU 重检查
         match execute_checkin(&state.db, &account_id, "manual_batch", Some(&settings)).await {
             Ok(run) => {
-                // 更新内存计数器，避免后续账户因过期计数而超限
-                *today_counts.entry(account_id.clone()).or_insert(0) += 1;
+                // 只对真实尝试（success/failed）累加内存计数，与 DB 计数口径一致；
+                // already_checked/skipped 不计入每日上限（M6）。
+                if db::is_real_attempt(&run.status) {
+                    *today_counts.entry(account_id.clone()).or_insert(0) += 1;
+                }
                 items.push(BatchResultItem {
                     account_id,
                     account_name,
@@ -226,8 +277,7 @@ pub async fn execute_batch(
     }
 
     // 按请求顺序排序结果，便于前端对照
-    let order: std::collections::HashMap<&str, usize> = payload
-        .account_ids
+    let order: std::collections::HashMap<&str, usize> = account_ids
         .iter()
         .enumerate()
         .map(|(i, id)| (id.as_str(), i))
@@ -281,7 +331,6 @@ fn resolve_cleanup_owner_scope(
     }
     Ok(Some(current_user_id.to_string()))
 }
-
 
 /// ?????????????????????????????????????
 pub async fn delete_run(
@@ -356,7 +405,7 @@ pub async fn cleanup_runs(
 }
 #[cfg(test)]
 mod tests {
-    use super::resolve_cleanup_owner_scope;
+    use super::{dedupe_account_ids, resolve_cleanup_owner_scope};
     use crate::error::AppError;
 
     #[test]
@@ -377,6 +426,19 @@ mod tests {
         assert_eq!(
             resolve_cleanup_owner_scope("SUPER_ADMIN", "root-1", None).expect("global admin scope"),
             None
+        );
+    }
+
+    #[test]
+    fn batch_ids_are_deduplicated_preserving_first_order() {
+        assert_eq!(
+            dedupe_account_ids(vec!["a".into(), "b".into(), "a".into(), "c".into()]),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+        assert!(dedupe_account_ids(vec![]).is_empty());
+        assert_eq!(
+            dedupe_account_ids(vec!["x".into(), "x".into()]),
+            vec!["x".to_string()]
         );
     }
 }

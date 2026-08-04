@@ -62,7 +62,7 @@ pub async fn list(
         .get("limit")
         .and_then(|s| s.parse().ok())
         .unwrap_or(500)
-        .min(1000);
+        .clamp(1, 1000);
     let offset: i32 = params
         .get("offset")
         .and_then(|s| s.parse().ok())
@@ -249,6 +249,19 @@ pub async fn update(
     if let Some(ref new_base) = payload.base_url {
         validate_public_http_url_resolved(new_base, "站点地址").await?;
     }
+    // Medium6：更新名称时同样校验非空与长度，避免把账户名改成空或超长破坏列表/CSV
+    if let Some(ref name) = payload.name {
+        if name.trim().is_empty() {
+            return Err(crate::error::AppError::Validation(
+                "账户名称不能为空".into(),
+            ));
+        }
+        if name.len() > 200 {
+            return Err(crate::error::AppError::Validation(
+                "账户名称不能超过 200 字符".into(),
+            ));
+        }
+    }
     // Validate based on site type (use existing site_type since it can't be changed)
     let site_type = &existing.site_type;
     let effective_base_url = payload.base_url.as_deref().unwrap_or(&existing.base_url);
@@ -373,6 +386,10 @@ pub async fn refresh_balance(
         .ok_or(crate::error::AppError::NotFound)?;
 
     check_account_ownership(&account, &user)?;
+
+    // SSRF 执行期复核：base_url 可能在上次配置写入后被 DNS 重绑定到内网，
+    // 余额请求发送前再次解析并拒绝私网地址。
+    crate::security::validate_public_http_url_resolved(&account.base_url, "站点地址").await?;
 
     tracing::info!(
         account_id = %id,

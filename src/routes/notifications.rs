@@ -84,6 +84,30 @@ fn require_non_empty(value: Option<&str>, field: &str) -> Result<()> {
     }
 }
 
+/// 校验 SMTP 发件人/收件人字段（M2）：`email_to` 按逗号拆分为多个收件人逐一校验，
+/// 与发送路径 `services::notification::validate_smtp_address` 共享同一拒绝规则
+/// （`\r\n<>` 等可注入 SMTP 指令的字符）。
+fn validate_email_address_field(value: &str, label: &str) -> Result<()> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(crate::error::AppError::Validation(format!(
+            "{} 不能为空",
+            label
+        )));
+    }
+    for recipient in value.split(',') {
+        let recipient = recipient.trim();
+        if recipient.is_empty() {
+            return Err(crate::error::AppError::Validation(format!(
+                "{} 包含空白的收件人",
+                label
+            )));
+        }
+        crate::services::notification::validate_smtp_address(recipient)?;
+    }
+    Ok(())
+}
+
 async fn validate_create_request(req: &CreateNotificationRequest) -> Result<()> {
     validate_common(
         Some(req.notify_type.as_str()),
@@ -117,8 +141,8 @@ async fn validate_create_request(req: &CreateNotificationRequest) -> Result<()> 
             .await?;
             require_non_empty(req.email_smtp_user.as_deref(), "SMTP 用户名")?;
             require_non_empty(req.email_smtp_password.as_deref(), "SMTP 密码")?;
-            require_non_empty(req.email_from.as_deref(), "发件人")?;
-            require_non_empty(req.email_to.as_deref(), "收件人")?;
+            validate_email_address_field(req.email_from.as_deref().unwrap_or_default(), "发件人")?;
+            validate_email_address_field(req.email_to.as_deref().unwrap_or_default(), "收件人")?;
         }
         "webhook" => {
             let url = req.webhook_url.as_deref().unwrap_or_default();
@@ -195,6 +219,12 @@ async fn validate_update_request(
         if let Some(url) = existing.webhook_url.as_deref() {
             validate_public_http_url_resolved(url, "Webhook URL").await?;
         }
+    }
+    if let Some(from) = req.email_from.as_deref() {
+        validate_email_address_field(from, "发件人")?;
+    }
+    if let Some(to) = req.email_to.as_deref() {
+        validate_email_address_field(to, "收件人")?;
     }
     Ok(())
 }
@@ -284,7 +314,7 @@ pub async fn test_notification(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_common;
+    use super::{validate_common, validate_email_address_field};
 
     #[test]
     fn validate_common_rejects_unknown_notification_type() {
@@ -292,5 +322,15 @@ mod tests {
             .expect_err("unknown notification type should be rejected");
 
         assert!(error.to_string().contains("不支持的通知类型"));
+    }
+
+    #[test]
+    fn email_address_field_rejects_crlf_and_angle_brackets() {
+        assert!(validate_email_address_field("a@b.com", "发件人").is_ok());
+        assert!(validate_email_address_field("a@b.com, c@d.com", "收件人").is_ok());
+        assert!(validate_email_address_field("a@b.com\r\nQUIT", "收件人").is_err());
+        assert!(validate_email_address_field("<a@b.com>", "发件人").is_err());
+        assert!(validate_email_address_field("", "发件人").is_err());
+        assert!(validate_email_address_field("a@b.com,", "收件人").is_err());
     }
 }

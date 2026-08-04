@@ -52,6 +52,12 @@ pub fn is_private_ip(ip: IpAddr) -> bool {
                 || ip.is_documentation()
         }
         IpAddr::V6(ip) => {
+            // IPv4-mapped（::ffff:a.b.c.d）与 IPv4-compatible（::a.b.c.d）地址
+            // 必须映射回 IPv4 后按 IPv4 私网规则判定，否则 ::ffff:127.0.0.1、
+            // ::ffff:169.254.169.254 等会被当作公网地址绕过 SSRF 防护。
+            if let Some(v4) = ip.to_ipv4() {
+                return is_private_ip(IpAddr::V4(v4));
+            }
             let segments = ip.segments();
             ip.is_loopback()
                 || ip.is_unspecified()
@@ -160,6 +166,30 @@ mod tests {
         assert!(is_private_ip("198.18.0.1".parse().unwrap()));
         assert!(is_private_ip("224.0.0.1".parse().unwrap()));
         assert!(is_private_ip("ff02::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn classifies_ipv4_mapped_ipv6_as_private() {
+        // IPv4-mapped IPv6 必须按映射后的 IPv4 判定，防止 SSRF 绕过
+        assert!(is_private_ip("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("::ffff:169.254.169.254".parse().unwrap()));
+        assert!(is_private_ip("::ffff:10.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("::ffff:192.168.1.1".parse().unwrap()));
+        // 公网映射地址仍应视为公网
+        assert!(!is_private_ip("::ffff:8.8.8.8".parse().unwrap()));
+        assert!(!is_private_ip("::ffff:1.1.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn classifies_ipv4_compatible_ipv6_as_private() {
+        assert!(is_private_ip("::127.0.0.1".parse().unwrap()));
+        assert!(!is_private_ip("::8.8.8.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn rejects_ipv4_mapped_ipv6_urls() {
+        assert!(validate_public_http_url("http://[::ffff:127.0.0.1]:8080", "url").is_err());
+        assert!(validate_public_http_url("http://[::ffff:169.254.169.254]", "url").is_err());
     }
 
     #[tokio::test]

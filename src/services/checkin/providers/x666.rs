@@ -8,12 +8,19 @@ pub struct X666Response {
     pub success: Option<bool>,
     pub message: Option<serde_json::Value>,
     pub error: Option<serde_json::Value>,
-    pub quota: Option<f64>,
+    /// 用宽松类型承接，避免站点把 quota 返回为字符串时整条解析失败（L4）
+    #[serde(default)]
+    pub quota: Option<serde_json::Value>,
 }
 
 const DEFAULT_CHECKIN_PATH: &str = "/api/checkin/spin";
 const DEFAULT_BALANCE_PATH: &str = "/api/checkin/status";
 const DEFAULT_BASE_URL: &str = "https://up.x666.me";
+
+/// 判断响应文本是否为 HTML 页面（非 JSON），避免把整页当消息或参与关键词判定（M11）
+fn looks_like_html(text: &str) -> bool {
+    text.trim_start().starts_with('<')
+}
 
 fn join_url(base_url: &str, path: &str) -> String {
     if path.starts_with("http://") || path.starts_with("https://") {
@@ -92,19 +99,22 @@ pub async fn checkin(
     // 尝试解析 JSON，失败时创建包含原始文本的 payload
     let payload: Option<X666Response> = serde_json::from_str(&text).ok();
 
-    // 如果 JSON 解析失败但有文本内容，将文本作为 message 处理
+    // 提取站点消息：优先 JSON 的 message/error 字段；JSON 解析失败或字段为空时，
+    // 仅当文本不是 HTML 页面才回退为原始文本（避免把整页 HTML 当消息，M11）。
     let response_msg = if let Some(ref p) = payload {
         let msg = normalize_message(p.message.as_ref().or(p.error.as_ref()));
-        if msg.is_empty() {
+        if msg.is_empty() && !looks_like_html(&text) {
             text.clone()
         } else {
             msg
         }
+    } else if looks_like_html(&text) {
+        String::new()
     } else {
         text.clone()
     };
 
-    // 先检查是否已签到（不管状态码）
+    // 先检查是否已签到（空消息天然不命中关键词，不会误判）
     if is_already_checked_message(&response_msg) {
         return Ok((
             "already_checked".to_string(),
@@ -113,13 +123,14 @@ pub async fn checkin(
         ));
     }
 
-    // 检查 HTTP 状态码
+    // 检查 HTTP 状态码（L5：非 2xx 优先用站点返回的错误消息）
     if !status_code.is_success() {
-        return Ok((
-            "failed".to_string(),
-            format!("签到请求失败：HTTP {}", status_code),
-            Some(text),
-        ));
+        let message = if response_msg.is_empty() {
+            format!("签到请求失败：HTTP {}", status_code)
+        } else {
+            response_msg
+        };
+        return Ok(("failed".to_string(), message, Some(text)));
     }
 
     // 检查 success 字段
@@ -205,9 +216,9 @@ pub async fn fetch_balance(
     if let Some(q) = quota {
         Ok(q)
     } else {
-        // 安全截断，避免切断 UTF-8 多字节字符导致 panic
+        // 安全截断，避免切断 UTF-8 多字节字符导致 panic（预览仅入日志，不回显到用户消息）
         let preview: String = text.chars().take(200).collect();
         tracing::error!("X666 balance field not found in response: {}", preview);
-        Err(format!("余额请求失败：站点未返回余额字段。响应: {}", preview).into())
+        Err("余额请求失败：站点未返回余额字段".to_string().into())
     }
 }
