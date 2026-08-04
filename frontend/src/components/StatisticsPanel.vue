@@ -17,9 +17,9 @@
           </select>
         </label>
         <div class="date-range" role="group" aria-label="统计日期范围">
-          <label class="filter-field"><span>开始日期</span><input v-model="startDate" type="date" class="date-input" :disabled="loading" :aria-invalid="Boolean(dateValidationMessage)" aria-describedby="statistics-date-error" /></label>
+          <label class="filter-field"><span>开始日期</span><input v-model="startDate" type="date" :disabled="loading" :aria-invalid="Boolean(dateValidationMessage)" aria-describedby="statistics-date-error" /></label>
           <span class="date-separator">至</span>
-          <label class="filter-field"><span>结束日期</span><input v-model="endDate" type="date" class="date-input" :disabled="loading" :aria-invalid="Boolean(dateValidationMessage)" aria-describedby="statistics-date-error" /></label>
+          <label class="filter-field"><span>结束日期</span><input v-model="endDate" type="date" :disabled="loading" :aria-invalid="Boolean(dateValidationMessage)" aria-describedby="statistics-date-error" /></label>
           <button class="primary" @click="loadStatistics" :disabled="loading || dateRangeInvalid || dateRangeTooLong">
             {{ loading ? '查询中...' : '查询' }}
           </button>
@@ -69,7 +69,7 @@
           </div>
           <div class="chart-scale"><span>最高单日</span><strong>{{ maxDailyTotal }} 次</strong></div>
         </div>
-        <div v-if="statistics.dailyTrend.length > 0" class="chart-container" role="group" aria-label="每日签到趋势图">
+        <div v-if="statistics.dailyTrend.length > 0" role="group" aria-label="每日签到趋势图">
           <div class="chart-legend">
             <span class="legend-item"><span class="dot success"></span>成功</span>
             <span class="legend-item"><span class="dot already"></span>已签到</span>

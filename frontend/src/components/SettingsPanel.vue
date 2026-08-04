@@ -248,45 +248,4 @@ const saveSettings = async () => {
 onMounted(fetchSettings)
 </script>
 
-<style scoped>
-/* design-system: design.md · Workbench panel · SettingsPanel */
-.settings-panel { max-width: 860px; margin: 0 auto; padding: clamp(var(--space-sm), 2.5vw, var(--space-lg)) 0 var(--space-xl); }
-.panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-sm); margin-bottom: var(--space-md); flex-wrap: wrap; }
-h2 { color: var(--text-strong); margin-bottom: var(--space-3xs); }
-.panel-subtitle { color: var(--text-muted); font-size: var(--text-meta); }
-h3 { color: var(--text-strong); margin-bottom: var(--space-sm); }
-.status-strip { display: flex; gap: var(--space-2xs); flex-wrap: wrap; }
-.status-pill { border-radius: var(--radius-pill); padding: var(--space-3xs) var(--space-xs); background: var(--border-strong); color: var(--text-faint); font-size: var(--text-meta); }
-.status-pill.enabled { background: var(--success-soft); color: var(--color-success); }
-.status-pill.disabled { background: var(--danger-soft); color: var(--color-danger); }
-.settings-form { background: var(--bg-card); border: var(--rule-thin) solid var(--border); padding: var(--space-lg); border-radius: var(--radius-card); margin-bottom: var(--space-lg); box-shadow: var(--shadow-card); }
-.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm); }
-.form-group { margin-bottom: var(--space-md); }
-.form-group label { display: block; color: var(--text); margin-bottom: var(--space-2xs); font-weight: 500; }
-.form-group input[type="time"], .form-group input[type="number"] { width: 100%; padding: var(--space-2xs); background: var(--bg-well); border: var(--rule-thin) solid var(--border-input); border-radius: var(--radius-input); color: var(--text-strong); }
-.switch { position: relative; display: inline-block; width: 50px; height: 24px; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.slider { position: absolute; cursor: pointer; inset: 0; background-color: var(--color-rule-strong); transition: background-color var(--dur-short) var(--ease-out); border-radius: var(--radius-pill); }
-.slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: var(--color-paper); transition: transform var(--dur-short) var(--ease-out); border-radius: 50%; }
-input:checked + .slider { background-color: var(--accent); }
-input:checked + .slider:before { transform: translateX(26px); }
-input:focus-visible + .slider { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.btn-primary { background: var(--accent); color: var(--color-accent-ink); border: none; padding: var(--space-xs) var(--space-md); border-radius: var(--radius-input); cursor: pointer; font-size: var(--text-md); font-weight: 600; }
-.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
-.validation-box { border: var(--rule-thin) solid var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); border-radius: var(--radius-card); padding: var(--space-xs) var(--space-sm); margin-bottom: var(--space-sm); display: grid; gap: var(--space-3xs); }
-.load-error { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
-.load-error button { border: var(--rule-thin) solid var(--border-strong); border-radius: var(--radius-input); background: var(--bg-elevated); color: var(--text-strong); padding: var(--space-2xs) var(--space-xs); }
-.info-section { background: var(--bg-card); border: var(--rule-thin) solid var(--border); padding: var(--space-md); border-radius: var(--radius-card); }
-.policy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-sm); }
-.policy-grid div { background: var(--bg-well); border: var(--rule-thin) solid var(--border); border-radius: var(--radius-card); padding: var(--space-sm); display: grid; gap: var(--space-3xs); }
-.policy-grid span { color: var(--text-muted); font-size: var(--text-xs); }
-.policy-grid strong { color: var(--text-strong); font-size: var(--text-sm); overflow-wrap: anywhere; }
-
-@media (max-width: 47.99rem) {
-  .settings-panel { padding: var(--space-sm); }
-  .form-row { grid-template-columns: 1fr; }
-  .settings-form { padding: var(--space-sm); }
-  .policy-grid { grid-template-columns: 1fr; }
-}
-</style>
+<style scoped src="./SettingsPanel.css"></style>

@@ -8,13 +8,13 @@
         </p>
       </div>
       <div class="header-actions">
-        <select v-if="isAdmin" v-model="filterUserId" class="user-filter" aria-label="按用户筛选账户">
+        <select v-if="isAdmin" v-model="filterUserId" aria-label="按用户筛选账户">
           <option value="">全部用户</option>
           <option v-if="usersLoading" disabled>加载中...</option>
           <option v-for="u in allUsers" :key="u.id" :value="u.id">{{ u.username }}</option>
         </select>
-        <button class="secondary" @click="exportAccounts" :disabled="loading || actionBusy">导出 CSV</button>
-        <button class="secondary" @click="openImportDialog" :disabled="actionBusy">导入 CSV</button>
+        <button @click="exportAccounts" :disabled="loading || actionBusy">导出 CSV</button>
+        <button @click="openImportDialog" :disabled="actionBusy">导入 CSV</button>
           <button
             v-if="accounts.length > 0"
             class="primary"
@@ -29,18 +29,18 @@
     </div>
 
     <div class="filter-bar">
-      <select v-model="filterSiteType" class="filter-select" aria-label="按站点类型筛选">
+      <select v-model="filterSiteType" aria-label="按站点类型筛选">
         <option value="">全部类型</option>
         <option value="new-api">new-api</option>
         <option value="anyrouter">anyrouter</option>
         <option value="x666">x666</option>
       </select>
-      <select v-model="filterEnabled" class="filter-select" aria-label="按启用状态筛选">
+      <select v-model="filterEnabled" aria-label="按启用状态筛选">
         <option value="">全部状态</option>
         <option value="true">已启用</option>
         <option value="false">已禁用</option>
       </select>
-      <select v-model="filterLastStatus" class="filter-select" aria-label="按签到状态筛选">
+      <select v-model="filterLastStatus" aria-label="按签到状态筛选">
         <option value="">全部签到状态</option>
         <option value="not_today">今日未签到</option>
         <option value="success">成功</option>
@@ -55,12 +55,12 @@
         placeholder="搜索账户名称、地址或备注"
         class="filter-input"
       />
-      <button v-if="hasActiveFilter" class="clear-filter" @click="clearFilters">清除筛选</button>
+      <button v-if="hasActiveFilter" @click="clearFilters">清除筛选</button>
       <span class="filter-count">{{ accounts.length }} 个结果</span>
     </div>
 
     <div v-if="!loading && accounts.length > 0" class="bulk-toolbar">
-      <label class="select-all">
+      <label>
         <input
           type="checkbox"
           :checked="allVisibleSelected"
@@ -69,7 +69,7 @@
         />
         选中本页
       </label>
-      <span class="selection-count">已选 {{ selectedIds.length }} 个</span>
+      <span>已选 {{ selectedIds.length }} 个</span>
       <button :disabled="selectedIds.length === 0 || actionBusy" @click="batchCheckin(selectedIds)">
         签到选中
       </button>
@@ -82,7 +82,7 @@
       <button :disabled="selectedIds.length === 0 || actionBusy" @click="bulkSetEnabled(false)">
         批量禁用
       </button>
-      <button v-if="selectedIds.length > 0" class="ghost" :disabled="actionBusy" @click="clearSelection">
+      <button v-if="selectedIds.length > 0" :disabled="actionBusy" @click="clearSelection">
         清空选择
       </button>
     </div>
@@ -101,7 +101,7 @@
     <div v-if="bulkErrors.length > 0" class="error-panel" role="alert" aria-live="assertive">
       <div class="error-panel-header">
         <strong>失败摘要</strong>
-        <button class="ghost" @click="bulkErrors = []">清除</button>
+        <button @click="bulkErrors = []">清除</button>
       </div>
       <ul>
         <li v-for="err in bulkErrors" :key="err">{{ err }}</li>
@@ -116,7 +116,7 @@
             共 {{ lastBatchResult.total }} 个，成功 {{ lastBatchResult.succeeded }} 个，跳过 {{ lastBatchResult.skipped }} 个，失败 {{ lastBatchResult.failed }} 个
           </p>
         </div>
-        <button class="ghost" @click="lastBatchResult = null">关闭</button>
+        <button @click="lastBatchResult = null">关闭</button>
       </div>
       <div class="batch-items">
         <div v-for="item in lastBatchResult.items" :key="item.accountId" class="batch-item">
@@ -160,24 +160,24 @@
           <div class="account-main">
             <div class="title-row">
               <strong>{{ account.name }}</strong>
-              <span class="badge">{{ account.siteType }}</span>
-              <span v-if="!account.enabled" class="badge disabled">已禁用</span>
-              <span class="status-pill" :class="accountStatusClass(account.lastStatus)">
-                {{ accountStatusText(account.lastStatus) }}
-              </span>
-              <span v-if="accountCheckedToday(account)" class="status-pill today">
-                今日 {{ account.todayRuns ?? 0 }} 次
+              <span class="site-tag">{{ account.siteType }}</span>
+              <span
+                class="status-pill"
+                :class="account.enabled ? accountStatusClass(account.lastStatus) : 'neutral'"
+              >
+                {{ account.enabled ? accountStatusText(account.lastStatus) : '已禁用' }}
               </span>
             </div>
 
-            <div class="meta-grid">
-              <span><b>地址</b>{{ account.baseUrl || '-' }}</span>
-              <span><b>认证</b>{{ account.authType || '-' }}</span>
-              <span><b>余额</b>{{ formatBalance(account.lastBalance) }}</span>
-              <span><b>最近签到</b>{{ formatDateTime(account.lastRunAt) }}</span>
-              <span v-if="account.ownerName"><b>归属</b>{{ account.ownerName }}</span>
-              <span v-if="account.lastBalanceAt"><b>余额刷新</b>{{ formatDateTime(account.lastBalanceAt) }}</span>
-            </div>
+            <p class="meta-line">
+              <span>地址 <b>{{ account.baseUrl || '-' }}</b></span>
+              <span>认证 <b>{{ account.authType || '-' }}</b></span>
+              <span>余额 <b>{{ formatBalance(account.lastBalance) }}</b></span>
+              <span>今日 <b>{{ account.todayRuns ?? 0 }} 次</b></span>
+              <span>最近签到 <b>{{ formatDateTime(account.lastRunAt) }}</b></span>
+              <span v-if="account.ownerName">归属 <b>{{ account.ownerName }}</b></span>
+              <span v-if="account.lastBalanceAt">余额刷新 <b>{{ formatDateTime(account.lastBalanceAt) }}</b></span>
+            </p>
 
             <p v-if="account.lastMessage" class="message" :title="account.lastMessage">
               {{ account.lastMessage }}
@@ -185,7 +185,7 @@
             <p v-if="account.note" class="note">备注：{{ account.note }}</p>
           </div>
 
-          <div class="actions">
+          <div class="card-actions">
             <button @click="refreshBalance(account.id)" :disabled="isAccountBusy(account.id)">
               {{ isAccountProcessing(account.id) ? '处理中...' : '刷新余额' }}
             </button>
@@ -241,7 +241,7 @@
       </div>
 
       <div v-if="showImportDialog" class="modal" role="presentation" @click.self="closeImportDialog" @keydown.escape="closeImportDialog">
-        <div v-focus-trap class="modal-content import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title" tabindex="-1">
+        <div v-focus-trap class="modal-content" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title" tabindex="-1">
         <h3 id="import-dialog-title">批量导入账户</h3>
         <p class="muted">支持 CSV 格式，需包含 header 行</p>
 
@@ -261,7 +261,6 @@
           accept=".csv"
           aria-label="选择账户 CSV 文件"
           @change="handleFileSelect"
-          class="file-input"
         />
 
         <div v-if="importResult" class="import-result">
@@ -489,15 +488,6 @@ function batchStatusClass(status: string): string {
   if (status === 'already_checked') return 'already'
   if (status === 'skipped') return 'neutral'
   return status
-}
-
-function accountCheckedToday(account: Account): boolean {
-  if ((account.todayRuns ?? 0) > 0) return true
-  if (!account.lastRunAt) return false
-  const runDate = new Date(account.lastRunAt)
-  if (Number.isNaN(runDate.getTime())) return false
-  const today = new Date()
-  return runDate.toDateString() === today.toDateString()
 }
 
 function clearFilters() {
@@ -958,132 +948,4 @@ onUnmounted(() => {
 })
 </script>
 
-<style scoped>
-/* design-system: design.md · Workbench panel · AccountPanel */
-.account-panel { max-width: 1220px; margin: 0 auto; padding: clamp(var(--space-sm), 2.5vw, var(--space-lg)) 0 var(--space-xl); }
-.panel-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-md); flex-wrap: wrap; gap: var(--space-xs); }
-.panel-header h2 { color: var(--text-strong); margin-bottom: var(--space-3xs); }
-.panel-subtitle { color: var(--text-muted); font-size: var(--text-meta); }
-.header-actions { display: flex; gap: var(--space-2xs); align-items: center; flex-wrap: wrap; }
-.user-filter { background: var(--bg-well); color: var(--color-ink); border: var(--rule-thin) solid var(--border-input); border-radius: var(--radius-input); padding: var(--space-2xs) var(--space-xs); font-size: var(--text-xs); }
-.filter-bar,
-.bulk-toolbar,
-.progress-panel,
-.batch-result,
-.error-panel {
-  background: var(--bg-card);
-  border: var(--rule-thin) solid var(--border);
-  border-radius: var(--radius-card);
-}
-.filter-bar { display: flex; gap: var(--space-xs); align-items: center; flex-wrap: wrap; padding: var(--space-sm); margin-bottom: var(--space-sm); }
-.filter-select { background: var(--bg-well); border: var(--rule-thin) solid var(--border-input); border-radius: var(--radius-input); color: var(--color-ink); padding: var(--space-2xs) var(--space-xs); font-size: var(--text-xs); }
-.filter-input { background: var(--bg-well); border: var(--rule-thin) solid var(--border-input); border-radius: var(--radius-input); color: var(--color-ink); padding: var(--space-2xs) var(--space-xs); font-size: var(--text-xs); min-width: 240px; }
-.clear-filter { background: var(--color-paper-3); }
-.filter-count { color: var(--color-muted); font-size: var(--text-xs); margin-left: auto; }
-.bulk-toolbar { display: flex; align-items: center; gap: var(--space-xs); flex-wrap: wrap; padding: var(--space-xs) var(--space-sm); margin-bottom: var(--space-sm); }
-.select-all { color: var(--text); display: inline-flex; align-items: center; gap: var(--space-2xs); }
-.selection-count { color: var(--text-faint); font-size: var(--text-meta); margin-right: auto; }
-.progress-panel { padding: var(--space-sm); margin-bottom: var(--space-sm); }
-.progress-meta,
-.batch-result-header,
-.error-panel-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
-.progress-track { height: 8px; background: var(--bg-well); border-radius: var(--radius-pill); overflow: hidden; margin: var(--space-xs) 0 var(--space-3xs); }
-.progress-track span { display: block; width: 100%; height: 100%; background: var(--accent); transform: scaleX(var(--progress-scale, 0)); transform-origin: left; transition: transform var(--dur-short) var(--ease-out); }
-.error-panel { padding: var(--space-sm); margin-bottom: var(--space-sm); border-color: var(--color-danger); }
-.error-panel ul { margin-top: var(--space-xs); padding-left: var(--space-md); color: var(--color-danger); }
-.batch-result { padding: var(--space-sm); margin-bottom: var(--space-sm); }
-.batch-items { display: grid; gap: var(--space-2xs); margin-top: var(--space-sm); max-height: 260px; overflow: auto; }
-.batch-item { display: grid; grid-template-columns: minmax(160px, 1fr) auto minmax(160px, 2fr); align-items: center; gap: var(--space-xs); padding: var(--space-2xs) var(--space-xs); background: var(--bg-well); border: var(--rule-thin) solid var(--border); border-radius: var(--radius-input); }
-.batch-name { color: var(--color-ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.batch-message { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.account-list { display: grid; gap: var(--space-md); }
-.account-group { display: grid; gap: var(--space-sm); }
-.group-header { display: flex; align-items: center; gap: var(--space-2xs); padding-bottom: var(--space-3xs); border-bottom: var(--rule-thin) solid var(--border); }
-.group-header h3 { margin: 0; font-size: var(--text-md); color: var(--color-ink); }
-.group-header .muted { font-size: var(--text-xs); flex: 1; }
-.group-header .batch-btn { background: var(--color-accent-soft); color: var(--color-accent-hover); font-size: var(--text-xs); padding: var(--space-3xs) var(--space-xs); }
-.self-tag { background: var(--accent); border-radius: var(--radius-pill); padding: var(--space-3xs) var(--space-2xs); margin-left: var(--space-2xs); font-size: var(--text-xs); color: var(--color-accent-ink); }
-.account-card { background: var(--bg-card); border: var(--rule-thin) solid var(--border); border-radius: var(--radius-card); padding: var(--space-sm); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-sm); transition: border-color var(--dur-short) var(--ease-out), background-color var(--dur-short) var(--ease-out); }
-.account-card:hover { background: var(--color-paper-2); border-color: var(--border-strong); }
-.account-card.selected { border-color: var(--accent-border); }
-.account-card.disabled { opacity: 0.78; }
-.card-select { display: flex; align-items: flex-start; padding-top: var(--space-3xs); }
-.account-main { min-width: 0; }
-.title-row { display: flex; gap: var(--space-2xs); align-items: center; margin-bottom: var(--space-xs); flex-wrap: wrap; }
-.title-row strong { color: var(--text-strong); font-size: var(--text-md); overflow-wrap: anywhere; }
-.badge,
-.status-pill { border-radius: var(--radius-pill); padding: var(--space-3xs) var(--space-2xs); font-size: var(--text-xs); white-space: nowrap; }
-.badge { background: var(--color-accent-soft); color: var(--color-accent-hover); }
-.badge.disabled { background: var(--color-paper-3); color: var(--color-muted); }
-.status-pill { background: var(--color-paper-3); color: var(--color-ink-2); }
-.status-pill.success { background: var(--success-soft); color: var(--color-success); }
-.status-pill.failed { background: var(--danger-soft); color: var(--color-danger); }
-.status-pill.already { background: var(--color-accent-soft); color: var(--color-accent-hover); }
-.status-pill.pending { background: var(--color-warning-soft); color: var(--color-warning); }
-.status-pill.today { background: var(--color-accent-soft); color: var(--color-accent-hover); }
-.status-pill.neutral { background: var(--border-strong); color: var(--text-faint); }
-.meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2xs) var(--space-sm); color: var(--color-muted); font-size: var(--text-sm); }
-.meta-grid span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.meta-grid b { color: var(--text-faint); font-weight: 600; margin-right: var(--space-2xs); }
-.message { margin-top: var(--space-xs); color: var(--text-faint); font-size: var(--text-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.note { color: var(--color-warning); margin-top: var(--space-3xs); font-size: var(--text-xs); overflow-wrap: anywhere; }
-.muted { color: var(--color-muted); margin: var(--space-3xs) 0; }
-.actions { display: flex; gap: var(--space-2xs); align-items: center; flex-wrap: wrap; justify-content: flex-end; align-self: start; max-width: 260px; }
-button { border: 0; border-radius: var(--radius-input); padding: var(--space-2xs) var(--space-xs); cursor: pointer; background: var(--color-paper-3); color: var(--color-ink); }
-button:hover:not(:disabled) { background: var(--color-paper-2); }
-button:disabled { opacity: 0.6; cursor: not-allowed; }
-button.primary, .primary { background: var(--accent); color: var(--color-accent-ink); }
-button.primary:hover:not(:disabled), .primary:hover:not(:disabled) { background: var(--accent-hover); }
-button.secondary { background: var(--color-paper-3); }
-button.secondary:hover:not(:disabled) { background: var(--color-paper-2); }
-button.ghost { background: transparent; border: var(--rule-thin) solid var(--border-strong); color: var(--text-faint); }
-button.ghost:hover:not(:disabled) { background: var(--bg-elevated); }
-button.danger { background: var(--color-danger-soft); color: var(--color-danger); }
-button.danger:hover:not(:disabled) { background: var(--color-danger-soft); }
-.empty { color: var(--color-muted); text-align: center; padding: var(--space-lg); }
-.modal { position: fixed; inset: 0; background: var(--color-overlay); display: flex; align-items: center; justify-content: center; z-index: var(--z-modal); padding: var(--space-sm); }
-.modal-content { width: min(35rem, calc(100% - var(--space-lg))); max-height: 90dvh; overflow: auto; background: var(--bg-card); border: var(--rule-thin) solid var(--border-input); border-radius: var(--radius-card); padding: var(--space-md); display: grid; gap: var(--space-xs); }
-.modal-content h3 { color: var(--text-strong); }
-label { display: grid; gap: var(--space-3xs); color: var(--text); }
-label.inline { display: flex; align-items: center; gap: var(--space-2xs); }
-.field-hint { color: var(--text-muted); font-size: var(--text-xs); line-height: 1.45; }
-input, select, textarea { background: var(--bg-well); border: var(--rule-thin) solid var(--border-input); border-radius: var(--radius-input); color: var(--color-ink); padding: var(--space-2xs); min-width: 0; }
-.modal-actions { display: flex; gap: var(--space-xs); justify-content: flex-end; margin-top: var(--space-2xs); }
-.import-dialog { max-width: 600px; }
-.import-instructions { background: var(--bg-elevated); border: var(--rule-thin) solid var(--border-input); border-radius: var(--radius-input); padding: var(--space-sm); margin: var(--space-sm) 0; }
-.import-instructions h4 { margin: 0 0 var(--space-2xs); color: var(--color-ink); font-size: var(--text-sm); }
-.import-instructions p { margin: var(--space-3xs) 0; font-size: var(--text-xs); color: var(--color-muted); }
-.import-instructions details { margin-top: var(--space-2xs); }
-.import-instructions summary { cursor: pointer; color: var(--focus-ring); font-size: var(--text-xs); }
-.import-instructions pre { background: var(--bg-well); padding: var(--space-xs); border-radius: var(--radius-input); overflow-x: auto; margin-top: var(--space-2xs); font-size: var(--text-meta); }
-.file-input { padding: var(--space-2xs); background: var(--bg-elevated); border: var(--rule-thin) dashed var(--color-rule-strong); border-radius: var(--radius-input); cursor: pointer; }
-.file-input::-webkit-file-upload-button { background: var(--color-paper-3); color: var(--color-ink); border: none; padding: var(--space-2xs) var(--space-sm); border-radius: var(--radius-input); cursor: pointer; margin-right: var(--space-sm); }
-.import-result { background: var(--bg-elevated); border-radius: var(--radius-input); padding: var(--space-sm); margin: var(--space-sm) 0; }
-.import-result .success { color: var(--success); margin: var(--space-3xs) 0; }
-.import-result .error { color: var(--danger); margin: var(--space-3xs) 0; }
-.error-list { margin-top: var(--space-2xs); }
-.error-list details { cursor: pointer; }
-.error-list summary { color: var(--color-warning); font-size: var(--text-meta); }
-.error-list ul { margin: var(--space-2xs) 0 0; padding-left: var(--space-md); max-height: 200px; overflow-y: auto; }
-.error-list li { color: var(--color-danger); font-size: var(--text-xs); margin: var(--space-3xs) 0; }
-
-@media (max-width: 47.99rem) {
-  .account-card { grid-template-columns: auto minmax(0, 1fr); padding: var(--space-sm); }
-  .actions { grid-column: 2; justify-content: flex-start; max-width: none; }
-  .meta-grid { grid-template-columns: 1fr; }
-  .account-panel { padding: var(--space-sm); }
-  .panel-header { align-items: stretch; }
-  .header-actions,
-  .filter-input,
-  .filter-select,
-  .user-filter { width: 100%; }
-  .header-actions > *,
-  .filter-bar > * { width: 100%; }
-  .filter-count,
-  .selection-count { margin-left: 0; width: 100%; }
-  .bulk-toolbar button,
-  .actions button { flex: 1; }
-  .batch-item { grid-template-columns: 1fr; align-items: start; }
-  .account-list { grid-template-columns: 1fr; }
-}
-</style>
+<style scoped src="./AccountPanel.css"></style>

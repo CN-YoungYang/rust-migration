@@ -4,11 +4,11 @@
       <div>
         <h2>签到记录</h2>
         <p class="panel-subtitle">
-          当前加载 {{ runSummary.total }} 条，成功 {{ runSummary.succeeded }} 条，失败 {{ runSummary.failed }} 条
+          当前加载 {{ runs.length }} 条记录
         </p>
       </div>
       <div class="header-actions">
-        <select v-if="isAdmin" v-model="filterUserId" class="user-filter" aria-label="按用户筛选签到记录">
+        <select v-if="isAdmin" v-model="filterUserId" aria-label="按用户筛选签到记录">
           <option value="">全部用户</option>
           <option v-if="usersLoading" disabled>加载中...</option>
           <option v-for="u in allUsers" :key="u.id" :value="u.id">{{ u.username }}</option>
@@ -59,7 +59,7 @@
           </span>
         </button>
       </div>
-      <select v-model="filterTriggeredBy" class="filter-select" aria-label="按触发方式筛选">
+      <select v-model="filterTriggeredBy" aria-label="按触发方式筛选">
         <option value="">全部触发方式</option>
         <option value="manual">手动</option>
         <option value="manual_batch">批量手动</option>
@@ -69,7 +69,6 @@
         <input
           v-model="filterStartDate"
           type="date"
-          class="filter-input"
           aria-label="开始日期"
           placeholder="开始日期"
         />
@@ -77,12 +76,11 @@
         <input
           v-model="filterEndDate"
           type="date"
-          class="filter-input"
           aria-label="结束日期"
           placeholder="结束日期"
         />
       </div>
-      <select v-model="filterAccountId" class="filter-select" aria-label="按账户筛选">
+      <select v-model="filterAccountId" aria-label="按账户筛选">
         <option value="">全部账户</option>
         <optgroup v-for="group in groupedAccounts" :key="group.key" :label="group.label">
           <option v-for="account in group.items" :key="account.id" :value="account.id">
@@ -90,28 +88,28 @@
           </option>
         </optgroup>
       </select>
-      <button v-if="hasActiveFilter" class="clear-filter" @click="clearFilters">清除筛选</button>
+      <button v-if="hasActiveFilter" @click="clearFilters">清除筛选</button>
       <span class="filter-count">{{ runs.length }} 条记录</span>
     </div>
 
-    <div class="summary-grid">
-      <div class="summary-card">
-        <strong>{{ runSummary.succeeded }}</strong>
-        <span>成功或已签</span>
+    <dl class="summary-strip" aria-label="签到记录概览">
+      <div>
+        <dt>成功或已签</dt>
+        <dd>{{ runSummary.succeeded }}</dd>
       </div>
-      <div class="summary-card danger">
-        <strong>{{ runSummary.failed }}</strong>
-        <span>失败</span>
+      <div class="danger">
+        <dt>失败</dt>
+        <dd>{{ runSummary.failed }}</dd>
       </div>
-      <div class="summary-card">
-        <strong>{{ runSummary.pending }}</strong>
-        <span>进行中</span>
+      <div>
+        <dt>进行中</dt>
+        <dd>{{ runSummary.pending }}</dd>
       </div>
-      <div class="summary-card">
-        <strong>{{ runSummary.avgDuration }}ms</strong>
-        <span>平均耗时</span>
+      <div>
+        <dt>平均耗时</dt>
+        <dd>{{ runSummary.avgDuration }}<small>ms</small></dd>
       </div>
-    </div>
+    </dl>
 
     <div v-if="lastBatchResult" class="batch-result" role="status" aria-live="polite">
       <div class="batch-result-header">
@@ -121,7 +119,7 @@
             共 {{ lastBatchResult.total }} 个，成功 {{ lastBatchResult.succeeded }} 个，跳过 {{ lastBatchResult.skipped }} 个，失败 {{ lastBatchResult.failed }} 个
           </p>
         </div>
-        <button class="ghost" @click="lastBatchResult = null">关闭</button>
+        <button @click="lastBatchResult = null">关闭</button>
       </div>
       <div class="batch-items">
         <div v-for="item in lastBatchResult.items" :key="item.accountId" class="batch-item">
@@ -142,16 +140,16 @@
           <div class="run-info">
             <div class="run-title">
               <span class="account-name">{{ accountName(run.accountId) }}</span>
-              <span class="badge" :class="run.status.toLowerCase()">{{ statusText(run.status) }}</span>
-              <span v-if="accountSite(run.accountId)" class="site-tag">{{ accountSite(run.accountId) }}</span>
+              <span class="site-tag" v-if="accountSite(run.accountId)">{{ accountSite(run.accountId) }}</span>
+              <span class="status-pill" :class="statusClass(run.status)">{{ statusText(run.status) }}</span>
             </div>
-            <div class="run-meta">
-              <span>触发方式: {{ triggerText(run.triggeredBy) }}</span>
-              <span>时间: {{ formatTime(run.createdAt) }}</span>
-              <span v-if="run.durationMs">耗时: {{ run.durationMs }}ms</span>
-              <span v-if="accountOwner(run.accountId)">归属: {{ accountOwner(run.accountId) }}</span>
-              <span v-if="run.message">消息: {{ run.message }}</span>
-            </div>
+            <p class="run-meta">
+              <span>{{ triggerText(run.triggeredBy) }}</span>
+              <span>{{ formatTimeShort(run.createdAt) }}</span>
+              <span v-if="run.durationMs">耗时 {{ run.durationMs }}ms</span>
+              <span v-if="accountOwner(run.accountId)">归属 {{ accountOwner(run.accountId) }}</span>
+            </p>
+            <p v-if="run.message" class="run-message" :title="run.message">{{ run.message }}</p>
           </div>
           <div class="run-actions">
             <button
@@ -612,6 +610,12 @@ const statusText = (status: string) => {
   return map[normalized] || status
 }
 
+// 徽标类名映射：已签用 workbench 的 .already 配色
+const statusClass = (status: string): string => {
+  const normalized = status.toLowerCase()
+  return normalized === 'already_checked' ? 'already' : normalized
+}
+
 const triggerText = (trigger: string) => {
   const map: Record<string, string> = {
     manual: '手动',
@@ -622,6 +626,18 @@ const triggerText = (trigger: string) => {
 }
 
 const formatTime = (time: string) => new Date(time).toLocaleString('zh-CN')
+
+// 记录行内的紧凑时间：MM-DD HH:mm，降低整段信息的视觉重量
+const formatTimeShort = (time: string): string => {
+  const date = new Date(time)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 // 把日期选择器的 `YYYY-MM-DD` 转成浏览器本地时区的日界 RFC3339 时刻。
 // 记录在界面上按浏览器本地时间显示，筛选也必须用浏览器本地日界，否则
@@ -699,109 +715,4 @@ watch([filterStatus, filterTriggeredBy, filterStartDate, filterEndDate, filterAc
 })
 </script>
 
-<style scoped>
-/* design-system: design.md · Workbench panel · CheckinRunsPanel */
-.checkin-runs-panel { max-width: 1200px; margin: 0 auto; padding: clamp(var(--space-sm), 2.5vw, var(--space-lg)) 0 var(--space-xl); }
-.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-lg); gap: var(--space-sm); flex-wrap: wrap; }
-.header-actions { display: flex; gap: var(--space-xs); align-items: center; flex-wrap: wrap; }
-.user-filter { background: var(--bg-well); color: var(--color-ink); border: var(--rule-thin) solid var(--border-input); border-radius: var(--radius-input); padding: var(--space-2xs) var(--space-xs); font-size: var(--text-xs); }
-h2 { color: var(--color-ink); }
-.panel-subtitle { color: var(--text-muted); font-size: var(--text-meta); margin-top: var(--space-3xs); }
-select, input { background: var(--bg-well); color: var(--color-ink); border: var(--rule-thin) solid var(--border-input); border-radius: var(--radius-input); padding: var(--space-2xs); }
-.keep-input { width: 90px; }
-.cleanup-controls { display: grid; gap: var(--space-3xs); padding: var(--space-2xs) var(--space-xs); background: var(--bg-card); border: var(--rule-thin) solid var(--border); border-radius: var(--radius-input); }
-.cleanup-row { display: flex; gap: var(--space-2xs); align-items: center; }
-.cleanup-scope { color: var(--text-muted); font-size: var(--text-xs); }
-.cleanup-reset-option { display: flex; align-items: center; gap: var(--space-2xs); color: var(--text-faint); font-size: var(--text-xs); cursor: pointer; }
-.cleanup-reset-option input { width: auto; margin: 0; padding: 0; accent-color: var(--accent); }
-.filter-bar { display: flex; gap: var(--space-xs); align-items: center; flex-wrap: wrap; padding: var(--space-sm); background: var(--bg-card); border: var(--rule-thin) solid var(--border); border-radius: var(--radius-card); margin-bottom: var(--space-md); }
-.filter-select { background: var(--bg-well); border: var(--rule-thin) solid var(--border-input); border-radius: var(--radius-input); color: var(--color-ink); padding: var(--space-2xs) var(--space-xs); font-size: var(--text-xs); }
-.filter-input { background: var(--bg-well); border: var(--rule-thin) solid var(--border-input); border-radius: var(--radius-input); color: var(--color-ink); padding: var(--space-2xs) var(--space-xs); font-size: var(--text-xs); min-width: 180px; }
-.date-range { display: flex; align-items: center; gap: var(--space-2xs); }
-.date-separator { color: var(--color-muted); }
-.status-filter { display: flex; gap: var(--space-2xs); }
-.status-btn { background: var(--bg-elevated); border: var(--rule-thin) solid var(--border-strong); border-radius: var(--radius-pill); padding: var(--space-2xs) var(--space-xs); font-size: var(--text-meta); cursor: pointer; transition: background-color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out); color: var(--color-ink); }
-.status-btn:hover { background: var(--color-paper-2); }
-.status-btn.active { background: var(--accent); border-color: var(--accent-border); color: var(--color-accent-ink); }
-.status-btn .count { background: var(--color-paper-3); border-radius: var(--radius-pill); padding: var(--space-3xs) var(--space-2xs); margin-left: var(--space-3xs); font-size: var(--text-xs); }
-.status-btn.active .count { color: var(--color-ink); }
-.clear-filter { background: var(--color-paper-3); border: none; border-radius: var(--radius-input); padding: var(--space-2xs) var(--space-xs); color: var(--color-ink); font-size: var(--text-meta); cursor: pointer; }
-.clear-filter:hover { background: var(--color-paper-2); }
-.filter-count { color: var(--color-muted); font-size: var(--text-xs); margin-left: auto; }
-.summary-grid { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: var(--space-xs); margin-bottom: var(--space-md); }
-.summary-card { background: var(--bg-card); border: var(--rule-thin) solid var(--border); border-radius: var(--radius-card); padding: var(--space-sm); display: grid; gap: var(--space-3xs); }
-.summary-card strong { color: var(--text-strong); font-size: var(--text-summary); }
-.summary-card span { color: var(--text-muted); font-size: var(--text-xs); }
-.summary-card.danger strong { color: var(--color-danger); }
-.batch-result { background: var(--bg-card); border: var(--rule-thin) solid var(--border); border-radius: var(--radius-card); padding: var(--space-sm); margin-bottom: var(--space-md); }
-.batch-result-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
-.batch-items { display: grid; gap: var(--space-2xs); margin-top: var(--space-sm); max-height: 260px; overflow: auto; }
-.batch-item { display: grid; grid-template-columns: minmax(160px, 1fr) auto minmax(160px, 2fr); align-items: center; gap: var(--space-xs); padding: var(--space-2xs) var(--space-xs); background: var(--bg-well); border: var(--rule-thin) solid var(--border); border-radius: var(--radius-input); }
-.batch-name,
-.batch-message { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.batch-name { color: var(--color-ink); font-weight: 600; }
-.batch-message { color: var(--text-muted); }
-.runs-list { display: grid; gap: var(--space-md); }
-.run-group { display: grid; gap: var(--space-xs); }
-.group-header { display: flex; align-items: center; gap: var(--space-2xs); padding-bottom: var(--space-3xs); border-bottom: var(--rule-thin) solid var(--border); }
-.group-header strong { color: var(--color-ink); font-size: var(--text-md); }
-.group-header .muted { font-size: var(--text-meta); }
-.self-tag { background: var(--accent); border-radius: var(--radius-pill); padding: var(--space-3xs) var(--space-2xs); margin-left: var(--space-2xs); font-size: var(--text-xs); color: var(--color-accent-ink); font-weight: normal; }
-.run-card { background: var(--bg-card); padding: var(--space-sm); border-radius: var(--radius-card); border: var(--rule-thin) solid var(--border); transition: background-color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out); display: flex; justify-content: space-between; gap: var(--space-sm); }
-.run-card:hover { background: var(--color-paper-2); border-color: var(--border-strong); }
-.run-card.success .badge { background: var(--success-soft); }
-.run-card.failed .badge { background: var(--danger-soft); }
-.run-card.already_checked .badge { background: var(--accent-soft); }
-.run-card.pending .badge { background: var(--warn-soft); }
-.run-info .account-name { color: var(--color-ink); font-size: var(--text-lg); font-weight: bold; }
-.run-info { display: flex; flex-direction: column; gap: var(--space-2xs); }
-.run-title { display: flex; align-items: center; gap: var(--space-2xs); flex-wrap: wrap; }
-.run-meta { display: flex; flex-direction: column; gap: var(--space-3xs); color: var(--text-muted); font-size: var(--text-meta); }
-.run-actions { display: flex; gap: var(--space-2xs); align-items: flex-start; flex-wrap: wrap; justify-content: flex-end; min-width: 160px; }
-.badge { padding: var(--space-3xs) var(--space-2xs); border-radius: var(--radius-pill); font-size: var(--text-xs); display: inline-block; width: fit-content; background: var(--color-paper-3); color: var(--color-ink-2); }
-.badge.success { background: var(--success-soft); color: var(--color-success); }
-.badge.failed { background: var(--danger-soft); color: var(--color-danger); }
-.badge.already_checked { background: var(--accent-soft); color: var(--color-accent-hover); }
-.badge.pending { background: var(--color-warning-soft); color: var(--color-warning); }
-.badge.neutral { background: var(--color-paper-3); }
-.site-tag { background: var(--color-paper-3); color: var(--color-muted); border: var(--rule-thin) solid var(--border-strong); border-radius: var(--radius-pill); padding: var(--space-3xs) var(--space-2xs); font-size: var(--text-xs); }
-button { color: var(--color-ink); border: none; padding: var(--space-2xs) var(--space-sm); border-radius: var(--radius-input); cursor: pointer; background: var(--color-paper-3); }
-button:hover:not(:disabled) { background: var(--color-paper-2); }
-button:disabled { background: var(--color-paper-3); cursor: not-allowed; opacity: 0.6; }
-.btn-execute { background: var(--accent); color: var(--color-accent-ink); }
-.btn-execute:hover:not(:disabled) { background: var(--accent-hover); }
-.btn-retry { background: var(--color-accent-soft); color: var(--color-accent-hover); }
-.btn-retry:hover:not(:disabled) { background: var(--color-accent-soft); }
-.btn-cleanup { background: var(--color-danger-soft); color: var(--color-danger); }
-.btn-cleanup:hover:not(:disabled) { background: var(--color-danger-soft); }
-.btn-delete { background: var(--color-danger-soft); color: var(--color-danger); }
-.btn-delete:hover:not(:disabled) { background: var(--color-danger-soft); }
-button.ghost { background: transparent; border: var(--rule-thin) solid var(--border-strong); color: var(--text-faint); }
-button.ghost:hover:not(:disabled) { background: var(--bg-elevated); }
-.empty { text-align: center; color: var(--text-muted); padding: var(--space-xl); background: var(--bg-card); border: var(--rule-thin) solid var(--border); border-radius: var(--radius-card); }
-.load-more { text-align: center; padding: var(--space-sm); }
-.load-more button { background: var(--color-paper-3); color: var(--color-ink-2); border: var(--rule-thin) solid var(--color-rule-strong); padding: var(--space-2xs) var(--space-md); border-radius: var(--radius-input); cursor: pointer; }
-.load-more button:hover { background: var(--color-paper-2); color: var(--color-ink); }
-
-@media (max-width: 47.99rem) {
-  .checkin-runs-panel { padding: var(--space-sm); }
-  .header-actions,
-  .status-filter,
-  .date-range { width: 100%; }
-  .cleanup-row { width: 100%; }
-  .cleanup-row .keep-input,
-  .cleanup-row .btn-cleanup { flex: 1; width: auto; }
-  .header-actions > *,
-  .filter-select,
-  .filter-input,
-  .date-range input { width: 100%; }
-  .status-filter { flex-wrap: wrap; }
-  .filter-bar { flex-direction: column; align-items: stretch; }
-  .filter-count { margin-left: 0; width: 100%; }
-  .summary-grid { grid-template-columns: 1fr 1fr; }
-  .run-card { display: grid; }
-  .run-actions { justify-content: flex-start; min-width: 0; }
-  .run-actions button { flex: 1; }
-  .batch-item { grid-template-columns: 1fr; align-items: start; }
-}
-</style>
+<style scoped src="./CheckinRunsPanel.css"></style>

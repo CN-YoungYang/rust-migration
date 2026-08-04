@@ -1,6 +1,11 @@
 <template>
   <div class="admin-user-panel">
-    <h2>用户管理</h2>
+    <div class="panel-header">
+      <div>
+        <h2>用户管理</h2>
+        <p class="panel-subtitle">共 {{ users.length }} 个用户</p>
+      </div>
+    </div>
 
     <form class="create-form" aria-labelledby="create-user-title" @submit.prevent="createUser">
       <h3 id="create-user-title">创建新用户</h3>
@@ -20,7 +25,7 @@
         </select>
       </div>
       <div class="form-group">
-        <label>
+        <label class="label-check">
           <input v-model="newUser.enabled" type="checkbox" />
           启用
         </label>
@@ -37,14 +42,13 @@
 
     <div class="user-list" :aria-busy="loading">
       <h3>用户列表</h3>
-      <p v-if="loading" class="loading-hint" role="status" aria-live="polite">加载中...</p>
-      <p v-if="!loading && users.length === 0" class="loading-hint" role="status">暂无用户</p>
-      <div v-for="user in users" :key="user.id" class="user-card">
+      <p v-if="loading" class="empty" role="status" aria-live="polite">加载中...</p>
+      <p v-if="!loading && users.length === 0" class="empty" role="status">暂无用户</p>
+      <div v-for="user in users" :key="user.id" class="user-card" :class="{ disabled: !user.enabled }">
         <div class="user-main">
           <div class="user-info">
             <strong>{{ user.username }}</strong>
-            <span class="badge" :class="user.role.toLowerCase()">{{ roleText(user.role) }}</span>
-            <span v-if="!user.enabled" class="badge disabled">已禁用</span>
+            <span class="badge">{{ roleText(user.role) }}</span>
             <span v-if="user.note" class="user-note" :title="user.note">{{ user.note }}</span>
           </div>
           <div class="user-stats">
@@ -60,7 +64,7 @@
           </p>
         </div>
         <div class="user-actions">
-          <button @click="editUser(user)" class="btn-edit" :disabled="!canManage(user)">编辑</button>
+          <button @click="editUser(user)" :disabled="!canManage(user)">编辑</button>
           <button
             @click="deleteUser(user.id)"
             class="btn-delete"
@@ -97,7 +101,7 @@
             </select>
           </div>
           <div class="form-group">
-            <label>
+            <label class="label-check">
               <input v-model="editingUser.enabled" type="checkbox" :disabled="editingUser.id === currentUser?.id" />
               启用
             </label>
@@ -116,7 +120,7 @@
             <button type="submit" class="btn-primary" :disabled="saving" :data-state="saving ? 'loading' : undefined">
               {{ saving ? '保存中...' : '保存' }}
             </button>
-            <button type="button" @click="closeEditModal" class="btn-cancel" :disabled="saving">取消</button>
+            <button type="button" @click="closeEditModal" :disabled="saving">取消</button>
           </div>
           <p id="edit-user-error" class="field-error-slot" :class="{ 'is-empty': !editErrorMessage }" :role="editErrorMessage ? 'alert' : undefined">{{ editErrorMessage || '\u00a0' }}</p>
         </form>
@@ -303,250 +307,4 @@ const deleteUser = async (id: string) => {
 onMounted(fetchUsers)
 </script>
 
-<style scoped>
-/* design-system: design.md · Workbench panel · AdminUserPanel */
-.admin-user-panel {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: clamp(var(--space-sm), 2.5vw, var(--space-lg)) 0 var(--space-xl);
-}
-
-h2 {
-  color: var(--text-strong);
-  margin-bottom: var(--space-lg);
-}
-
-h3 {
-  color: var(--text-strong);
-  margin-bottom: var(--space-sm);
-}
-
-.create-form {
-  background: var(--bg-card);
-   border: var(--rule-thin) solid var(--border);
-  padding: var(--space-md);
-  border-radius: var(--radius-card);
-  margin-bottom: var(--space-lg);
-  box-shadow: var(--shadow-card);
-}
-
-.form-group {
-  margin-bottom: var(--space-sm);
-}
-
-.form-group label {
-  display: block;
-  color: var(--text);
-  margin-bottom: var(--space-2xs);
-}
-
-.form-group input[type="text"],
-.form-group input[type="password"],
-.form-group select {
-  width: 100%;
-  padding: var(--space-2xs);
-  background: var(--bg-well);
-   border: var(--rule-thin) solid var(--border-input);
-  border-radius: var(--radius-input);
-  color: var(--text-strong);
-}
-
-.form-group input[type="checkbox"] {
-  margin-right: var(--space-2xs);
-}
-
-.btn-primary {
-  background: var(--accent);
-  color: var(--color-accent-ink);
-  border: none;
-  padding: var(--space-2xs) var(--space-md);
-  border-radius: var(--radius-input);
-  cursor: pointer;
-}
-
-.btn-primary:hover {
-  background: var(--accent-hover);
-}
-
-.user-list {
-  background: var(--bg-card);
-   border: var(--rule-thin) solid var(--border);
-  padding: var(--space-md);
-  border-radius: var(--radius-card);
-}
-
-.user-card {
-  background: var(--bg-app);
-   border: var(--rule-thin) solid var(--border);
-  padding: var(--space-sm);
-  border-radius: var(--radius-card);
-  margin-bottom: var(--space-xs);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-sm);
-  transition: background-color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out);
-}
-
-.user-card:hover {
-  background: var(--color-paper-2);
-  border-color: var(--border-strong);
-}
-
-.user-info {
-  display: flex;
-  gap: var(--space-2xs);
-  align-items: center;
-  color: var(--text-strong);
-}
-
-.user-main {
-  display: grid;
-  gap: var(--space-2xs);
-  min-width: 0;
-}
-
-.user-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2xs) var(--space-sm);
-  color: var(--text-muted);
-  font-size: var(--text-meta);
-}
-
-.user-stats b {
-  color: var(--color-ink);
-}
-
-.user-stats .danger,
-.user-stats .danger b {
-  color: var(--color-danger);
-}
-
-.disabled-hint {
-  color: var(--warn);
-  font-size: var(--text-xs);
-  margin: 0;
-}
-
-.badge {
-  padding: var(--space-3xs) var(--space-2xs);
-  border-radius: var(--radius-pill);
-  font-size: var(--text-xs);
-  font-weight: bold;
-}
-
-.badge.user {
-  background: var(--border-strong);
-  color: var(--color-accent-hover);
-}
-
-.badge.admin {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-}
-
-.badge.super_admin {
-  background: var(--danger-soft);
-  color: var(--color-danger);
-}
-
-.badge.disabled {
-  background: var(--color-paper-3);
-  color: var(--text-faint);
-}
-
-.user-actions {
-  display: flex;
-  gap: var(--space-2xs);
-}
-
-.btn-edit {
-  background: var(--success);
-  color: var(--color-accent-ink);
-  border: none;
-  padding: var(--space-3xs) var(--space-xs);
-  border-radius: var(--radius-input);
-  cursor: pointer;
-}
-
-.btn-delete {
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-  border: none;
-  padding: var(--space-3xs) var(--space-xs);
-  border-radius: var(--radius-input);
-  cursor: pointer;
-}
-
-.btn-delete:disabled {
-  background: var(--color-paper-3);
-  cursor: not-allowed;
-}
-
-.btn-primary:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-
-.modal {
-  position: fixed;
-  inset: 0;
-  background: var(--color-overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-modal);
-  padding: var(--space-sm);
-}
-
-.modal-content {
-  background: var(--bg-card);
-   border: var(--rule-thin) solid var(--border-input);
-  padding: var(--space-lg);
-  border-radius: var(--radius-card);
-  width: min(100%, 31.25rem);
-  max-height: min(90dvh, 44rem);
-  overflow: auto;
-}
-
-.modal-actions {
-  display: flex;
-  gap: var(--space-sm);
-  margin-top: var(--space-sm);
-}
-
-.btn-cancel {
-  background: var(--color-paper-3);
-  color: var(--color-ink-2);
-  border: none;
-  padding: var(--space-2xs) var(--space-md);
-  border-radius: var(--radius-input);
-  cursor: pointer;
-}
-
-.loading-hint {
-  color: var(--color-muted);
-  text-align: center;
-  padding: var(--space-md);
-}
-
-.user-note {
-  color: var(--color-muted);
-  font-size: var(--text-xs);
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: default;
-}
-
-@media (max-width: 47.99rem) {
-  .admin-user-panel { padding: var(--space-sm); }
-  .user-card { align-items: flex-start; flex-direction: column; }
-  .user-info { flex-wrap: wrap; }
-  .user-stats { display: grid; gap: var(--space-3xs); }
-  .user-actions { width: 100%; }
-  .user-actions button { flex: 1; }
-}
-</style>
+<style scoped src="./AdminUserPanel.css"></style>

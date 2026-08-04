@@ -1,0 +1,223 @@
+/* Hallmark · pre-emit critique: P5 H4 E5 S5 R5 V4 */
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench · theme: Cobalt · design-system: design.md · designed-as-app
+ * panel: account-panel · de-noise: 单状态信号 · 元信息单行 · 开放式区块
+ * contrast: pass (40–41) · slop: pass (42–45) · responsive: pass (34, 49) · mobile: pass (50–57)
+ * 外框皮肤（纸面/分隔线/输入控件/按钮）由 workbench.css 提供，这里只定义结构与组件级细节。
+ */
+.account-panel {
+  width: min(100%, 75rem);
+  margin-inline: auto;
+  padding-block: var(--space-sm) var(--space-xl);
+  color: var(--color-ink-2);
+}
+
+.panel-subtitle {
+  margin-block-start: var(--space-3xs);
+  color: var(--color-muted);
+}
+
+.filter-input { min-width: min(18rem, 100%); }
+.filter-count { color: var(--color-muted); font-size: var(--text-xs); margin-inline-start: auto; }
+
+/* 分组头：组名、数量与"该组签到"一行排布；按钮收敛为小号次级按钮 */
+.account-group { display: grid; gap: var(--space-sm); min-width: 0; }
+.group-header { display: flex; align-items: center; gap: var(--space-2xs); }
+.group-header .muted { flex: 1; }
+.account-panel .group-header .batch-btn {
+  min-height: 0;
+  padding: var(--space-3xs) var(--space-xs);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-hover);
+  border-color: var(--color-accent-soft);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+/* 账户行：开放式区块（分隔皮肤由 workbench 提供），这里只定结构。 */
+.account-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-sm);
+}
+.account-card.disabled { opacity: 0.72; }
+.card-select { display: flex; align-items: flex-start; padding-block-start: var(--space-3xs); }
+.account-main { min-width: 0; display: grid; gap: var(--space-2xs); }
+
+.title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+.title-row strong {
+  color: var(--color-ink);
+  font-size: var(--text-md);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+/* 元信息压缩为一行流动等宽小字，标签不再加粗。 */
+.meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs) var(--space-sm);
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+.meta-line span { display: inline-flex; gap: var(--space-2xs); min-width: 0; }
+.meta-line b { color: var(--color-ink-2); font-weight: 500; overflow-wrap: anywhere; }
+
+.message {
+  color: var(--color-muted);
+  font-size: var(--text-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note { color: var(--color-muted); font-size: var(--text-xs); overflow-wrap: anywhere; }
+
+/* 行操作收敛为次级按钮，避免每行一排重描边按钮墙。 */
+.account-panel .card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+.account-panel .card-actions button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.account-panel .card-actions button.danger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-color: var(--color-danger-soft);
+}
+.account-panel .card-actions button.danger:hover:not(:disabled) {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-color: var(--color-danger-soft);
+}
+
+/* 进度 / 批量结果 / 错误：外框由 workbench 提供，内部布局在此。 */
+.progress-meta,
+.batch-result-header,
+.error-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+.progress-meta strong { color: var(--color-ink); }
+.progress-track {
+  height: 6px;
+  margin-block: var(--space-xs);
+  background: var(--color-paper-3);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.progress-track span {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  transform: scaleX(var(--progress-scale, 0));
+  transform-origin: left;
+  transition: transform var(--dur-short) var(--ease-out);
+}
+.error-panel ul {
+  margin-block-start: var(--space-xs);
+  padding-left: var(--space-md);
+  color: var(--color-danger);
+}
+.batch-items {
+  display: grid;
+  gap: var(--space-2xs);
+  margin-block-start: var(--space-sm);
+  max-height: 260px;
+  overflow: auto;
+}
+.batch-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 2fr);
+  align-items: center;
+  gap: var(--space-xs);
+}
+.batch-name {
+  color: var(--color-ink);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-message {
+  color: var(--color-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.muted { color: var(--color-muted); font-size: var(--text-xs); }
+
+/* 表单弹窗：壳由 workbench 提供，字段布局在此。 */
+.modal-content { display: grid; gap: var(--space-sm); padding: var(--space-md); }
+.modal-content h3 { color: var(--color-ink); }
+.modal-content label { display: grid; gap: var(--space-3xs); color: var(--color-ink-2); }
+.modal-content label.inline { display: flex; align-items: center; gap: var(--space-2xs); }
+.field-hint { color: var(--color-muted); font-size: var(--text-xs); line-height: 1.45; }
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-xs); }
+.import-instructions {
+  display: grid;
+  gap: var(--space-2xs);
+  padding: var(--space-sm);
+  background: var(--color-paper-3);
+  border-radius: var(--radius-input);
+}
+.import-instructions h4 { margin: 0; color: var(--color-ink); font-size: var(--text-sm); }
+.import-instructions p { margin: 0; color: var(--color-muted); font-size: var(--text-xs); }
+.import-instructions details { font-size: var(--text-xs); }
+.import-instructions summary { cursor: pointer; color: var(--color-accent-hover); }
+.import-instructions pre {
+  margin-block-start: var(--space-2xs);
+  padding: var(--space-xs);
+  background: var(--color-paper-2);
+  border-radius: var(--radius-input);
+  overflow-x: auto;
+  font-size: var(--text-meta);
+}
+.import-result {
+  display: grid;
+  gap: var(--space-2xs);
+  padding: var(--space-sm);
+  background: var(--color-paper-3);
+  border-radius: var(--radius-input);
+}
+.import-result .success { margin: 0; color: var(--color-success); }
+.import-result .error { margin: 0; color: var(--color-danger); }
+.error-list summary { cursor: pointer; color: var(--color-warning); font-size: var(--text-meta); }
+.error-list ul {
+  margin: var(--space-2xs) 0 0;
+  padding-left: var(--space-md);
+  max-height: 200px;
+  overflow-y: auto;
+}
+.error-list li { margin: var(--space-3xs) 0; color: var(--color-danger); font-size: var(--text-xs); }
+
+@media (max-width: 47.99rem) {
+  .account-panel { padding: var(--space-sm); }
+  .account-card { grid-template-columns: auto minmax(0, 1fr); }
+  .card-actions { grid-column: 2; justify-content: flex-start; }
+  .account-panel .card-actions button { flex: 1 1 auto; min-height: 2.75rem; }
+  .filter-bar > * { flex: 1 1 100%; }
+  .bulk-toolbar button { flex: 1 1 auto; }
+  .batch-item { grid-template-columns: 1fr; align-items: start; }
+}

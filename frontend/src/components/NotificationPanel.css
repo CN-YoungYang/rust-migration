@@ -1,0 +1,82 @@
+/* Hallmark · pre-emit critique: P5 H4 E5 S5 R5 V4 */
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench · theme: Cobalt · design-system: design.md · designed-as-app
+ * panel: notification-panel · de-noise: 单一状态信号 · 开放表单与列表行
+ * contrast: pass (40–41) · slop: pass (42–45) · responsive: pass (34, 49) · mobile: pass (50–57)
+ * 外框皮肤（纸面/分隔线/输入控件/按钮/预览网格）由 workbench.css 提供，这里只定义结构与组件级细节。
+ */
+.notification-panel {
+  width: min(100%, 64rem);
+  margin-inline: auto;
+  padding-block: var(--space-sm) var(--space-xl);
+  color: var(--color-ink-2);
+}
+
+.panel-subtitle { margin-block-start: var(--space-3xs); color: var(--color-muted); }
+
+/* 通知表单：开放区块（外框由 workbench 摊平），字段布局在此。 */
+.notification-form { display: grid; gap: var(--space-sm); }
+.form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-sm); }
+.notification-form label { display: grid; gap: var(--space-2xs); color: var(--color-ink-2); }
+.notification-form label.switch-row {
+  align-content: center;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+.notification-form .clear-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.clear-option input { width: auto; margin: 0; }
+.form-actions { justify-content: flex-end; }
+
+/* 预览网格：外框与数字排版由 workbench 提供，这里只补标签色。 */
+.preview-grid span { color: var(--color-muted); font-size: var(--text-xs); }
+
+/* 配置卡：开放式区块；启用/停用是唯一状态信号。 */
+.notification-card { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-sm); }
+.config-main { min-width: 0; }
+.title-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs); }
+.title-row strong { color: var(--color-ink); font-size: var(--text-md); font-weight: 700; }
+.muted {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  margin: var(--space-3xs) 0;
+  overflow-wrap: anywhere;
+}
+.note {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  margin: var(--space-3xs) 0;
+  overflow-wrap: anywhere;
+}
+.test-result { margin-block-start: var(--space-2xs); font-size: var(--text-xs); }
+.test-result.success { color: var(--color-success); }
+.test-result.failed { color: var(--color-danger); }
+
+/* 行操作收敛为次级按钮。 */
+.notification-panel .actions button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.notification-panel .actions button.danger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-color: var(--color-danger-soft);
+}
+.notification-panel .actions button.danger:hover:not(:disabled) {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-color: var(--color-danger-soft);
+}
+
+@media (max-width: 47.99rem) {
+  .notification-panel { padding: var(--space-sm); }
+  .form-row { grid-template-columns: 1fr; }
+}

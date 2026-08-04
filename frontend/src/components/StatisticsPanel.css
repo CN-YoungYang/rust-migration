@@ -53,15 +53,6 @@
 .toolbar button { white-space: nowrap; }
 .toolbar button.selected { background: var(--color-accent-soft); color: var(--color-accent-hover); border-color: var(--color-accent); }
 
-.validation-box {
-  margin-block-start: var(--space-sm);
-  padding: var(--space-xs) var(--space-sm);
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-  border: var(--rule-thin) solid var(--color-danger);
-  border-radius: var(--radius-card);
-}
-
 .stats-content {
   min-width: 0;
   display: grid;

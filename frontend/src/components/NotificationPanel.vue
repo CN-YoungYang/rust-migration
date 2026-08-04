@@ -151,7 +151,7 @@
         <div class="config-main">
           <div class="title-row">
             <strong>{{ typeLabel(config.notifyType) }}</strong>
-            <span class="badge" :class="{ disabled: !config.enabled }">{{ config.enabled ? '启用' : '停用' }}</span>
+            <span class="badge" :class="config.enabled ? 'success' : 'neutral'">{{ config.enabled ? '启用' : '停用' }}</span>
           </div>
           <p class="muted">
             {{ triggerSummary(config) }}
@@ -477,114 +477,4 @@ async function deleteConfig(id: string) {
 onMounted(loadConfigs)
 </script>
 
-<style scoped>
-/* design-system: design.md · Workbench panel · NotificationPanel */
-.notification-panel { max-width: 1000px; margin: 0 auto; padding: clamp(var(--space-sm), 2.5vw, var(--space-lg)) 0 var(--space-xl); }
-.panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-sm); margin-bottom: var(--space-md); }
-h2, h3 { color: var(--text-strong); }
-.panel-subtitle { color: var(--text-muted); font-size: var(--text-meta); margin-top: var(--space-3xs); }
-.notification-form,
-.notification-card {
-  background: var(--bg-card);
-  border: var(--rule-thin) solid var(--border);
-  border-radius: var(--radius-card);
-  padding: var(--space-md);
-}
-.notification-form { display: grid; gap: var(--space-sm); margin-bottom: var(--space-md); }
-.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm); }
-label { color: var(--text); display: grid; gap: var(--space-2xs); }
-.switch-row { align-content: center; grid-template-columns: auto 1fr; align-items: center; }
-.clear-option { display: flex; flex-direction: row; align-items: center; gap: var(--space-2xs); color: var(--text-muted); font-size: var(--text-xs); cursor: pointer; }
-.clear-option input { width: auto; margin: 0; }
-input,
-select {
-  color: var(--text-strong);
-  background: var(--bg-well);
-  border: var(--rule-thin) solid var(--border-input);
-  border-radius: var(--radius-input);
-  padding: var(--space-2xs);
-}
-input:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
-button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-.form-actions,
-.actions { display: flex; gap: var(--space-xs); align-items: center; }
-.preview-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-xs);
-}
-.preview-grid div {
-  background: var(--bg-well);
-  border: var(--rule-thin) solid var(--border);
-  border-radius: var(--radius-card);
-  padding: var(--space-xs);
-  display: grid;
-  gap: var(--space-3xs);
-}
-.preview-grid span {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-}
-.preview-grid strong {
-  color: var(--text-strong);
-  font-size: var(--text-sm);
-  overflow-wrap: anywhere;
-}
-.validation-box {
-  border: var(--rule-thin) solid var(--color-danger);
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-  border-radius: var(--radius-card);
-  padding: var(--space-xs) var(--space-sm);
-  display: grid;
-  gap: var(--space-3xs);
-}
-.notification-list { display: grid; gap: var(--space-sm); }
-.notification-card { display: flex; justify-content: space-between; gap: var(--space-sm); transition: border-color var(--dur-short) var(--ease-out), background-color var(--dur-short) var(--ease-out); }
-.notification-card:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
-.config-main { min-width: 0; }
-.title-row { display: flex; align-items: center; gap: var(--space-2xs); margin-bottom: var(--space-2xs); }
-.badge { background: var(--success-soft); color: var(--color-success); border-radius: var(--radius-pill); padding: var(--space-3xs) var(--space-2xs); font-size: var(--text-xs); }
-.badge.disabled { background: var(--color-paper-3); color: var(--color-muted); }
-.muted { color: var(--text-muted); margin: var(--space-3xs) 0; overflow-wrap: anywhere; }
-.note { color: var(--color-warning); margin: var(--space-3xs) 0; }
-.test-result { margin-top: var(--space-2xs); font-size: var(--text-xs); }
-.test-result.success { color: var(--color-success); }
-.test-result.failed { color: var(--color-danger); }
-button {
-  color: var(--text-strong);
-  background: var(--border-input);
-  border: 0;
-  border-radius: var(--radius-input);
-  padding: var(--space-2xs) var(--space-xs);
-}
-button:disabled { opacity: 0.6; cursor: not-allowed; }
-button.primary,
-.primary { background: var(--accent); color: var(--color-accent-ink); }
-button:hover:not(:disabled) { background: var(--color-paper-2); }
-button.primary:hover:not(:disabled),
-.primary:hover:not(:disabled) { background: var(--accent-hover); }
-button.danger { background: var(--color-danger-soft); color: var(--color-danger); }
-button.danger:hover:not(:disabled) { background: var(--color-danger-soft); }
-.empty { color: var(--text-muted); text-align: center; padding: var(--space-lg); }
-
-@media (max-width: 47.99rem) {
-  .notification-panel { padding: var(--space-sm); }
-  .panel-header { display: grid; }
-  .panel-header button { width: 100%; }
-  .notification-form { grid-template-columns: 1fr; }
-  .form-row { display: flex; flex-direction: column; gap: var(--space-sm); }
-  .preview-grid { grid-template-columns: 1fr; }
-  .notification-card { display: grid; grid-template-columns: 1fr; }
-  .actions { flex-wrap: wrap; }
-  .actions button,
-  .panel-header button { width: 100%; }
-}
-</style>
+<style scoped src="./NotificationPanel.css"></style>

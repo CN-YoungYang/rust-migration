@@ -526,15 +526,8 @@ a:focus-visible {
   color: var(--color-ink-2);
 }
 
-.panel-region section[class$="-panel"]:not(.statistics-panel),
-.panel-region .checkin-runs-panel,
-.panel-region .admin-user-panel,
-.panel-region .settings-panel {
-  width: 100%;
-  max-width: none;
-  margin-inline: 0;
-  padding-inline: 0;
-}
+/* 六个数据面板（statistics/account/checkin-runs/notification/admin-user/settings）
+   列宽均由各自组件样式持有（width:min(100%,…)），构成有节制的数据列宽。 */
 
 .panel-region .panel-header,
 .panel-region .header {
