@@ -168,6 +168,14 @@ pub async fn update_user(
                 return Err(crate::error::AppError::Forbidden);
             }
         }
+        // M16：禁止自禁用。唯一的 SUPER_ADMIN 一旦禁用自己，auth_middleware 立即
+        // 拒绝其会话，且没有任何管理员能再启用（check_admin_permission 禁止管理同级/上级），
+        // 造成永久锁死；ADMIN 同理，避免误操作锁死自己。
+        if payload.enabled == Some(false) {
+            return Err(crate::error::AppError::Validation(
+                "不能禁用当前登录账号".into(),
+            ));
+        }
     } else {
         check_admin_permission(&current_user, &existing)?;
         check_role_assignment(&current_user, payload.role.as_deref())?;

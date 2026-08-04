@@ -144,59 +144,50 @@ pub async fn export_accounts(
     Extension(user): Extension<crate::models::AppUser>,
 ) -> Result<Response> {
     let is_admin = user.role == "ADMIN" || user.role == "SUPER_ADMIN";
-
-    // 查询账户（管理员导出全部含禁用账户，普通用户只看自己的）
-    let accounts = if is_admin {
-        crate::db::list_accounts_filtered(
-            &state.db,
-            &crate::db::AccountFilter {
-                owner_id: None,
-                site_type: None,
-                enabled: None,
-                last_status: None,
-                keyword: None,
-                limit: 10000,
-                offset: 0,
-            },
-        )
-        .await?
+    let owner_id = if is_admin {
+        None
     } else {
-        crate::db::list_accounts_filtered(
-            &state.db,
-            &crate::db::AccountFilter {
-                owner_id: Some(user.id.clone()),
-                site_type: None,
-                enabled: None,
-                last_status: None,
-                keyword: None,
-                limit: 10000,
-                offset: 0,
-            },
-        )
-        .await?
+        Some(user.id.clone())
     };
 
-    // 需要查询完整账户信息（包含加密字段）
-    let account_ids: Vec<String> = accounts.iter().map(|a| a.id.clone()).collect();
-    let full_accounts = crate::db::find_accounts_by_ids(&state.db, &account_ids).await?;
+    // 分页拉取完整账户（含加密凭证列），避免：
+    // 1) 一次性 limit=10000 在超量账户时静默截断导出（备份不完整）；
+    // 2) find_accounts_by_ids 构造超长 IN 子句撞上 SQLite 占位符上限。
+    const PAGE_SIZE: i32 = 500;
+    let mut full_accounts = Vec::new();
+    loop {
+        let page = crate::db::list_full_accounts_filtered(
+            &state.db,
+            &crate::db::AccountFilter {
+                owner_id: owner_id.clone(),
+                site_type: None,
+                enabled: None,
+                last_status: None,
+                keyword: None,
+                limit: PAGE_SIZE,
+                offset: full_accounts.len() as i32,
+            },
+        )
+        .await?;
+        let page_len = page.len();
+        full_accounts.extend(page);
+        if page_len < PAGE_SIZE as usize {
+            break;
+        }
+    }
 
     // 构建 CSV
     let mut wtr = csv::Writer::from_writer(vec![]);
 
-    for account in accounts.iter() {
-        let full_account = match full_accounts.get(&account.id) {
-            Some(a) => a,
-            None => continue,
-        };
-
+    for account in full_accounts.iter() {
         // 解密凭证
-        let access_token = full_account
+        let access_token = account
             .access_token_enc
             .as_ref()
             .and_then(|enc| crypto::decrypt(enc).ok())
             .unwrap_or_default();
 
-        let cookie = full_account
+        let cookie = account
             .cookie_enc
             .as_ref()
             .and_then(|enc| crypto::decrypt(enc).ok())

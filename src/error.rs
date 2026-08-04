@@ -19,6 +19,11 @@ pub enum AppError {
     #[error("权限不足")]
     Forbidden,
 
+    /// 登录频率限制触发（保留剩余秒数，供前端展示倒计时）。
+    /// 与 `Unauthorized` 同属“登录失败”语义，但携带可操作的解锁时间。
+    #[error("登录尝试过于频繁，请 {0} 秒后重试")]
+    RateLimited(u64),
+
     #[error("校验失败: {0}")]
     Validation(String),
 
@@ -47,6 +52,7 @@ impl AppError {
             AppError::Unauthorized => "认证失败，请重新登录".into(),
             AppError::NotFound => "资源不存在".into(),
             AppError::Forbidden => "权限不足".into(),
+            AppError::RateLimited(secs) => format!("登录尝试过于频繁，请 {secs} 秒后重试"),
             AppError::Validation(msg) => msg.clone(),
             AppError::Conflict(msg) => msg.clone(),
             AppError::Crypto(_) => "加密操作失败，请检查加密密钥配置是否正确".into(),
@@ -84,51 +90,61 @@ fn http_error_message(e: &reqwest::Error) -> &'static str {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        // message 统一为 String，允许 RateLimited 等变体携带动态文案（如剩余秒数）。
         let (status, message, details) = match self {
             AppError::Database(ref e) => {
                 tracing::error!("Database error: {}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    database_user_message(e),
+                    database_user_message(e).into(),
                     None,
                 )
             }
             AppError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
-                "认证失败，请重新登录",
+                "认证失败，请重新登录".into(),
                 Some("会话已过期或无效".to_string()),
             ),
             AppError::NotFound => (
                 StatusCode::NOT_FOUND,
-                "资源不存在",
+                "资源不存在".into(),
                 Some("请求的资源未找到或已被删除".to_string()),
             ),
             AppError::Forbidden => (
                 StatusCode::FORBIDDEN,
-                "权限不足",
+                "权限不足".into(),
                 Some("您没有权限执行此操作".to_string()),
             ),
-            AppError::Validation(ref msg) => {
-                (StatusCode::BAD_REQUEST, "输入验证失败", Some(msg.clone()))
+            AppError::RateLimited(secs) => (
+                StatusCode::TOO_MANY_REQUESTS,
+                format!("登录尝试过于频繁，请 {secs} 秒后重试"),
+                None,
+            ),
+            AppError::Validation(ref msg) => (
+                StatusCode::BAD_REQUEST,
+                "输入验证失败".into(),
+                Some(msg.clone()),
+            ),
+            AppError::Conflict(ref msg) => {
+                (StatusCode::CONFLICT, "资源冲突".into(), Some(msg.clone()))
             }
-            AppError::Conflict(ref msg) => (StatusCode::CONFLICT, "资源冲突", Some(msg.clone())),
             AppError::Crypto(ref e) => {
                 tracing::error!("Crypto error: {}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "加密操作失败",
+                    "加密操作失败".into(),
                     Some("请检查加密密钥配置是否正确".to_string()),
                 )
             }
             AppError::Http(ref e) => {
                 tracing::error!("HTTP request error: {}", e);
-                (StatusCode::BAD_GATEWAY, http_error_message(e), None)
+                (StatusCode::BAD_GATEWAY, http_error_message(e).into(), None)
             }
             AppError::Io(ref e) => {
                 tracing::error!("IO error: {}", e);
                 (
                     StatusCode::BAD_GATEWAY,
-                    "外部服务连接失败",
+                    "外部服务连接失败".into(),
                     Some("请检查网络连接或服务配置".to_string()),
                 )
             }
@@ -136,7 +152,7 @@ impl IntoResponse for AppError {
                 tracing::error!("Internal error: {}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "服务内部错误",
+                    "服务内部错误".into(),
                     Some("请联系管理员或稍后重试".to_string()),
                 )
             }

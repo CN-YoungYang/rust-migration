@@ -1,7 +1,7 @@
 use super::super::{http_client, BrowserProfile};
 use super::{
     classify_checkin_status, format_awarded_quota, is_already_checked_message, read_error_message,
-    read_number, CheckinResponse,
+    read_number, resolve_checkin_success, CheckinResponse,
 };
 use crate::error::Result;
 
@@ -96,7 +96,7 @@ pub async fn checkin(
     }
 
     let parsed: CheckinResponse = serde_json::from_str(&text).unwrap_or(CheckinResponse {
-        success: false,
+        success: None,
         code: None,
         message: Some("响应解析失败".into()),
         data: None,
@@ -104,10 +104,13 @@ pub async fn checkin(
 
     let message = parsed
         .message
-        .unwrap_or_else(|| "站点未返回消息".to_string());
+        .as_deref()
+        .unwrap_or("站点未返回消息")
+        .to_string();
 
-    // 部分 fork 不返回 success 字段，改用 code=200 表示成功（M10）
-    let success = parsed.success || parsed.code == Some(200);
+    // 部分 fork 不返回 success 字段，改用 code 表示成功（0 / 200 两种约定）。
+    // 显式 success 字段为准，缺失时才启用 code 兜底；显式 success:false 不被覆盖（M10 回归修复）。
+    let success = resolve_checkin_success(&parsed);
 
     // 状态判定：已签关键词 > checked_in 标志 > success（与 Next.js 顺序对齐）
     let status = {

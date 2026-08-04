@@ -4,12 +4,15 @@ pub mod x666;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct CheckinResponse {
-    /// 缺省（如 `{code,message,data}` 结构的 fork）时为 false，避免整条解析失败
+    /// 缺省（如 `{code,message,data}` 结构的 fork）时为 None。
+    /// 用 Option 区分“未提供”与“显式 false”：显式 false 必须被尊重，
+    /// 不能被 code 兜底覆盖成成功（M10 回归修复）。
     #[serde(default)]
-    pub success: bool,
-    /// HTTP 风格成功码（部分 new-api fork 用 code=200 表示成功）
+    pub success: Option<bool>,
+    /// fork 自定义状态码（new-api 系常用 code=200 表示成功；微信/钉钉风格用 code=0）。
+    /// 用宽松 Value 承接字符串/浮点等写法，避免字段类型不合导致整条响应解析失败。
     #[serde(default)]
-    pub code: Option<i64>,
+    pub code: Option<serde_json::Value>,
     pub message: Option<String>,
     #[serde(default)]
     pub data: Option<serde_json::Value>,
@@ -28,6 +31,25 @@ pub fn classify_checkin_status(success: bool, message: &str) -> &'static str {
     } else {
         "failed"
     }
+}
+
+/// 解析响应中的“成功”信号。`success` 字段显式给出时以它为准；
+/// 仅当字段缺失时才用 `code` 兜底（0 / 200 两种 fork 约定的成功码）。
+/// 显式 `success:false` 不被 code 覆盖，避免 `{success:false, code:200}`
+/// 被误判为签到成功（M10 回归修复）。
+pub fn resolve_checkin_success(parsed: &CheckinResponse) -> bool {
+    match parsed.success {
+        Some(true) => true,
+        Some(false) => false,
+        None => code_implies_success(parsed.code.as_ref()),
+    }
+}
+
+/// `code` 字段是否表达成功：仅 0（微信/钉钉风格）与 200（HTTP 风格）两种
+/// fork 约定视为成功，其余值一律按失败处理（fail-closed）。
+/// 用 `read_number` 容忍字符串/浮点写法，如 `"200"`、`200.0`。
+fn code_implies_success(code: Option<&serde_json::Value>) -> bool {
+    matches!(read_number(code), Some(c) if c == 0.0 || c == 200.0)
 }
 
 /// 判断消息是否表示今日已签到（供 x666/anyrouter 使用）
@@ -134,7 +156,7 @@ mod tests {
     fn checkin_response_parses_without_success_field() {
         // M10：缺省 success 的 fork 响应不再整条解析失败
         let parsed: CheckinResponse = serde_json::from_str(r#"{"message":"ok"}"#).unwrap();
-        assert!(!parsed.success);
+        assert_eq!(parsed.success, None);
         assert_eq!(parsed.message.as_deref(), Some("ok"));
         assert_eq!(parsed.code, None);
     }
@@ -143,7 +165,42 @@ mod tests {
     fn checkin_response_parses_code_200_fork() {
         let parsed: CheckinResponse =
             serde_json::from_str(r#"{"code":200,"message":"ok"}"#).unwrap();
-        assert!(!parsed.success);
-        assert_eq!(parsed.code, Some(200));
+        assert_eq!(parsed.success, None);
+        assert_eq!(parsed.code, Some(serde_json::json!(200)));
+        assert!(resolve_checkin_success(&parsed));
+    }
+
+    #[test]
+    fn explicit_success_false_is_authoritative_over_code() {
+        // 回归：`{success:false, code:200}` 不得被 code 兜底覆盖为成功
+        let parsed: CheckinResponse =
+            serde_json::from_str(r#"{"success":false,"code":200,"message":"checkin failed"}"#)
+                .unwrap();
+        assert!(!resolve_checkin_success(&parsed));
+    }
+
+    #[test]
+    fn code_heuristic_handles_zero_string_and_float_codes() {
+        // 微信/钉钉风格 code=0 表示成功；字符串/浮点写法也能解析（不再整条解析失败）
+        assert!(resolve_checkin_success(
+            &serde_json::from_str(r#"{"code":0}"#).unwrap()
+        ));
+        assert!(resolve_checkin_success(
+            &serde_json::from_str(r#"{"code":200}"#).unwrap()
+        ));
+        assert!(resolve_checkin_success(
+            &serde_json::from_str(r#"{"code":"200"}"#).unwrap()
+        ));
+        assert!(resolve_checkin_success(
+            &serde_json::from_str(r#"{"code":200.0}"#).unwrap()
+        ));
+        // 其余 code 一律按失败处理（fail-closed）
+        assert!(!resolve_checkin_success(
+            &serde_json::from_str(r#"{"code":500}"#).unwrap()
+        ));
+        // 显式 success:false 优先于 code=0
+        assert!(!resolve_checkin_success(
+            &serde_json::from_str(r#"{"success":false,"code":0}"#).unwrap()
+        ));
     }
 }

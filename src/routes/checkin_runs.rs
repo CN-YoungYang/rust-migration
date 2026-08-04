@@ -105,8 +105,11 @@ pub async fn list(
     Ok(crate::routes::data(runs))
 }
 
-/// 把 `YYYY-MM-DD` 起始/结束日期转换为本地日界的 UTC 时间戳（RFC3339 文本）。
-/// 无法按 `%Y-%m-%d` 解析时回退为原始字符串（兼容旧的 ISO 时间戳入参）。
+/// 把日期入参转换为比较用时间戳：
+/// - `YYYY-MM-DD`（日历日）：按服务器本地日界解释（与统计/调度口径一致）。
+/// - 含 `T` 的完整时间戳（如浏览器本地日界转成的 RFC3339）：原样透传，作为绝对时刻比较。
+///
+/// 无法按 `%Y-%m-%d` 解析且不含 `T` 时回退为原始字符串（兼容旧入参）。
 fn resolve_date_bounds(
     start: Option<&str>,
     end: Option<&str>,
@@ -114,17 +117,19 @@ fn resolve_date_bounds(
     use chrono::NaiveDate;
 
     let start_date = match start.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(s) => match NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        Some(s) if !s.contains('T') => match NaiveDate::parse_from_str(s, "%Y-%m-%d") {
             Ok(d) => Some(crate::routes::statistics::local_day_start(d)?.to_rfc3339()),
             Err(_) => Some(s.to_string()),
         },
+        Some(s) => Some(s.to_string()),
         None => None,
     };
     let end_date = match end.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(s) => match NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        Some(s) if !s.contains('T') => match NaiveDate::parse_from_str(s, "%Y-%m-%d") {
             Ok(d) => Some(crate::routes::statistics::local_day_end(d)?.to_rfc3339()),
             Err(_) => Some(s.to_string()),
         },
+        Some(s) => Some(s.to_string()),
         None => None,
     };
     Ok((start_date, end_date))
@@ -271,7 +276,8 @@ pub async fn execute_batch(
                 account_id,
                 account_name,
                 status: "failed".to_string(),
-                message: Some(e.to_string()),
+                // Low8：脱敏后再回显到批量结果，避免 sqlx/DB 内部细节进入 UI
+                message: Some(e.user_message()),
             }),
         }
     }

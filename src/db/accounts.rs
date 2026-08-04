@@ -12,15 +12,39 @@ const ACCOUNT_LIST_COLUMNS: &str = "\
     lastBalance, lastBalanceAt, lastStatus, lastMessage, lastRunAt, \
     createdAt, updatedAt";
 
-/// List accounts with filters and pagination
+/// Column list for account queries that need the encrypted credential fields
+/// (export/decrypt scenarios). Includes accessTokenEnc / cookieEnc.
+const ACCOUNT_FULL_COLUMNS: &str = "\
+    id, name, siteType, baseUrl, userId, ownerId, authType, \
+    accessTokenEnc, cookieEnc, \
+    customCheckinUrl, enabled, retryEnabled, note, \
+    lastBalance, lastBalanceAt, lastStatus, lastMessage, lastRunAt, \
+    createdAt, updatedAt";
+
+/// List accounts with filters and pagination (excludes encrypted fields).
 pub async fn list_accounts_filtered(
     db: &SqlitePool,
     filter: &AccountFilter,
 ) -> Result<Vec<CheckinAccount>> {
-    let mut sql = format!(
-        "SELECT {} FROM CheckinAccount WHERE 1=1",
-        ACCOUNT_LIST_COLUMNS
-    );
+    list_accounts_with_columns(db, filter, ACCOUNT_LIST_COLUMNS).await
+}
+
+/// 与 `list_accounts_filtered` 相同，但包含加密凭证列（accessTokenEnc/cookieEnc），
+/// 供导出等需要解密的场景使用。分页循环调用即可遍历全量，避免一次性拉取全部
+/// 或构造超长 IN 子句（SQLite 占位符上限）。
+pub async fn list_full_accounts_filtered(
+    db: &SqlitePool,
+    filter: &AccountFilter,
+) -> Result<Vec<CheckinAccount>> {
+    list_accounts_with_columns(db, filter, ACCOUNT_FULL_COLUMNS).await
+}
+
+async fn list_accounts_with_columns(
+    db: &SqlitePool,
+    filter: &AccountFilter,
+    columns: &str,
+) -> Result<Vec<CheckinAccount>> {
+    let mut sql = format!("SELECT {columns} FROM CheckinAccount WHERE 1=1");
 
     if filter.owner_id.is_some() {
         sql.push_str(" AND ownerId = ?");

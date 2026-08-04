@@ -140,7 +140,22 @@ pub async fn execute_checkin(
     {
         let msg = e.to_string();
         tracing::warn!(account_id = %account_id, error = %msg, "签到前 SSRF 复核未通过");
-        return create_failed_run(db, account_id, &msg, triggered_by, start).await;
+        // 视为一次真实失败尝试：更新账户 lastStatus/lastRunAt、失败计数并触发通知，
+        // 与 provider 报错路径一致。否则 lastRunAt 停在昨日，`skip_reason_for_batch`
+        // 的 retry_disabled 分支永不触发——关闭重试的账户会在每轮调度中反复尝试（回归修复）。
+        let duration_ms = start.elapsed().as_millis().min(i64::MAX as u128) as i64;
+        let run = db::create_run_with_status_update(
+            db,
+            account_id,
+            "failed",
+            Some(&msg),
+            Some(duration_ms),
+            triggered_by,
+            None,
+        )
+        .await?;
+        handle_notifications(db, &account, "failed", &msg, account.last_balance).await;
+        return Ok(run);
     }
 
     // 防判定：每次签到使用随机 UA，降低多账户同 IP + 同 UA 的关联指纹。
@@ -196,6 +211,28 @@ pub async fn execute_checkin(
                 balance_to_store,
             )
             .await?;
+
+            // 跨实例每日上限兜底：进程内单飞锁与计数预检只覆盖单进程（M5）。
+            // 多实例共享同一 SQLite 时，两个实例可能同时通过预检各自签到；SQLite
+            // 单写者保证“插入后计数复核”原子可见，超限则撤销本条记录并按 skipped
+            // 返回，避免今日真实尝试数突破 maxAttemptsPerDay。代价：竞态窗口内
+            // 可能多发一次到站点的网络签到，但本地不会超限计数。
+            if let Some(s) = settings {
+                if db::is_real_attempt(&run.status) {
+                    let today_runs = db::count_runs_today(db, account_id).await?;
+                    if today_runs > s.max_attempts_per_day.max(1) {
+                        let msg = format!("已达到今日最大尝试次数 ({})", s.max_attempts_per_day);
+                        tracing::warn!(
+                            account_id = %account_id,
+                            today_runs,
+                            "跨实例竞态：撤销超出每日上限的签到记录"
+                        );
+                        let _ = db::delete_run(db, &run.id).await;
+                        return Ok(skipped_run(account_id, &msg, triggered_by, start));
+                    }
+                }
+            }
+
             handle_notifications(db, &account, &status, &final_message, notification_balance).await;
             Ok(run)
         }
@@ -351,26 +388,6 @@ pub async fn fetch_account_balance(
             .map_err(|e| AppError::Internal(e.to_string()))
         }
     }
-}
-
-async fn create_failed_run(
-    db: &SqlitePool,
-    account_id: &str,
-    message: &str,
-    triggered_by: &str,
-    start: Instant,
-) -> Result<CheckinRun> {
-    let duration_ms = start.elapsed().as_millis().min(i64::MAX as u128) as i64;
-    db::create_run(
-        db,
-        account_id,
-        "failed",
-        Some(message),
-        Some(duration_ms),
-        triggered_by,
-        None,
-    )
-    .await
 }
 
 /// 构造一个“已跳过”的签到结果：不落库、不计入每日尝试上限、不触发通知。
