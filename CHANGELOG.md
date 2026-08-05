@@ -5,6 +5,8 @@
 ### 前端
 
 - **全面切换至 Naive UI 组件库**：放弃自研 UI 体系（`tokens.css` / `style.css` / `workbench.css` / 六面板同名 `.css` / `toast.ts` / `dialogFocus.ts`），删除相关文件并整体重写前端。布局改为可折叠 `NLayoutSider` 侧边导航 + `NMenu` + `NLayoutHeader` 工作台；列表统一 `NDataTable`（管理员「按归属分组」改为「归属用户」列 + 用户筛选）；支持亮/暗主题切换（`NConfigProvider` + `darkTheme`，`localStorage` 记忆）；消息/弹窗改由 `NMessageProvider`/`NDialogProvider`/`NNotificationProvider`/`NLoadingBarProvider` 提供。自绘堆叠柱状图保留，配色改用 `useThemeVars()` 主题变量明暗自适应。后端 API 契约与 `api.ts`/`types.ts`/`accountForm.ts`/`cleanupRuns.ts` 零改动，全部功能点原样保留。
+- **抽取共享前端工具**：新增 `utils/format.ts`（日期/时间格式化）、`utils/checkinStatus.ts`（签到状态/触发文案与 Tag 颜色映射）、`utils/clipboard.ts`（复制文本含 `execCommand` 回退）；账户 / 签到记录 / 统计 / 用户四面板移除 8 处本地重复函数，净减约 180 行。
+- **移除前端构建产物 git 跟踪**：`public/` 不再入库（Vite `outDir -> ../public`），外层仓库与 `rust-migration/` 两仓库 `.gitignore` 均新增忽略规则。
 
 ### 功能
 
@@ -69,6 +71,7 @@
 
 ### 界面
 
+- **工作台壳与面板美化**：面板切换轻量淡入（0.13s，`prefers-reduced-motion` 下关闭）、侧栏品牌区加分隔线与内边距、顶栏间距统一、登录页加主色氛围光（径向渐变）；数值表面启用等宽数字（`font-variant-numeric: tabular-nums`），统计图表选中条改用主题主色（`color-mix`），账户筛选「用户」条件纳入活动筛选与清空。
 - 登录页优化字体、间距、表单层次和导航状态；退出按钮改用明确选择器，移除 `!important` 优先级覆盖。
 - 新增“跳到主要内容”键盘入口，并让主内容区域可接收程序性焦点。
 - Rust 前端切换为暖白编辑式工作台：登录页采用宽版分栏布局，登录后使用响应式侧边导航，业务面板统一卡片、表单、状态标签和弹窗视觉。
@@ -90,6 +93,8 @@
 - **死代码清理**：移除全部 legacy 样式变量引用（`--bg-card`/`--accent`/`--text-strong` 等归零）、模板中无规则命中的冗余类名与未使用的 CSS 规则，前端产物 CSS 体积约 -8 kB。
 
 ### 测试
+
+- 新增 21 个前端单元测试（`node --test`）：`format`（日期/时间格式化与 fallback）、`checkinStatus`（状态/触发文案与 Tag 颜色映射）。
 
 - 新增未知通知类型校验测试。
 
