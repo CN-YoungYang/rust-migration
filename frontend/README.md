@@ -1,10 +1,11 @@
 # AI Hub Rust 前端
 
-这是 `rust-migration/` 的 Vue 3 + Vite + TypeScript 前端。界面采用中文工作台布局和原生 CSS 动效，并保持低资源部署目标。
+这是 `rust-migration/` 的 Vue 3 + Vite + TypeScript 前端，UI 基于 **Naive UI** 组件库。界面采用中文工作台布局，支持亮/暗主题切换，并保持低资源部署目标。
 
 ## 功能页面
 
-- `App.vue`：登录、会话检查、响应式侧边导航和在线状态。
+- `App.vue`：`NConfigProvider` 主题（亮/暗）与 locale，Provider 包裹根。
+- `AppShell.vue`：登录、会话检查、响应式侧边导航、在线状态与面板切换。
 - `AccountPanel.vue`：账户管理、筛选、分组、多选、批量操作、CSV 导入导出。
 - `CheckinRunsPanel.vue`：签到记录、筛选、失败重试、摘要复制、记录清理。
 - `StatisticsPanel.vue`：统计概览、趋势、站点统计、最近失败。
@@ -36,9 +37,11 @@ npm run build
 
 ## 视觉与动效约定
 
-- 全局设计令牌位于 `tokens.css`，基础规则位于 `src/style.css`，工作台规则位于 `src/workbench.css`。
-- 动效仅使用短时 CSS 过渡，不引入 JavaScript 动画运行时。
-- `prefers-reduced-motion: reduce` 时关闭非必要动效，并保留完整交互。
+- UI 组件库为 Naive UI：每个组件文件显式 `import { NXxx } from 'naive-ui'`（按需、摇树友好），不做全局注册。
+- 明暗主题由 `NConfigProvider` 的 `theme`（`darkTheme` / null）驱动，偏好存于 `localStorage`（`ai-hub-theme`）。
+- 组件与自绘图表颜色通过 `useThemeVars()` 获取主题变量，避免硬编码颜色，随主题自动适配。
+- 中文 locale 在 `NConfigProvider` 上设置 `zhCN` / `dateZhCN`。
+- 动效使用 Naive UI 内置过渡，不引入额外动画运行时。
 
 ## API 约定
 

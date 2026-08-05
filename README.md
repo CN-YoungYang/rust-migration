@@ -17,8 +17,8 @@
 - **余额查询** — 支持 `new-api`、`anyrouter` 和 `x666` 站点的实时余额查询。
 - **签到反馈** — 签到成功后显示本次获得额度（quota + 美元换算，500000 quota = 1 USD）。
 - **余额联动** — 签到成功 / 已签到后自动刷新账户余额，刷新失败不阻塞签到结果。
-- **编辑式工作台** — 暖白低对比界面、响应式侧边导航、清晰的面板层次与键盘跳转入口。
-- **轻量动效** — Vue 前端仅使用原生 CSS 短过渡，并支持减少动态效果设置。
+- **Naive UI 工作台** — 基于 Naive UI 组件库的响应式侧边导航工作台，支持亮/暗主题切换与键盘跳转入口。
+- **明暗主题** — 亮/暗模式由 `NConfigProvider` 驱动并记忆偏好；组件与自绘图表颜色使用 `useThemeVars()` 主题变量自动适配。
 - **反爬处理** — `anyrouter` 自动识别并求解 `acw_sc__v2` 反爬挑战。
 - **安全加固** — 登录频率限制、HttpOnly Cookie 会话、CSRF 校验、AES-256-GCM 凭证加密、bcrypt 密码哈希、时序攻击防护。
 
@@ -104,11 +104,14 @@ rust-migration/
 │               └── x666.rs
 ├── frontend/
 │   └── src/
-│       ├── App.vue          # 主应用 + 路由
-│       ├── components/      # 账户、记录、统计、通知、设置、用户管理面板
+│       ├── App.vue          # NConfigProvider（主题/locale）+ 各 Provider 包裹根
+│       ├── AppShell.vue     # 登录页 + 工作台壳（侧边导航，无 vue-router）
+│       ├── global.css       # 最小全局样式
+│       ├── components/      # 账户、记录、统计、通知、设置、用户管理面板（Naive UI）
 │       └── utils/
 │           ├── api.ts       # 请求封装 + 错误解析
-│           └── toast.ts     # Toast + 确认弹窗
+│           ├── accountForm.ts
+│           └── cleanupRuns.ts
 ├── migrations/
 │   └── 20260611_init.sql    # 建表 + 索引 + 默认数据
 ├── Dockerfile               # 多阶段构建（非 root 用户）
@@ -257,7 +260,7 @@ ADMIN_PASSWORD=YourSecurePassword123!@#  # 初始管理员密码，首次创建�
 
 **后端：** Rust + Axum 0.7 + SQLite/sqlx + Tokio + ring + bcrypt + reqwest
 
-**前端：** Vue 3 + TypeScript + Vite
+**前端：** Vue 3 + TypeScript + Vite + Naive UI
 
 ## 许可证
 

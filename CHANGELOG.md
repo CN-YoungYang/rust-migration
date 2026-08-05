@@ -4,11 +4,7 @@
 
 ### 前端
 
-- **弹窗样式回归修复**：账户与用户管理弹窗通过 `<Teleport to="body">` 渲染到 `<body>` 后，`.modal` / `.modal-content` 原先挂在 `.panel-region` 下的选择器全部失效，且缺少 `position:fixed; inset:0; z-index`，导致新增/编辑账户、编辑用户弹窗无法覆盖视口。现把 modal 外框样式提升为 `workbench.css` 的全局选择器并补齐定位与 `var(--z-modal)` 层级，与 `design.md` 的 CSS ownership 约定一致。
-- **浏览器主题色对齐 Cobalt 暖白**：`index.html` 的 `theme-color` 从废弃深色 `#080b10` 改为 `#f7f8fa`，与锁定的 `--color-paper` 暖白纸面一致。
-- **签到记录面板 header 命名统一**：`.header` → `.panel-header`，与其余五面板及 `design.md` 的 Workbench rhythm 命名一致；同步移除 `style.css` 中仅为 `.header` 服务的 sr-only hack。
-- **概览条字号跨面板统一**：签到记录与数据统计的 `.summary-strip dd` 字号统一为 `clamp(var(--text-xl), 3vw, calc(var(--text-xl) + var(--text-sm)))`，避免两个面板在相同视口下概览数字大小不同。
-- **弹窗内边距统一**：用户管理编辑弹窗 `.modal-content` 内边距从 `var(--space-lg)` 收敛为 `var(--space-md)`，与账户表单密度一致。
+- **全面切换至 Naive UI 组件库**：放弃自研 UI 体系（`tokens.css` / `style.css` / `workbench.css` / 六面板同名 `.css` / `toast.ts` / `dialogFocus.ts`），删除相关文件并整体重写前端。布局改为可折叠 `NLayoutSider` 侧边导航 + `NMenu` + `NLayoutHeader` 工作台；列表统一 `NDataTable`（管理员「按归属分组」改为「归属用户」列 + 用户筛选）；支持亮/暗主题切换（`NConfigProvider` + `darkTheme`，`localStorage` 记忆）；消息/弹窗改由 `NMessageProvider`/`NDialogProvider`/`NNotificationProvider`/`NLoadingBarProvider` 提供。自绘堆叠柱状图保留，配色改用 `useThemeVars()` 主题变量明暗自适应。后端 API 契约与 `api.ts`/`types.ts`/`accountForm.ts`/`cleanupRuns.ts` 零改动，全部功能点原样保留。
 
 ### 功能
 
