@@ -6,6 +6,7 @@
 
 - **全面切换至 Naive UI 组件库**：放弃自研 UI 体系（`tokens.css` / `style.css` / `workbench.css` / 六面板同名 `.css` / `toast.ts` / `dialogFocus.ts`），删除相关文件并整体重写前端。布局改为可折叠 `NLayoutSider` 侧边导航 + `NMenu` + `NLayoutHeader` 工作台；列表统一 `NDataTable`（管理员「按归属分组」改为「归属用户」列 + 用户筛选）；支持亮/暗主题切换（`NConfigProvider` + `darkTheme`，`localStorage` 记忆）；消息/弹窗改由 `NMessageProvider`/`NDialogProvider`/`NNotificationProvider`/`NLoadingBarProvider` 提供。自绘堆叠柱状图保留，配色改用 `useThemeVars()` 主题变量明暗自适应。后端 API 契约与 `api.ts`/`types.ts`/`accountForm.ts`/`cleanupRuns.ts` 零改动，全部功能点原样保留。
 - **抽取共享前端工具**：新增 `utils/format.ts`（日期/时间格式化）、`utils/checkinStatus.ts`（签到状态/触发文案与 Tag 颜色映射）、`utils/clipboard.ts`（复制文本含 `execCommand` 回退）；账户 / 签到记录 / 统计 / 用户四面板移除 8 处本地重复函数，净减约 180 行。
+- **多选批量签到改为前端逐账户执行（防反代/Cloudflare 超时）**：放弃一次长 `POST /api/checkin-runs/batch` 串行处理全部账户，改为前端逐账户调用单签接口、实时更新进度。此前部署在反向代理（Cloudflare 等）之后时，批量总时长超过其源站等待上限（约 100s）会被整批返回 504 错误页并掐断连接，前端又只在成功时更新进度，表现为「批量签到 0/N 卡住 + 整页 HTML」。逐账户后每个请求都是单签，天然低于超时上限。语义尽量贴近原批量：新增共享 `utils/batchCheckin.ts` 复刻「跳过已签/禁用/重试关闭/每日上限（管理员可读设置时）」与「打乱顺序 + 随机间隔」；进度卡片新增「停止」按钮（可中断，未执行账户记为"已手动停止"），组件卸载自动中断。行为变化：逐账户按「手动单签」语义，每日上限不再强校验（仅管理员按列表 `todayRuns` 预检跳过）；后端 `/batch` 端点保留，签到记录面板「失败重试」仍使用它。
 - **移除前端构建产物 git 跟踪**：`public/` 不再入库（Vite `outDir -> ../public`），外层仓库与 `rust-migration/` 两仓库 `.gitignore` 均新增忽略规则。
 
 ### 功能
@@ -97,6 +98,8 @@
 ### 测试
 
 - 新增 21 个前端单元测试（`node --test`）：`format`（日期/时间格式化与 fallback）、`checkinStatus`（状态/触发文案与 Tag 颜色映射）。
+
+- 新增 `batchCheckin` 前端单元测试（批量跳过判断、本地日界、随机延迟区间、洗牌不改动原数组等 18 个）。
 
 - 新增未知通知类型校验测试。
 
