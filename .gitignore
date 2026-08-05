@@ -36,3 +36,6 @@ desktop.ini
 # Frontend (has its own .gitignore)
 frontend/node_modules/
 frontend/dist/
+
+# 前端构建产物（Vite outDir -> ../public）
+/public/
