@@ -1,190 +1,186 @@
 <template>
-  <div class="checkin-runs-panel">
+  <div class="panel">
     <div class="panel-header">
       <div>
-        <h2>签到记录</h2>
-        <p class="panel-subtitle">
-          当前加载 {{ runs.length }} 条记录
-        </p>
+        <h2 class="panel-title">签到记录</h2>
+        <n-text depth="3" class="panel-subtitle">当前加载 {{ runs.length }} 条记录</n-text>
       </div>
-      <div class="header-actions">
-        <select v-if="isAdmin" v-model="filterUserId" aria-label="按用户筛选签到记录">
-          <option value="">全部用户</option>
-          <option v-if="usersLoading" disabled>加载中...</option>
-          <option v-for="u in allUsers" :key="u.id" :value="u.id">{{ u.username }}</option>
-        </select>
-        <select v-model="selectedAccountId" aria-label="选择要执行签到的账户">
-          <option value="">选择账户</option>
-          <optgroup v-for="group in groupedAccounts" :key="group.key" :label="group.label">
-            <option v-for="account in group.items" :key="account.id" :value="account.id">
-              {{ account.name }} ({{ account.siteType }})
-            </option>
-          </optgroup>
-        </select>
-        <button @click="executeCheckin" class="btn-execute" :disabled="!selectedAccountId || executing" :data-state="executing ? 'loading' : undefined">
-          {{ executing ? '执行中...' : '执行签到' }}
-        </button>
-        <button @click="retryFailedRuns" class="btn-retry" :disabled="failedAccountIds.length === 0 || actionBusy" :data-state="retryingBatch ? 'loading' : undefined">
-          {{ retryingBatch ? '重试中...' : `重试失败账户 ${failedAccountIds.length}` }}
-        </button>
+      <n-space align="center" :size="8" wrap>
+        <n-select
+          v-if="isAdmin"
+          v-model:value="filterUserId"
+          :options="userFilterOptions"
+          placeholder="全部用户"
+          :loading="usersLoading"
+          size="small"
+          style="width: 140px"
+        />
+        <n-select
+          v-model:value="selectedAccountId"
+          :options="accountSelectOptions"
+          placeholder="选择账户"
+          clearable
+          size="small"
+          style="width: 200px"
+        />
+        <n-button
+          size="small"
+          type="primary"
+          :loading="executing"
+          :disabled="!selectedAccountId || executing"
+          @click="executeCheckin"
+        >
+          {{ executing ? '执行中…' : '执行签到' }}
+        </n-button>
+        <n-button size="small" :disabled="failedAccountIds.length === 0 || actionBusy" :loading="retryingBatch" @click="retryFailedRuns">
+          {{ retryingBatch ? '重试中…' : `重试失败账户 ${failedAccountIds.length}` }}
+        </n-button>
         <div class="cleanup-controls">
-          <span class="cleanup-scope">清理范围：{{ cleanupScope }}</span>
-          <div class="cleanup-row">
-            <input v-model.number="keepLatest" type="number" min="0" max="10000" class="keep-input" aria-label="清理后保留的最新记录数" title="保留最新记录数（0=清除全部）" />
-            <button @click="cleanupRuns" class="btn-cleanup" :disabled="cleaning" :data-state="cleaning ? 'loading' : undefined">
-              {{ cleaning ? '清理中...' : '清理历史' }}
-            </button>
-          </div>
-          <label v-if="keepLatest === 0" class="cleanup-reset-option">
-            <input v-model="resetState" type="checkbox" />
+          <span class="muted cleanup-scope">清理范围：{{ cleanupScope }}</span>
+          <n-input-number
+            v-model:value="keepLatest"
+            :min="0"
+            :max="10000"
+            size="small"
+            class="keep-input"
+            :title="'保留最新记录数（0=清除全部）'"
+            aria-label="清理后保留的最新记录数"
+          />
+          <n-button size="small" :loading="cleaning" :disabled="actionBusy" @click="cleanupRuns">
+            {{ cleaning ? '清理中…' : '清理历史' }}
+          </n-button>
+          <n-checkbox v-if="keepLatest === 0" v-model:checked="resetState" size="small" class="cleanup-reset-option">
             同时重置最近签到状态和失败计数（保留余额）
-          </label>
+          </n-checkbox>
         </div>
-      </div>
+      </n-space>
     </div>
 
     <!-- 筛选栏 -->
-    <div class="filter-bar">
-      <div class="status-filter" role="group" aria-label="按签到状态筛选">
-        <button
-          v-for="status in statusOptions"
-          :key="status.value"
-          :class="['status-btn', { active: filterStatus === status.value }]"
-          :aria-pressed="filterStatus === status.value"
-          @click="filterStatus = status.value"
-        >
-          {{ status.label }}
-          <span v-if="statusCounts[status.value]" class="count">
-            {{ statusCounts[status.value] }}
-          </span>
-        </button>
-      </div>
-      <select v-model="filterTriggeredBy" aria-label="按触发方式筛选">
-        <option value="">全部触发方式</option>
-        <option value="manual">手动</option>
-        <option value="manual_batch">批量手动</option>
-        <option value="scheduled">定时</option>
-      </select>
-      <div class="date-range">
-        <input
-          v-model="filterStartDate"
-          type="date"
-          aria-label="开始日期"
-          placeholder="开始日期"
-        />
-        <span class="date-separator">至</span>
-        <input
-          v-model="filterEndDate"
-          type="date"
-          aria-label="结束日期"
-          placeholder="结束日期"
-        />
-      </div>
-      <select v-model="filterAccountId" aria-label="按账户筛选">
-        <option value="">全部账户</option>
-        <optgroup v-for="group in groupedAccounts" :key="group.key" :label="group.label">
-          <option v-for="account in group.items" :key="account.id" :value="account.id">
-            {{ account.name }}
-          </option>
-        </optgroup>
-      </select>
-      <button v-if="hasActiveFilter" @click="clearFilters">清除筛选</button>
-      <span class="filter-count">{{ runs.length }} 条记录</span>
-    </div>
+    <n-space class="filter-bar" align="center" :size="8" wrap>
+      <n-radio-group v-model:value="filterStatus" size="small">
+        <n-radio-button v-for="s in statusOptions" :key="s.value" :value="s.value">
+          {{ s.label }}
+          <span v-if="statusCounts[s.value]" class="count-badge">{{ statusCounts[s.value] }}</span>
+        </n-radio-button>
+      </n-radio-group>
+      <n-select
+        v-model:value="filterTriggeredBy"
+        :options="triggerOptions"
+        size="small"
+        style="width: 130px"
+      />
+      <n-date-picker
+        v-model:value="dateRange"
+        type="daterange"
+        clearable
+        size="small"
+        style="width: 260px"
+      />
+      <n-select
+        v-model:value="filterAccountId"
+        :options="accountFilterOptions"
+        placeholder="全部账户"
+        clearable
+        size="small"
+        style="width: 180px"
+      />
+      <n-button v-if="hasActiveFilter" size="small" @click="clearFilters">清除筛选</n-button>
+      <n-text depth="3" class="filter-count">{{ runs.length }} 条记录</n-text>
+    </n-space>
 
-    <dl class="summary-strip" aria-label="签到记录概览">
-      <div>
-        <dt>成功或已签</dt>
-        <dd>{{ runSummary.succeeded }}</dd>
-      </div>
-      <div class="danger">
-        <dt>失败</dt>
-        <dd>{{ runSummary.failed }}</dd>
-      </div>
-      <div>
-        <dt>进行中</dt>
-        <dd>{{ runSummary.pending }}</dd>
-      </div>
-      <div>
-        <dt>平均耗时</dt>
-        <dd>{{ runSummary.avgDuration }}<small>ms</small></dd>
-      </div>
-    </dl>
+    <!-- 概览 -->
+    <n-grid class="summary-grid" :cols="4" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
+      <n-grid-item>
+        <n-statistic label="成功或已签" :value="runSummary.succeeded" />
+      </n-grid-item>
+      <n-grid-item>
+        <n-statistic
+          label="失败"
+          :value="runSummary.failed"
+          :value-style="runSummary.failed > 0 ? { color: themeVars.errorColor } : undefined"
+        />
+      </n-grid-item>
+      <n-grid-item>
+        <n-statistic label="进行中" :value="runSummary.pending" />
+      </n-grid-item>
+      <n-grid-item>
+        <n-statistic label="平均耗时">
+          {{ runSummary.avgDuration }}<small class="unit">ms</small>
+        </n-statistic>
+      </n-grid-item>
+    </n-grid>
 
-    <div v-if="lastBatchResult" class="batch-result" role="status" aria-live="polite">
-      <div class="batch-result-header">
-        <div>
+    <!-- 批量重试结果 -->
+    <n-card v-if="lastBatchResult" size="small" class="batch-result" role="status" aria-live="polite">
+      <template #header>
+        <div class="batch-result-header">
           <strong>批量重试结果</strong>
-          <p class="muted">
+          <span class="muted">
             共 {{ lastBatchResult.total }} 个，成功 {{ lastBatchResult.succeeded }} 个，跳过 {{ lastBatchResult.skipped }} 个，失败 {{ lastBatchResult.failed }} 个
-          </p>
+          </span>
         </div>
-        <button @click="lastBatchResult = null">关闭</button>
-      </div>
-      <div class="batch-items">
-        <div v-for="item in lastBatchResult.items" :key="item.accountId" class="batch-item">
-          <span class="batch-name">{{ item.accountName }}</span>
-          <span class="badge" :class="batchStatusClass(item.status)">{{ batchStatusText(item.status) }}</span>
-          <span v-if="item.message" class="batch-message" :title="item.message">{{ item.message }}</span>
-        </div>
-      </div>
-    </div>
+      </template>
+      <template #header-extra>
+        <n-button size="tiny" text @click="lastBatchResult = null">关闭</n-button>
+      </template>
+      <n-list>
+        <n-list-item v-for="item in lastBatchResult.items" :key="item.accountId">
+          <div class="batch-item">
+            <span class="batch-name">{{ item.accountName }}</span>
+            <n-tag size="small" :bordered="false" :type="batchStatusTagType(item.status)">
+              {{ batchStatusText(item.status) }}
+            </n-tag>
+            <span v-if="item.message" class="batch-message muted" :title="item.message">{{ item.message }}</span>
+          </div>
+        </n-list-item>
+      </n-list>
+    </n-card>
 
-    <div class="runs-list" :aria-busy="runsLoading">
-      <section v-for="group in groupedRuns" :key="group.key" class="run-group">
-        <div class="group-header">
-          <strong>{{ group.label }}<span v-if="group.isSelf" class="self-tag">我</span></strong>
-          <span class="muted">{{ group.items.length }} 条记录</span>
-        </div>
-        <div v-for="run in group.items" :key="run.id" class="run-card" :class="run.status.toLowerCase()">
-          <div class="run-info">
-            <div class="run-title">
-              <span class="account-name">{{ accountName(run.accountId) }}</span>
-              <span class="site-tag" v-if="accountSite(run.accountId)">{{ accountSite(run.accountId) }}</span>
-              <span class="status-pill" :class="statusClass(run.status)">{{ statusText(run.status) }}</span>
-            </div>
-            <p class="run-meta">
-              <span>{{ triggerText(run.triggeredBy) }}</span>
-              <span>{{ formatTimeShort(run.createdAt) }}</span>
-              <span v-if="run.durationMs">耗时 {{ run.durationMs }}ms</span>
-              <span v-if="accountOwner(run.accountId)">归属 {{ accountOwner(run.accountId) }}</span>
-            </p>
-            <p v-if="run.message" class="run-message" :title="run.message">{{ run.message }}</p>
-          </div>
-          <div class="run-actions">
-            <button
-              v-if="run.status === 'failed'"
-              class="btn-retry"
-              :disabled="actionBusy"
-              @click="executeAccountCheckin(run.accountId)"
-            >
-              {{ executingAccountId === run.accountId ? '重试中...' : '重试' }}
-            </button>
-            <button @click="copyRunSummary(run)" :disabled="actionBusy">复制摘要</button>
-            <button
-              class="btn-delete"
-              :disabled="actionBusy"
-              :data-state="deletingRunId === run.id ? 'loading' : undefined"
-              @click="deleteRun(run)"
-            >
-              {{ deletingRunId === run.id ? '删除中...' : '删除' }}
-            </button>
-          </div>
-        </div>
-      </section>
-      <div v-if="runs.length === 0 && !runsLoading" class="empty" role="status">暂无签到记录</div>
-      <div v-if="runsLoading" class="empty" role="status" aria-live="polite">加载中...</div>
-      <div v-if="hasMore && runs.length > 0 && !runsLoading" class="load-more">
-        <button @click="loadMoreRuns">加载更多</button>
-      </div>
+    <!-- 记录表 -->
+    <n-data-table
+      :columns="runColumns"
+      :data="runs"
+      :loading="runsLoading"
+      :row-key="(row: CheckinRun) => row.id"
+      :scroll-x="900"
+      class="runs-table"
+    >
+      <template #empty>暂无签到记录</template>
+    </n-data-table>
+    <div v-if="hasMore && runs.length > 0 && !runsLoading" class="load-more">
+      <n-button size="small" @click="loadMoreRuns">加载更多</n-button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
+import {
+  NButton,
+  NCard,
+  NCheckbox,
+  NDataTable,
+  NDatePicker,
+  NGrid,
+  NGridItem,
+  NInputNumber,
+  NList,
+  NListItem,
+  NPopconfirm,
+  NRadioButton,
+  NRadioGroup,
+  NSelect,
+  NSpace,
+  NStatistic,
+  NTag,
+  NText,
+  useDialog,
+  useMessage,
+  useThemeVars,
+  type DataTableColumns,
+} from 'naive-ui'
 import { apiUrl, request, responseData } from '../utils/api'
-import { confirmAction, showToast } from '../utils/toast'
 import type { CurrentUser, Account, AccountGroup } from '../types'
 import { useUsers } from '../composables/useUsers'
 import { buildCleanupRequest, cleanupScopeLabel, cleanupTargetText } from '../utils/cleanupRuns'
@@ -198,13 +194,6 @@ interface CheckinRun {
   triggeredBy: string
   rawResponse?: string | null
   createdAt: string
-}
-
-interface RunGroup {
-  key: string
-  label: string
-  isSelf: boolean
-  items: CheckinRun[]
 }
 
 interface BatchResultItem {
@@ -233,6 +222,10 @@ const props = defineProps<{
   currentUser: CurrentUser | null
   isAdmin: boolean
 }>()
+
+const message = useMessage()
+const dialog = useDialog()
+const themeVars = useThemeVars()
 
 const { allUsers, usersLoading, loadUsers: fetchUsers } = useUsers(() => props.isAdmin)
 const filterUserId = ref('')
@@ -270,14 +263,30 @@ const filterTriggeredBy = ref('')
 const filterStartDate = ref('')
 const filterEndDate = ref('')
 const filterAccountId = ref('')
+const dateRange = ref<[number, number] | null>(null)
 
 const statusOptions = [
   { value: '', label: '全部' },
   { value: 'success', label: '成功' },
   { value: 'failed', label: '失败' },
   { value: 'already_checked', label: '已签' },
-  { value: 'pending', label: '进行中' }
+  { value: 'pending', label: '进行中' },
 ]
+
+const triggerOptions = [
+  { label: '全部触发方式', value: '' },
+  { label: '手动', value: 'manual' },
+  { label: '批量手动', value: 'manual_batch' },
+  { label: '定时', value: 'scheduled' },
+]
+
+const userFilterOptions = computed(() => {
+  const options = [{ label: '全部用户', value: '' }]
+  for (const user of allUsers.value) {
+    options.push({ label: user.username, value: user.id })
+  }
+  return options
+})
 
 const statusCounts = computed(() => {
   const counts: Record<string, number> = {}
@@ -336,6 +345,7 @@ function clearFilters() {
   filterStartDate.value = ''
   filterEndDate.value = ''
   filterAccountId.value = ''
+  dateRange.value = null
 }
 
 // 按账户归属用户分组下拉框选项
@@ -357,29 +367,20 @@ const groupedAccounts = computed<AccountGroup[]>(() => {
   })
 })
 
-// 通过账户反查归属用户，把签到记录按用户分组；当前用户分组置顶。
-const groupedRuns = computed<RunGroup[]>(() => {
-  const groups = new Map<string, RunGroup>()
-  for (const run of runs.value) {
-    const account = accounts.value.find((a) => a.id === run.accountId)
-    const key = account?.ownerId || 'unknown'
-    if (!groups.has(key)) {
-      const label = account?.ownerName
-        || (account?.ownerId ? `用户 ${account.ownerId.slice(0, 8)}` : '已删除账户')
-      groups.set(key, {
-        key,
-        label,
-        isSelf: !!props.currentUser && !!account?.ownerId && account.ownerId === props.currentUser.id,
-        items: [],
-      })
-    }
-    groups.get(key)!.items.push(run)
-  }
-  return Array.from(groups.values()).sort((a, b) => {
-    if (a.isSelf !== b.isSelf) return a.isSelf ? -1 : 1
-    return a.label.localeCompare(b.label, 'zh-Hans')
-  })
-})
+function accountGroupOptions(labelFn: (account: Account) => string) {
+  return groupedAccounts.value.map((group) => ({
+    type: 'group' as const,
+    label: group.label,
+    key: group.key,
+    children: group.items.map((account) => ({
+      label: labelFn(account),
+      value: account.id,
+    })),
+  }))
+}
+
+const accountSelectOptions = computed(() => accountGroupOptions((account) => `${account.name} (${account.siteType})`))
+const accountFilterOptions = computed(() => accountGroupOptions((account) => account.name))
 
 const fetchAccounts = async () => {
   const seq = ++accountRequestSeq
@@ -401,7 +402,7 @@ const fetchAccounts = async () => {
     }
   } catch (error) {
     if (seq === accountRequestSeq) {
-      showToast(error instanceof Error ? error.message : '加载账户失败', 'error')
+      message.error(error instanceof Error ? error.message : '加载账户失败')
     }
   }
 }
@@ -451,7 +452,7 @@ const fetchRuns = async (append = false) => {
     hasMore.value = data.length >= PAGE_SIZE
   } catch (error) {
     if (seq === runsRequestSeq) {
-      showToast(error instanceof Error ? error.message : '加载签到记录失败', 'error')
+      message.error(error instanceof Error ? error.message : '加载签到记录失败')
     }
   } finally {
     if (seq === runsRequestSeq) runsLoading.value = false
@@ -470,10 +471,24 @@ const fetchSettings = async () => {
   }
 }
 
+function confirmWarning(content: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    dialog.warning({
+      title: '请确认',
+      content,
+      positiveText: '确认',
+      negativeText: '取消',
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+    })
+  })
+}
+
 async function confirmDailyLimit(accountId: string): Promise<boolean> {
   const account = accounts.value.find((a) => a.id === accountId)
   if (account && (account.todayRuns ?? 0) >= maxAttemptsPerDay.value) {
-    return confirmAction(
+    return confirmWarning(
       `该账户今日已签到 ${account.todayRuns} 次，已达每日上限（${maxAttemptsPerDay.value} 次）。\n手动签到不受限制，确定继续吗？`
     )
   }
@@ -499,7 +514,7 @@ const executeAccountCheckin = async (accountId: string) => {
     })
     await Promise.all([fetchRuns(), fetchAccounts()])
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '执行签到失败', 'error')
+    message.error(error instanceof Error ? error.message : '执行签到失败')
   } finally {
     executing.value = false
     executingAccountId.value = ''
@@ -520,10 +535,10 @@ const retryFailedRuns = async () => {
     })
     const result = await responseData<BatchCheckinResult>(response)
     lastBatchResult.value = result
-    if (result.failed > 0) showToast(`重试后仍有 ${result.failed} 个账户失败`, 'error')
+    if (result.failed > 0) message.error(`重试后仍有 ${result.failed} 个账户失败`)
     await Promise.all([fetchRuns(), fetchAccounts()])
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '重试失败账户失败', 'error')
+    message.error(error instanceof Error ? error.message : '重试失败账户失败')
   } finally {
     retryingBatch.value = false
   }
@@ -532,7 +547,7 @@ const retryFailedRuns = async () => {
 const cleanupRuns = async () => {
   if (cleaning.value) return
   if (!Number.isInteger(keepLatest.value) || keepLatest.value < 0 || keepLatest.value > 10000) {
-    showToast('保留数量必须是 0~10000 的整数', 'error')
+    message.error('保留数量必须是 0~10000 的整数')
     return
   }
 
@@ -542,7 +557,7 @@ const cleanupRuns = async () => {
   const msg = keepLatest.value === 0
     ? `确定清空${cleanupTarget.value}签到历史${resetDescription}吗？此操作不可撤销！`
     : `确定清理${cleanupTarget.value}签到历史，并保留最新 ${keepLatest.value} 条吗？`
-  if (!(await confirmAction(msg))) return
+  if (!(await confirmWarning(msg))) return
   cleaning.value = true
   try {
     const response = await request(apiUrl('/checkin-runs/cleanup'), {
@@ -559,29 +574,27 @@ const cleanupRuns = async () => {
     const resetSummary = result.resetAccountCount > 0 || result.deletedFailureCounterCount > 0
       ? `，重置 ${result.resetAccountCount} 个账户状态和 ${result.deletedFailureCounterCount} 个失败计数`
       : ''
-    showToast(`已删除 ${result.deletedCount} 条签到历史${resetSummary}`, 'success')
+    message.success(`已删除 ${result.deletedCount} 条签到历史${resetSummary}`)
     await Promise.all([fetchRuns(), fetchAccounts()])
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '清理签到历史失败', 'error')
+    message.error(error instanceof Error ? error.message : '清理签到历史失败')
   } finally {
     cleaning.value = false
   }
 }
+
 const deleteRun = async (run: CheckinRun) => {
   if (!run?.id || deletingRunId.value) return
-  const name = accountName(run.accountId)
-  if (!(await confirmAction(`确定删除账户「${name}」的这条签到记录吗？此操作不可撤销。`))) return
-
   deletingRunId.value = run.id
   try {
     await request(apiUrl(`/checkin-runs/${encodeURIComponent(run.id)}`), {
       method: 'DELETE',
     })
-    showToast('已删除该签到记录', 'success')
+    message.success('已删除该签到记录')
     runs.value = runs.value.filter((item) => item.id !== run.id)
     await fetchRuns()
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '删除签到记录失败', 'error')
+    message.error(error instanceof Error ? error.message : '删除签到记录失败')
   } finally {
     deletingRunId.value = ''
   }
@@ -605,22 +618,24 @@ const statusText = (status: string) => {
     success: '成功',
     failed: '失败',
     already_checked: '今日已签',
-    pending: '进行中'
+    pending: '进行中',
   }
   return map[normalized] || status
 }
 
-// 徽标类名映射：已签用 workbench 的 .already 配色
-const statusClass = (status: string): string => {
+function statusTagType(status: string): 'default' | 'success' | 'error' | 'warning' {
   const normalized = status.toLowerCase()
-  return normalized === 'already_checked' ? 'already' : normalized
+  if (normalized === 'success' || normalized === 'already_checked') return 'success'
+  if (normalized === 'failed') return 'error'
+  if (normalized === 'pending') return 'warning'
+  return 'default'
 }
 
 const triggerText = (trigger: string) => {
   const map: Record<string, string> = {
     manual: '手动',
     manual_batch: '批量手动',
-    scheduled: '定时'
+    scheduled: '定时',
   }
   return map[trigger] || trigger
 }
@@ -648,6 +663,24 @@ const dayBoundary = (date: string, atEnd: boolean): string => {
   return new Date(`${date}${time}`).toISOString()
 }
 
+function formatDateInput(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+watch(dateRange, (range) => {
+  if (!range) {
+    filterStartDate.value = ''
+    filterEndDate.value = ''
+    return
+  }
+  const [start, end] = range
+  filterStartDate.value = formatDateInput(new Date(start))
+  filterEndDate.value = formatDateInput(new Date(end))
+})
+
 const batchStatusText = (status: string) => {
   const map: Record<string, string> = {
     success: '成功',
@@ -659,10 +692,11 @@ const batchStatusText = (status: string) => {
   return map[status] || status
 }
 
-const batchStatusClass = (status: string) => {
-  if (status === 'already_checked') return 'already_checked'
-  if (status === 'skipped') return 'neutral'
-  return status
+function batchStatusTagType(status: string): 'default' | 'success' | 'error' | 'warning' {
+  if (status === 'success' || status === 'already_checked') return 'success'
+  if (status === 'failed') return 'error'
+  if (status === 'pending') return 'warning'
+  return 'default'
 }
 
 const copyRunSummary = async (run: CheckinRun) => {
@@ -689,17 +723,125 @@ const copyRunSummary = async (run: CheckinRun) => {
       document.execCommand('copy')
       document.body.removeChild(textarea)
     }
-    showToast('摘要已复制', 'success')
+    message.success('摘要已复制')
   } catch {
-    showToast('复制失败，请手动选择消息内容', 'error')
+    message.error('复制失败，请手动选择消息内容')
   }
 }
+
+const runColumns = computed<DataTableColumns<CheckinRun>>(() => {
+  // 显式依赖，保证操作中表格重渲染
+  const busy = actionBusy.value
+  const executingId = executingAccountId.value
+  const deletingId = deletingRunId.value
+  void busy
+  void executingId
+  void deletingId
+  void accounts.value
+
+  return [
+    {
+      title: '时间',
+      key: 'createdAt',
+      width: 120,
+      render: (row) =>
+        h('span', { title: formatTime(row.createdAt) }, formatTimeShort(row.createdAt)),
+    },
+    {
+      title: '账户',
+      key: 'accountId',
+      render: (row) =>
+        h('div', { class: 'account-name-cell' }, [
+          h('span', { class: 'account-name' }, accountName(row.accountId)),
+          accountSite(row.accountId)
+            ? h(NTag, { size: 'small', bordered: false }, { default: () => accountSite(row.accountId) })
+            : null,
+        ]),
+    },
+    {
+      title: '状态',
+      key: 'status',
+      width: 100,
+      render: (row) =>
+        h(
+          NTag,
+          { size: 'small', bordered: false, type: statusTagType(row.status) },
+          { default: () => statusText(row.status) },
+        ),
+    },
+    { title: '触发', key: 'triggeredBy', width: 90, render: (row) => triggerText(row.triggeredBy) },
+    { title: '耗时', key: 'durationMs', width: 80, render: (row) => (row.durationMs ? `${row.durationMs}ms` : '—') },
+    {
+      title: '消息',
+      key: 'message',
+      ellipsis: { tooltip: true },
+      render: (row) => row.message || '—',
+    },
+    ...(props.isAdmin
+      ? [{ title: '归属', key: 'owner', width: 100, render: (row: CheckinRun) => accountOwner(row.accountId) || '—' }]
+      : []),
+    {
+      title: '操作',
+      key: 'actions',
+      width: 210,
+      render: (row) =>
+        h(NSpace, { size: 4 }, {
+          default: () => [
+            row.status === 'failed'
+              ? h(
+                  NButton,
+                  {
+                    size: 'tiny',
+                    secondary: true,
+                    loading: executingId === row.accountId && executing.value,
+                    disabled: busy,
+                    onClick: () => executeAccountCheckin(row.accountId),
+                  },
+                  { default: () => (executingId === row.accountId ? '重试中…' : '重试') },
+                )
+              : null,
+            h(
+              NButton,
+              {
+                size: 'tiny',
+                tertiary: true,
+                disabled: busy,
+                onClick: () => copyRunSummary(row),
+              },
+              { default: () => '复制摘要' },
+            ),
+            h(
+              NPopconfirm,
+              {
+                onPositiveClick: () => deleteRun(row),
+              },
+              {
+                trigger: () =>
+                  h(
+                    NButton,
+                    {
+                      size: 'tiny',
+                      tertiary: true,
+                      type: 'error',
+                      loading: deletingId === row.id,
+                      disabled: busy,
+                    },
+                    { default: () => (deletingId === row.id ? '删除中…' : '删除') },
+                  ),
+                default: () => `确定删除账户「${accountName(row.accountId)}」的这条签到记录吗？此操作不可撤销。`,
+              },
+            ),
+          ],
+        }),
+    },
+  ]
+})
 
 onMounted(async () => {
   try {
     await Promise.all([fetchAccounts(), fetchRuns(), fetchUsers(), fetchSettings()])
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '加载失败', 'error')
+    message.error(error instanceof Error ? error.message : '加载失败')
   }
 })
 
@@ -715,4 +857,127 @@ watch([filterStatus, filterTriggeredBy, filterStartDate, filterEndDate, filterAc
 })
 </script>
 
-<style scoped src="./CheckinRunsPanel.css"></style>
+<style scoped>
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.panel-subtitle {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.filter-bar {
+  margin-bottom: 14px;
+}
+
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 4px;
+  border-radius: 9px;
+  font-size: 12px;
+  background: rgba(128, 128, 128, 0.15);
+}
+
+.summary-grid {
+  margin-bottom: 14px;
+}
+
+.unit {
+  font-size: 12px;
+  margin-left: 2px;
+}
+
+.batch-result {
+  margin-bottom: 12px;
+}
+
+.batch-result-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.batch-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.batch-name {
+  font-weight: 500;
+  flex: none;
+}
+
+.batch-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cleanup-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cleanup-scope {
+  font-size: 13px;
+}
+
+.keep-input {
+  width: 110px;
+}
+
+.cleanup-reset-option {
+  font-size: 13px;
+}
+
+.runs-table {
+  margin-top: 4px;
+}
+
+.load-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.account-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.account-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.muted {
+  color: v-bind('themeVars.textColor3');
+}
+</style>

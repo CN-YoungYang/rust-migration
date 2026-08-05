@@ -1,8 +1,9 @@
 import { ref } from 'vue'
+import { useMessage } from 'naive-ui'
 import { apiUrl, request, responseData } from '../utils/api'
-import { showToast } from '../utils/toast'
 
 export function useUsers(isAdminCheck?: () => boolean) {
+  const message = useMessage()
   const allUsers = ref<{ id: string; username: string }[]>([])
   const usersLoading = ref(false)
 
@@ -13,7 +14,7 @@ export function useUsers(isAdminCheck?: () => boolean) {
       const res = await request(apiUrl('/admin/users?scope=all'))
       allUsers.value = await responseData<{ id: string; username: string }[]>(res)
     } catch {
-      showToast('加载用户列表失败', 'error')
+      message.error('加载用户列表失败')
     } finally {
       usersLoading.value = false
     }

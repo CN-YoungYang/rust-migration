@@ -1,183 +1,296 @@
 <template>
-  <section class="notification-panel">
+  <div class="panel">
     <div class="panel-header">
       <div>
-        <h2>通知设置</h2>
-        <p class="panel-subtitle">已配置 {{ configs.length }} 个，启用 {{ enabledCount }} 个</p>
+        <h2 class="panel-title">通知设置</h2>
+        <n-text depth="3" class="panel-subtitle">已配置 {{ configs.length }} 个，启用 {{ enabledCount }} 个</n-text>
       </div>
-      <button class="primary" @click="startCreate" :disabled="saving || loading">新建通知</button>
+      <n-button type="primary" size="small" :disabled="saving || loading" @click="startCreate">新建通知</n-button>
     </div>
 
-    <form v-if="editing" class="notification-form" :aria-busy="saving" aria-labelledby="notification-form-title" @submit.prevent="saveConfig">
-      <h3 id="notification-form-title">{{ form.id ? '编辑通知' : '新建通知' }}</h3>
-      <div class="form-row">
-        <label>
-          通知类型
-          <select v-model="form.notifyType" :disabled="Boolean(form.id)" :aria-invalid="invalidFields.notifyType" aria-describedby="notification-validation">
-            <option value="webhook">Webhook</option>
-            <option value="telegram">Telegram</option>
-            <option value="email">邮件</option>
-          </select>
-        </label>
-        <label class="switch-row">
-          启用
-          <input v-model="form.enabled" type="checkbox" />
-        </label>
-      </div>
-
-      <div class="form-row">
-        <label class="switch-row">
-          签到失败通知
-          <input v-model="form.onFailure" type="checkbox" />
-        </label>
-        <label>
-          连续失败阈值
-          <input v-model.number="form.failureThreshold" type="number" min="1" max="100" :aria-invalid="invalidFields.failureThreshold" aria-describedby="notification-validation" />
-        </label>
-      </div>
-
-      <div class="form-row">
-        <label class="switch-row">
-          余额过低通知
-          <input v-model="form.onBalanceLow" type="checkbox" />
-        </label>
-        <label>
-          余额阈值（美元）
-          <input v-model.number="form.balanceThreshold" type="number" min="0" step="0.01" :aria-invalid="invalidFields.balanceThreshold" aria-describedby="notification-validation" />
-        </label>
-      </div>
-
-      <template v-if="form.notifyType === 'webhook'">
-        <label>
-          Webhook URL
-          <input v-model.trim="form.webhookUrl" type="url" :aria-invalid="invalidFields.webhookUrl" aria-describedby="notification-validation" />
-        </label>
-        <div class="form-row">
-          <label>
-            HTTP 方法
-            <select v-model="form.webhookMethod">
-              <option value="POST">POST</option>
-              <option value="PUT">PUT</option>
-            </select>
-          </label>
-          <label>
-            Headers JSON
-            <input v-model.trim="form.webhookHeaders" placeholder='{"X-Token":"..."}' :aria-invalid="invalidFields.webhookHeaders" aria-describedby="notification-validation" />
-          </label>
-        </div>
+    <!-- 编辑 / 新建表单 -->
+    <n-card v-if="editing" class="notification-form" :bordered="true" aria-labelledby="notification-form-title">
+      <template #header>
+        <h3 id="notification-form-title" class="form-title">{{ form.id ? '编辑通知' : '新建通知' }}</h3>
       </template>
+      <n-form :model="form" label-placement="top" :disabled="saving">
+        <n-grid :cols="2" :x-gap="16" responsive="screen" item-responsive>
+          <n-grid-item>
+            <n-form-item label="通知类型" :show-feedback="false">
+              <n-select
+                v-model:value="form.notifyType"
+                :options="typeOptions"
+                :disabled="Boolean(form.id)"
+                :status="invalidFields.notifyType ? 'error' : undefined"
+              />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="启用" :show-feedback="false">
+              <n-switch v-model:value="form.enabled" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="签到失败通知" :show-feedback="false">
+              <n-switch v-model:value="form.onFailure" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="连续失败阈值" :show-feedback="false">
+              <n-input-number
+                v-model:value="form.failureThreshold"
+                :min="1"
+                :max="100"
+                :status="invalidFields.failureThreshold ? 'error' : undefined"
+                style="width: 100%"
+              />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="余额过低通知" :show-feedback="false">
+              <n-switch v-model:value="form.onBalanceLow" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="余额阈值（美元）" :show-feedback="false">
+              <n-input-number
+                v-model:value="form.balanceThreshold"
+                :min="0"
+                :step="0.01"
+                placeholder="0"
+                :status="invalidFields.balanceThreshold ? 'error' : undefined"
+                style="width: 100%"
+              />
+            </n-form-item>
+          </n-grid-item>
+        </n-grid>
 
-      <template v-if="form.notifyType === 'telegram'">
-        <label>
-          Bot Token
-          <input v-model.trim="form.telegramBotToken" type="password" autocomplete="new-password" placeholder="留空保持不变" :disabled="clearTelegramToken" :aria-invalid="invalidFields.telegramBotToken" aria-describedby="notification-validation" />
-        </label>
-        <label v-if="form.id" class="clear-option">
-          <input v-model="clearTelegramToken" type="checkbox" />
-          清除已保存的 Bot Token
-        </label>
-        <label>
-          Chat ID
-          <input v-model.trim="form.telegramChatId" :aria-invalid="invalidFields.telegramChatId" aria-describedby="notification-validation" />
-        </label>
-      </template>
+        <template v-if="form.notifyType === 'webhook'">
+          <n-form-item label="Webhook URL" :show-feedback="false">
+            <n-input
+              v-model:value="form.webhookUrl"
+              type="text"
+              placeholder="https://example.com/hook"
+              :status="invalidFields.webhookUrl ? 'error' : undefined"
+            />
+          </n-form-item>
+          <n-grid :cols="2" :x-gap="16" responsive="screen" item-responsive>
+            <n-grid-item>
+              <n-form-item label="HTTP 方法" :show-feedback="false">
+                <n-select
+                  v-model:value="form.webhookMethod"
+                  :options="[{ label: 'POST', value: 'POST' }, { label: 'PUT', value: 'PUT' }]"
+                />
+              </n-form-item>
+            </n-grid-item>
+            <n-grid-item>
+              <n-form-item label="Headers JSON" :show-feedback="false">
+                <n-input
+                  v-model:value="form.webhookHeaders"
+                  type="text"
+                  placeholder='{"X-Token":"..."}'
+                  :status="invalidFields.webhookHeaders ? 'error' : undefined"
+                />
+              </n-form-item>
+            </n-grid-item>
+          </n-grid>
+        </template>
 
-      <template v-if="form.notifyType === 'email'">
-        <div class="form-row">
-          <label>
-            SMTP 主机
-            <input v-model.trim="form.emailSmtpHost" :aria-invalid="invalidFields.emailSmtpHost" aria-describedby="notification-validation" />
-          </label>
-          <label>
-            SMTP 端口
-            <input v-model.number="form.emailSmtpPort" type="number" min="1" max="65535" :aria-invalid="invalidFields.emailSmtpPort" aria-describedby="notification-validation" />
-          </label>
-        </div>
-        <label>
-          SMTP 用户名
-          <input v-model.trim="form.emailSmtpUser" :aria-invalid="invalidFields.emailSmtpUser" aria-describedby="notification-validation" />
-        </label>
-        <label>
-          SMTP 密码
-          <input v-model.trim="form.emailSmtpPassword" type="password" autocomplete="new-password" placeholder="留空保持不变" :disabled="clearSmtpPassword" :aria-invalid="invalidFields.emailSmtpPassword" aria-describedby="notification-validation" />
-        </label>
-        <label v-if="form.id" class="clear-option">
-          <input v-model="clearSmtpPassword" type="checkbox" />
-          清除已保存的 SMTP 密码
-        </label>
-        <div class="form-row">
-          <label>
-            发件人
-            <input v-model.trim="form.emailFrom" type="email" :aria-invalid="invalidFields.emailFrom" aria-describedby="notification-validation" />
-          </label>
-          <label>
-            收件人
-            <input v-model.trim="form.emailTo" :aria-invalid="invalidFields.emailTo" aria-describedby="notification-validation" />
-          </label>
-        </div>
-      </template>
+        <template v-if="form.notifyType === 'telegram'">
+          <n-form-item label="Bot Token" :show-feedback="false">
+            <n-input
+              v-model:value="form.telegramBotToken"
+              type="password"
+              show-password-on="click"
+              autocomplete="new-password"
+              placeholder="留空保持不变"
+              :disabled="clearTelegramToken"
+              :status="invalidFields.telegramBotToken ? 'error' : undefined"
+            />
+          </n-form-item>
+          <n-form-item v-if="form.id" :show-feedback="false" class="clear-option">
+            <n-checkbox v-model:checked="clearTelegramToken">清除已保存的 Bot Token</n-checkbox>
+          </n-form-item>
+          <n-form-item label="Chat ID" :show-feedback="false">
+            <n-input
+              v-model:value="form.telegramChatId"
+              :status="invalidFields.telegramChatId ? 'error' : undefined"
+            />
+          </n-form-item>
+        </template>
 
-      <label>
-        备注
-        <input v-model.trim="form.note" />
-      </label>
+        <template v-if="form.notifyType === 'email'">
+          <n-grid :cols="2" :x-gap="16" responsive="screen" item-responsive>
+            <n-grid-item>
+              <n-form-item label="SMTP 主机" :show-feedback="false">
+                <n-input
+                  v-model:value="form.emailSmtpHost"
+                  :status="invalidFields.emailSmtpHost ? 'error' : undefined"
+                />
+              </n-form-item>
+            </n-grid-item>
+            <n-grid-item>
+              <n-form-item label="SMTP 端口" :show-feedback="false">
+                <n-input-number
+                  v-model:value="form.emailSmtpPort"
+                  :min="1"
+                  :max="65535"
+                  :status="invalidFields.emailSmtpPort ? 'error' : undefined"
+                  style="width: 100%"
+                />
+              </n-form-item>
+            </n-grid-item>
+          </n-grid>
+          <n-form-item label="SMTP 用户名" :show-feedback="false">
+            <n-input
+              v-model:value="form.emailSmtpUser"
+              :status="invalidFields.emailSmtpUser ? 'error' : undefined"
+            />
+          </n-form-item>
+          <n-form-item label="SMTP 密码" :show-feedback="false">
+            <n-input
+              v-model:value="form.emailSmtpPassword"
+              type="password"
+              show-password-on="click"
+              autocomplete="new-password"
+              placeholder="留空保持不变"
+              :disabled="clearSmtpPassword"
+              :status="invalidFields.emailSmtpPassword ? 'error' : undefined"
+            />
+          </n-form-item>
+          <n-form-item v-if="form.id" :show-feedback="false" class="clear-option">
+            <n-checkbox v-model:checked="clearSmtpPassword">清除已保存的 SMTP 密码</n-checkbox>
+          </n-form-item>
+          <n-grid :cols="2" :x-gap="16" responsive="screen" item-responsive>
+            <n-grid-item>
+              <n-form-item label="发件人" :show-feedback="false">
+                <n-input
+                  v-model:value="form.emailFrom"
+                  placeholder="sender@example.com"
+                  :status="invalidFields.emailFrom ? 'error' : undefined"
+                />
+              </n-form-item>
+            </n-grid-item>
+            <n-grid-item>
+              <n-form-item label="收件人" :show-feedback="false">
+                <n-input
+                  v-model:value="form.emailTo"
+                  :status="invalidFields.emailTo ? 'error' : undefined"
+                />
+              </n-form-item>
+            </n-grid-item>
+          </n-grid>
+        </template>
 
-      <div class="preview-grid">
-        <div>
-          <span>触发条件</span>
-          <strong>{{ formTriggerSummary }}</strong>
-        </div>
-        <div>
-          <span>发送目标</span>
-          <strong>{{ formTargetSummary }}</strong>
-        </div>
-      </div>
+        <n-form-item label="备注" :show-feedback="false">
+          <n-input v-model:value="form.note" />
+        </n-form-item>
 
-      <p id="notification-validation" class="field-error-slot" :class="{ 'is-empty': validationErrors.length === 0 }" :role="validationErrors.length > 0 ? 'alert' : undefined">{{ validationErrors[0] || '\u00a0' }}</p>
+        <n-descriptions :column="2" size="small" bordered class="preview-grid">
+          <n-descriptions-item label="触发条件">{{ formTriggerSummary }}</n-descriptions-item>
+          <n-descriptions-item label="发送目标">{{ formTargetSummary }}</n-descriptions-item>
+        </n-descriptions>
 
-      <div class="form-actions">
-        <button type="submit" class="primary" :disabled="saving || validationErrors.length > 0" :data-state="saving ? 'loading' : undefined">
-          {{ saving ? '保存中...' : '保存' }}
-        </button>
-        <button type="button" @click="cancelEdit" :disabled="saving">取消</button>
-      </div>
-    </form>
+        <n-alert v-if="validationErrors.length > 0" type="error" :show-icon="true" class="form-error" role="alert">
+          {{ validationErrors[0] }}
+        </n-alert>
 
-    <div v-if="loading" class="empty" role="status" aria-live="polite">加载中...</div>
-    <div v-else-if="configs.length === 0" class="empty" role="status">暂无通知配置，可使用“新建通知”添加。</div>
+        <n-space :size="8" class="form-actions">
+          <n-button
+            type="primary"
+            :loading="saving"
+            :disabled="saving || validationErrors.length > 0"
+            @click="saveConfig"
+          >
+            {{ saving ? '保存中…' : '保存' }}
+          </n-button>
+          <n-button :disabled="saving" @click="cancelEdit">取消</n-button>
+        </n-space>
+      </n-form>
+    </n-card>
+
+    <div v-if="loading" class="state-hint" role="status" aria-live="polite">
+      <n-spin size="large" />
+      <p class="muted">加载中…</p>
+    </div>
+    <n-empty v-else-if="configs.length === 0" description="暂无通知配置，可使用「新建通知」添加。" />
 
     <div v-else class="notification-list" :aria-busy="loading">
-      <article v-for="config in configs" :key="config.id" class="notification-card">
+      <n-card v-for="config in configs" :key="config.id" class="notification-card" size="small" :bordered="true">
         <div class="config-main">
           <div class="title-row">
             <strong>{{ typeLabel(config.notifyType) }}</strong>
-            <span class="badge" :class="config.enabled ? 'success' : 'neutral'">{{ config.enabled ? '启用' : '停用' }}</span>
+            <n-tag size="small" :bordered="false" :type="config.enabled ? 'success' : 'default'">
+              {{ config.enabled ? '启用' : '停用' }}
+            </n-tag>
           </div>
-          <p class="muted">
-            {{ triggerSummary(config) }}
-          </p>
+          <p class="muted">{{ triggerSummary(config) }}</p>
           <p class="muted">{{ targetSummary(config) }}</p>
-          <p v-if="testResults[config.id]" :class="['test-result', testResults[config.id].success ? 'success' : 'failed']" role="status" aria-live="polite">
+          <n-alert
+            v-if="testResults[config.id]"
+            :type="testResults[config.id].success ? 'success' : 'error'"
+            size="small"
+            :show-icon="true"
+            class="test-result"
+            role="status"
+            aria-live="polite"
+          >
             {{ testResults[config.id].message }} · {{ testResults[config.id].testedAt }}
-          </p>
+          </n-alert>
           <p v-if="config.note" class="note">{{ config.note }}</p>
         </div>
-        <div class="actions">
-          <button @click="testConfig(config)" :disabled="Boolean(testingId) || saving">
-            {{ testingId === config.id ? '测试中...' : '测试' }}
-          </button>
-          <button @click="startEdit(config)" :disabled="saving || Boolean(testingId)">编辑</button>
-          <button class="danger" @click="deleteConfig(config.id)" :disabled="saving || Boolean(testingId)">删除</button>
-        </div>
-      </article>
+        <template #footer>
+          <n-space :size="8">
+            <n-button
+              size="small"
+              secondary
+              :loading="testingId === config.id"
+              :disabled="Boolean(testingId) || saving"
+              @click="testConfig(config)"
+            >
+              {{ testingId === config.id ? '测试中…' : '测试' }}
+            </n-button>
+            <n-button size="small" :disabled="saving || Boolean(testingId)" @click="startEdit(config)">编辑</n-button>
+            <n-popconfirm @positive-click="deleteConfig(config.id)">
+              <template #trigger>
+                <n-button size="small" tertiary type="error" :disabled="saving || Boolean(testingId)">删除</n-button>
+              </template>
+              确定要删除此通知配置吗？此操作不可撤销。
+            </n-popconfirm>
+          </n-space>
+        </template>
+      </n-card>
     </div>
-  </section>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import {
+  NAlert,
+  NButton,
+  NCard,
+  NCheckbox,
+  NDescriptions,
+  NDescriptionsItem,
+  NEmpty,
+  NForm,
+  NFormItem,
+  NGrid,
+  NGridItem,
+  NInput,
+  NInputNumber,
+  NPopconfirm,
+  NSelect,
+  NSpace,
+  NSpin,
+  NSwitch,
+  NTag,
+  NText,
+  useMessage,
+  useThemeVars,
+} from 'naive-ui'
 import { apiUrl, request, responseData } from '../utils/api'
-import { confirmAction, showToast } from '../utils/toast'
 
 interface NotificationConfig {
   id: string
@@ -206,6 +319,8 @@ interface NotificationForm extends Partial<NotificationConfig> {
   telegramBotToken?: string | null
 }
 
+const message = useMessage()
+const themeVars = useThemeVars()
 const configs = ref<NotificationConfig[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -216,6 +331,12 @@ const form = ref<NotificationForm>(emptyForm())
 const clearSmtpPassword = ref(false)
 const clearTelegramToken = ref(false)
 const testResults = ref<Record<string, { success: boolean; message: string; testedAt: string }>>({})
+
+const typeOptions = [
+  { label: 'Webhook', value: 'webhook' },
+  { label: 'Telegram', value: 'telegram' },
+  { label: '邮件', value: 'email' },
+]
 
 const enabledCount = computed(() => configs.value.filter((config) => config.enabled).length)
 
@@ -303,7 +424,7 @@ function emptyForm(): NotificationForm {
     failureThreshold: 1,
     onBalanceLow: false,
     balanceThreshold: null,
-    webhookMethod: 'POST'
+    webhookMethod: 'POST',
   }
 }
 
@@ -402,7 +523,7 @@ async function loadConfigs() {
     const response = await request(apiUrl('/notifications'))
     configs.value = await responseData<NotificationConfig[]>(response)
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '加载通知配置失败', 'error')
+    message.error(error instanceof Error ? error.message : '加载通知配置失败')
   } finally {
     loading.value = false
   }
@@ -418,12 +539,12 @@ async function saveConfig() {
     await request(apiUrl(id ? `/notifications/${id}` : '/notifications'), {
       method: id ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildPayload())
+      body: JSON.stringify(buildPayload()),
     })
     cancelEdit()
     await loadConfigs()
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '保存通知配置失败', 'error')
+    message.error(error instanceof Error ? error.message : '保存通知配置失败')
   } finally {
     saving.value = false
   }
@@ -433,48 +554,133 @@ async function testConfig(config: NotificationConfig) {
   testingId.value = config.id
   try {
     const response = await request(apiUrl(`/notifications/${config.id}/test`), {
-      method: 'POST'
+      method: 'POST',
     })
     const result = await responseData<{ success: boolean; message?: string }>(response)
-    const message = result.message || '测试完成'
+    const resultMessage = result.message || '测试完成'
     testResults.value = {
       ...testResults.value,
       [config.id]: {
         success: result.success,
-        message,
-        testedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-      }
+        message: resultMessage,
+        testedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      },
     }
-    if (!result.success) showToast(message, 'error')
+    if (!result.success) message.error(resultMessage)
   } catch (error) {
-    const message = error instanceof Error ? error.message : '测试通知失败'
+    const resultMessage = error instanceof Error ? error.message : '测试通知失败'
     testResults.value = {
       ...testResults.value,
       [config.id]: {
         success: false,
-        message,
-        testedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-      }
+        message: resultMessage,
+        testedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      },
     }
-    showToast(message, 'error')
+    message.error(resultMessage)
   } finally {
     testingId.value = ''
   }
 }
 
 async function deleteConfig(id: string) {
-  if (!(await confirmAction('确定要删除此通知配置吗？'))) return
   try {
     await request(apiUrl(`/notifications/${id}`), {
-      method: 'DELETE'
+      method: 'DELETE',
     })
+    message.success('已删除通知配置')
     await loadConfigs()
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '删除通知配置失败', 'error')
+    message.error(error instanceof Error ? error.message : '删除通知配置失败')
   }
 }
 
 onMounted(loadConfigs)
 </script>
 
-<style scoped src="./NotificationPanel.css"></style>
+<style scoped>
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.panel-subtitle {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.notification-form {
+  margin-bottom: 16px;
+}
+
+.form-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.clear-option {
+  margin-bottom: 12px;
+}
+
+.preview-grid {
+  margin-top: 4px;
+}
+
+.form-error {
+  margin-top: 12px;
+}
+
+.form-actions {
+  margin-top: 14px;
+}
+
+.state-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 0;
+}
+
+.notification-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.config-main p {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.test-result {
+  margin-top: 8px;
+}
+
+.note {
+  color: v-bind('themeVars.textColor2');
+}
+
+.muted {
+  color: v-bind('themeVars.textColor3');
+}
+</style>

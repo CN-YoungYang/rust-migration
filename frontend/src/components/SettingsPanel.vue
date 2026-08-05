@@ -1,109 +1,165 @@
 <template>
-  <div class="settings-panel">
+  <div class="panel">
     <div class="panel-header">
       <div>
-        <h2>全局设置</h2>
-        <p class="panel-subtitle">{{ settingsStatusText }}</p>
+        <h2 class="panel-title">全局设置</h2>
+        <n-text depth="3" class="panel-subtitle">{{ settingsStatusText }}</n-text>
       </div>
-      <div v-if="!loading && !loadError" class="status-strip">
-        <span :class="['status-pill', settings.enabled ? 'enabled' : 'disabled']">
+      <n-space v-if="!loading && !loadError" align="center" :size="8">
+        <n-tag round :bordered="false" :type="settings.enabled ? 'success' : 'default'">
           {{ settings.enabled ? '启用' : '停用' }}
-        </span>
-        <span class="status-pill">{{ settings.windowStart }} - {{ settings.windowEnd }}</span>
-      </div>
+        </n-tag>
+        <n-tag round :bordered="false" type="info">{{ settings.windowStart }} - {{ settings.windowEnd }}</n-tag>
+      </n-space>
     </div>
 
-
-    <div v-if="loadError" class="validation-box load-error" role="alert">
-      <span>{{ loadError }}</span>
-      <button type="button" @click="fetchSettings">重试</button>
+    <n-alert v-if="loadError" type="error" :show-icon="true" class="load-error" role="alert" :action="() => h(NButton, { size: 'small', onClick: fetchSettings }, { default: () => '重试' })">
+      {{ loadError }}
+    </n-alert>
+    <div v-else-if="loading" class="state-hint" role="status" aria-live="polite">
+      <n-spin size="large" />
+      <p class="muted">正在加载设置…</p>
     </div>
-    <p v-else-if="loading" class="loading-state" role="status" aria-live="polite">正在加载设置...</p>
 
-    <form v-else class="settings-form" :aria-busy="saving" @submit.prevent="saveSettings" @input="saved = false" @change="saved = false">
-      <div class="form-group">
-        <label for="settings-enabled">启用自动签到</label>
-        <label class="switch">
-          <input id="settings-enabled" v-model="settings.enabled" type="checkbox" />
-          <span class="slider" aria-hidden="true"></span>
-        </label>
-      </div>
+    <n-form v-else class="settings-form" :model="settings" :disabled="saving" label-placement="left" label-width="220" @submit.prevent="saveSettings">
+      <n-form-item label="启用自动签到" :show-feedback="false">
+        <n-switch v-model:value="settings.enabled" @update:value="markDirty" />
+      </n-form-item>
 
-      <div class="form-row">
-        <div class="form-group">
-          <label for="settings-window-start">签到窗口开始</label>
-          <input id="settings-window-start" v-model="settings.windowStart" type="time" required :aria-invalid="invalidFields.windowStart" aria-describedby="settings-validation" />
-        </div>
-        <div class="form-group">
-          <label for="settings-window-end">签到窗口结束</label>
-          <input id="settings-window-end" v-model="settings.windowEnd" type="time" required :aria-invalid="invalidFields.windowEnd" aria-describedby="settings-validation" />
-        </div>
-      </div>
+      <n-grid :cols="2" :x-gap="16" responsive="screen" item-responsive>
+        <n-grid-item>
+          <n-form-item label="签到窗口开始" :show-feedback="false" :validation-status="invalidFields.windowStart ? 'error' : undefined">
+            <n-time-picker v-model:value="windowStartPicker" format="HH:mm" clearable />
+          </n-form-item>
+        </n-grid-item>
+        <n-grid-item>
+          <n-form-item label="签到窗口结束" :show-feedback="false" :validation-status="invalidFields.windowEnd ? 'error' : undefined">
+            <n-time-picker v-model:value="windowEndPicker" format="HH:mm" clearable />
+          </n-form-item>
+        </n-grid-item>
+      </n-grid>
 
-      <div class="form-group">
-        <label for="settings-retry-enabled">启用失败重试</label>
-        <label class="switch">
-          <input id="settings-retry-enabled" v-model="settings.retryEnabled" type="checkbox" />
-          <span class="slider" aria-hidden="true"></span>
-        </label>
-      </div>
+      <n-form-item label="启用失败重试" :show-feedback="false">
+        <n-switch v-model:value="settings.retryEnabled" @update:value="markDirty" />
+      </n-form-item>
 
-      <div class="form-group">
-        <label for="settings-max-attempts">每天最大尝试次数</label>
-        <input id="settings-max-attempts" v-model.number="settings.maxAttemptsPerDay" type="number" min="1" max="100" :aria-invalid="invalidFields.maxAttemptsPerDay" aria-describedby="settings-validation" />
-      </div>
+      <n-form-item label="每天最大尝试次数" :show-feedback="false">
+        <n-input-number
+          v-model:value="settings.maxAttemptsPerDay"
+          :min="1"
+          :max="100"
+          :status="invalidFields.maxAttemptsPerDay ? 'error' : undefined"
+          @update:value="markDirty"
+        />
+      </n-form-item>
 
-      <div class="form-row">
-        <div class="form-group">
-          <label for="settings-delay-min">批量/定时签到最小延迟（秒）</label>
-          <input id="settings-delay-min" v-model.number="settings.batchDelayMin" type="number" min="0" max="600" :aria-invalid="invalidFields.batchDelayMin" aria-describedby="settings-validation" />
-        </div>
-        <div class="form-group">
-          <label for="settings-delay-max">批量/定时签到最大延迟（秒）</label>
-          <input id="settings-delay-max" v-model.number="settings.batchDelayMax" type="number" min="0" max="600" :aria-invalid="invalidFields.batchDelayMax" aria-describedby="settings-validation" />
-        </div>
-      </div>
+      <n-grid :cols="2" :x-gap="16" responsive="screen" item-responsive>
+        <n-grid-item>
+          <n-form-item label="批量/定时签到最小延迟（秒）" :show-feedback="false">
+            <n-input-number
+              v-model:value="settings.batchDelayMin"
+              :min="0"
+              :max="600"
+              :status="invalidFields.batchDelayMin ? 'error' : undefined"
+              @update:value="markDirty"
+              style="width: 100%"
+            />
+          </n-form-item>
+        </n-grid-item>
+        <n-grid-item>
+          <n-form-item label="批量/定时签到最大延迟（秒）" :show-feedback="false">
+            <n-input-number
+              v-model:value="settings.batchDelayMax"
+              :min="0"
+              :max="600"
+              :status="invalidFields.batchDelayMax ? 'error' : undefined"
+              @update:value="markDirty"
+              style="width: 100%"
+            />
+          </n-form-item>
+        </n-grid-item>
+      </n-grid>
 
-      <div class="form-group">
-        <label for="settings-cleanup-latest">清理记录时保留最新条数</label>
-        <input id="settings-cleanup-latest" v-model.number="settings.cleanupKeepLatest" type="number" min="0" max="10000" :aria-invalid="invalidFields.cleanupKeepLatest" aria-describedby="settings-validation" />
-      </div>
+      <n-form-item label="清理记录时保留最新条数" :show-feedback="false">
+        <n-input-number
+          v-model:value="settings.cleanupKeepLatest"
+          :min="0"
+          :max="10000"
+          :status="invalidFields.cleanupKeepLatest ? 'error' : undefined"
+          @update:value="markDirty"
+        />
+      </n-form-item>
 
-      <p id="settings-validation" class="field-error-slot" :class="{ 'is-empty': validationErrors.length === 0 }" :role="validationErrors.length > 0 ? 'alert' : undefined">{{ validationErrors[0] || '\u00a0' }}</p>
+      <n-alert v-if="validationErrors.length > 0" type="error" :show-icon="true" class="form-error" role="alert">
+        {{ validationErrors[0] }}
+      </n-alert>
 
-    <button type="submit" class="btn-primary" :disabled="saving || validationErrors.length > 0" :data-state="saving ? 'loading' : (saved ? 'success' : undefined)">
-        {{ saving ? '保存中...' : (saved ? '已保存' : '保存设置') }}
-      </button>
-    </form>
+      <n-button
+        type="primary"
+        :loading="saving"
+        :disabled="saving || validationErrors.length > 0"
+        @click="saveSettings"
+      >
+        <template #icon v-if="saved"><n-icon :component="CheckmarkOutline" /></template>
+        {{ saving ? '保存中…' : saved ? '已保存' : '保存设置' }}
+      </n-button>
+    </n-form>
 
     <div v-if="!loading && !loadError" class="info-section">
-      <h3>当前执行策略</h3>
-      <div class="policy-grid">
-        <div>
-          <span>签到窗口</span>
-          <strong>{{ nextWindowText }}</strong>
-        </div>
-        <div>
-          <span>失败重试</span>
-          <strong>{{ settings.retryEnabled ? `启用，最多 ${settings.maxAttemptsPerDay} 次/天` : '停用' }}</strong>
-        </div>
-        <div>
-          <span>批量节奏</span>
-          <strong>{{ delaySummary }}</strong>
-        </div>
-        <div>
-          <span>记录清理</span>
-          <strong>保留最新 {{ settings.cleanupKeepLatest }} 条</strong>
-        </div>
-      </div>
+      <h3 class="section-title">当前执行策略</h3>
+      <n-grid :cols="4" :x-gap="12" :y-gap="12" responsive="screen" item-responsive class="policy-grid">
+        <n-grid-item>
+          <n-card size="small">
+            <p class="policy-label">签到窗口</p>
+            <p class="policy-value">{{ nextWindowText }}</p>
+          </n-card>
+        </n-grid-item>
+        <n-grid-item>
+          <n-card size="small">
+            <p class="policy-label">失败重试</p>
+            <p class="policy-value">{{ settings.retryEnabled ? `启用，最多 ${settings.maxAttemptsPerDay} 次/天` : '停用' }}</p>
+          </n-card>
+        </n-grid-item>
+        <n-grid-item>
+          <n-card size="small">
+            <p class="policy-label">批量节奏</p>
+            <p class="policy-value">{{ delaySummary }}</p>
+          </n-card>
+        </n-grid-item>
+        <n-grid-item>
+          <n-card size="small">
+            <p class="policy-label">记录清理</p>
+            <p class="policy-value">保留最新 {{ settings.cleanupKeepLatest }} 条</p>
+          </n-card>
+        </n-grid-item>
+      </n-grid>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, h, ref, onMounted } from 'vue'
+import {
+  NAlert,
+  NButton,
+  NCard,
+  NForm,
+  NFormItem,
+  NGrid,
+  NGridItem,
+  NIcon,
+  NInputNumber,
+  NSpace,
+  NSpin,
+  NSwitch,
+  NTag,
+  NText,
+  NTimePicker,
+  useMessage,
+  useThemeVars,
+} from 'naive-ui'
+import { CheckmarkOutline } from '@vicons/ionicons5'
 import { apiUrl, request, responseData } from '../utils/api'
-import { showToast } from '../utils/toast'
 
 interface Settings {
   id?: string
@@ -118,6 +174,8 @@ interface Settings {
   updatedAt?: string
 }
 
+const message = useMessage()
+const themeVars = useThemeVars()
 const settings = ref<Settings>({
   enabled: false,
   windowStart: '02:00',
@@ -126,7 +184,7 @@ const settings = ref<Settings>({
   maxAttemptsPerDay: 3,
   batchDelayMin: 3,
   batchDelayMax: 10,
-  cleanupKeepLatest: 500
+  cleanupKeepLatest: 500,
 })
 const loading = ref(true)
 const loadError = ref('')
@@ -134,7 +192,7 @@ const saving = ref(false)
 const saved = ref(false)
 
 const settingsStatusText = computed(() => {
-  if (loading.value) return '正在加载设置...'
+  if (loading.value) return '正在加载设置…'
   if (loadError.value) return '设置加载失败'
   return settings.value.enabled ? '自动签到已启用' : '自动签到已停用'
 })
@@ -211,6 +269,40 @@ const nextWindowText = computed(() => {
   return `今日 ${range}`
 })
 
+// NTimePicker 用时间戳作为值，这里与设置的 "HH:MM" 字符串互转
+function timeToTimestamp(value: string): number | null {
+  const minutes = minutesOf(value)
+  if (minutes === null) return null
+  const date = new Date()
+  date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0)
+  return date.getTime()
+}
+
+function timestampToTime(timestamp: number): string {
+  const date = new Date(timestamp)
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+const windowStartPicker = computed<number | null>({
+  get: () => timeToTimestamp(settings.value.windowStart),
+  set: (value) => {
+    settings.value.windowStart = value !== null ? timestampToTime(value) : ''
+    saved.value = false
+  },
+})
+
+const windowEndPicker = computed<number | null>({
+  get: () => timeToTimestamp(settings.value.windowEnd),
+  set: (value) => {
+    settings.value.windowEnd = value !== null ? timestampToTime(value) : ''
+    saved.value = false
+  },
+})
+
+function markDirty() {
+  saved.value = false
+}
+
 const fetchSettings = async () => {
   loading.value = true
   loadError.value = ''
@@ -219,7 +311,7 @@ const fetchSettings = async () => {
     settings.value = await responseData<Settings>(response)
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : '加载设置失败'
-    showToast(loadError.value, 'error')
+    message.error(loadError.value)
   } finally {
     loading.value = false
   }
@@ -234,12 +326,12 @@ const saveSettings = async () => {
     const response = await request(apiUrl('/settings'), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings.value)
+      body: JSON.stringify(settings.value),
     })
     settings.value = await responseData<Settings>(response)
     saved.value = true
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '保存设置失败', 'error')
+    message.error(error instanceof Error ? error.message : '保存设置失败')
   } finally {
     saving.value = false
   }
@@ -248,4 +340,72 @@ const saveSettings = async () => {
 onMounted(fetchSettings)
 </script>
 
-<style scoped src="./SettingsPanel.css"></style>
+<style scoped>
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.panel-subtitle {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.load-error {
+  margin-bottom: 12px;
+}
+
+.state-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 0;
+}
+
+.form-error {
+  margin-bottom: 14px;
+}
+
+.info-section {
+  margin-top: 24px;
+}
+
+.section-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.policy-grid {
+  margin-top: 12px;
+}
+
+.policy-label {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: v-bind('themeVars.textColor3');
+}
+
+.policy-value {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.muted {
+  color: v-bind('themeVars.textColor3');
+}
+</style>

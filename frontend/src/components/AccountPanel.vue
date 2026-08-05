@@ -1,300 +1,296 @@
 <template>
-  <section class="account-panel">
+  <section class="panel">
     <div class="panel-header">
       <div>
-        <h2>签到账户管理</h2>
-        <p class="panel-subtitle">
+        <h2 class="panel-title">签到账户管理</h2>
+        <n-text depth="3" class="panel-subtitle">
           已启用 {{ listSummary.enabled }} 个，今日执行 {{ listSummary.todayRuns }} 次，失败 {{ listSummary.failed }} 个
-        </p>
+        </n-text>
       </div>
-      <div class="header-actions">
-        <select v-if="isAdmin" v-model="filterUserId" aria-label="按用户筛选账户">
-          <option value="">全部用户</option>
-          <option v-if="usersLoading" disabled>加载中...</option>
-          <option v-for="u in allUsers" :key="u.id" :value="u.id">{{ u.username }}</option>
-        </select>
-        <button @click="exportAccounts" :disabled="loading || actionBusy">导出 CSV</button>
-        <button @click="openImportDialog" :disabled="actionBusy">导入 CSV</button>
-          <button
-            v-if="accounts.length > 0"
-            class="primary"
-            :disabled="actionBusy"
-            :data-state="batchLoading ? 'loading' : undefined"
+      <n-space align="center" :size="8">
+        <n-select
+          v-if="isAdmin"
+          v-model:value="filterUserId"
+          :options="userFilterOptions"
+          placeholder="全部用户"
+          :loading="usersLoading"
+          size="small"
+          style="width: 140px"
+        />
+        <n-button size="small" :disabled="loading || actionBusy" @click="exportAccounts">
+          <template #icon><n-icon :component="DownloadOutline" /></template>
+          导出 CSV
+        </n-button>
+        <n-button size="small" :disabled="actionBusy" @click="openImportDialog">
+          <template #icon><n-icon :component="CloudUploadOutline" /></template>
+          导入 CSV
+        </n-button>
+        <n-button
+          v-if="accounts.length > 0"
+          size="small"
+          type="primary"
+          :loading="batchLoading"
+          :disabled="actionBusy"
           @click="batchCheckin(accounts.map((a) => a.id))"
         >
-          {{ batchLoading ? '签到中...' : (filterUserId ? '该用户签到' : '当前列表签到') }}
-        </button>
-        <button class="primary" :disabled="actionBusy" @click="openCreate">新增账户</button>
-      </div>
+          {{ batchLoading ? '签到中…' : (filterUserId ? '该用户签到' : '当前列表签到') }}
+        </n-button>
+        <n-button size="small" type="primary" :disabled="actionBusy" @click="openCreate">
+          <template #icon><n-icon :component="AddOutline" /></template>
+          新增账户
+        </n-button>
+      </n-space>
     </div>
 
-    <div class="filter-bar">
-      <select v-model="filterSiteType" aria-label="按站点类型筛选">
-        <option value="">全部类型</option>
-        <option value="new-api">new-api</option>
-        <option value="anyrouter">anyrouter</option>
-        <option value="x666">x666</option>
-      </select>
-      <select v-model="filterEnabled" aria-label="按启用状态筛选">
-        <option value="">全部状态</option>
-        <option value="true">已启用</option>
-        <option value="false">已禁用</option>
-      </select>
-      <select v-model="filterLastStatus" aria-label="按签到状态筛选">
-        <option value="">全部签到状态</option>
-        <option value="not_today">今日未签到</option>
-        <option value="success">成功</option>
-        <option value="failed">失败</option>
-        <option value="already_checked">今日已签</option>
-        <option value="never">从未签到</option>
-      </select>
-      <input
-        v-model="filterKeyword"
-        type="search"
-        aria-label="搜索账户"
+    <n-space class="filter-bar" align="center" :size="8" wrap>
+      <n-select v-model:value="filterSiteType" :options="siteTypeOptions" size="small" style="width: 130px" />
+      <n-select v-model:value="filterEnabled" :options="enabledOptions" size="small" style="width: 120px" />
+      <n-select v-model:value="filterLastStatus" :options="lastStatusOptions" size="small" style="width: 140px" />
+      <n-input
+        v-model:value="filterKeyword"
+        type="text"
+        clearable
+        size="small"
         placeholder="搜索账户名称、地址或备注"
-        class="filter-input"
+        style="width: 240px"
       />
-      <button v-if="hasActiveFilter" @click="clearFilters">清除筛选</button>
-      <span class="filter-count">{{ accounts.length }} 个结果</span>
-    </div>
+      <n-button v-if="hasActiveFilter" size="small" @click="clearFilters">清除筛选</n-button>
+      <n-text depth="3" class="filter-count">{{ accounts.length }} 个结果</n-text>
+    </n-space>
 
-    <div v-if="!loading && accounts.length > 0" class="bulk-toolbar">
-      <label>
-        <input
-          type="checkbox"
-          :checked="allVisibleSelected"
-          :indeterminate.prop="someVisibleSelected"
-          @change="toggleSelectAllVisible"
-        />
-        选中本页
-      </label>
-      <span>已选 {{ selectedIds.length }} 个</span>
-      <button :disabled="selectedIds.length === 0 || actionBusy" @click="batchCheckin(selectedIds)">
-        签到选中
-      </button>
-      <button :disabled="selectedIds.length === 0 || actionBusy" @click="bulkRefreshBalance">
-        刷新余额
-      </button>
-      <button :disabled="selectedIds.length === 0 || actionBusy" @click="bulkSetEnabled(true)">
-        批量启用
-      </button>
-      <button :disabled="selectedIds.length === 0 || actionBusy" @click="bulkSetEnabled(false)">
-        批量禁用
-      </button>
-      <button v-if="selectedIds.length > 0" :disabled="actionBusy" @click="clearSelection">
+    <n-space v-if="!loading && accounts.length > 0" align="center" :size="8" class="bulk-toolbar">
+      <n-text depth="3">已选 {{ selectedIds.length }} 个</n-text>
+      <n-button-group size="small">
+        <n-button :disabled="selectedIds.length === 0 || actionBusy" @click="batchCheckin(selectedIds)">签到选中</n-button>
+        <n-button :disabled="selectedIds.length === 0 || actionBusy" @click="bulkRefreshBalance">刷新余额</n-button>
+        <n-button :disabled="selectedIds.length === 0 || actionBusy" @click="bulkSetEnabled(true)">批量启用</n-button>
+        <n-button :disabled="selectedIds.length === 0 || actionBusy" @click="bulkSetEnabled(false)">批量禁用</n-button>
+      </n-button-group>
+      <n-button v-if="selectedIds.length > 0" size="small" text type="primary" :disabled="actionBusy" @click="clearSelection">
         清空选择
-      </button>
-    </div>
+      </n-button>
+    </n-space>
 
-    <div v-if="bulkProgress" class="progress-panel" role="status" aria-live="polite" aria-atomic="true">
+    <n-card v-if="bulkProgress" size="small" class="progress-panel" role="status" aria-live="polite">
       <div class="progress-meta">
         <strong>{{ bulkProgress.label }}</strong>
         <span>{{ bulkProgress.completed }} / {{ bulkProgress.total }}</span>
       </div>
-      <div class="progress-track" role="progressbar" :aria-label="bulkProgress.label" aria-valuemin="0" :aria-valuemax="bulkProgress.total" :aria-valuenow="bulkProgress.completed">
-        <span :style="{ '--progress-scale': String(progressPercent / 100) }"></span>
-      </div>
+      <n-progress type="line" :percentage="progressPercent" :height="8" :show-indicator="false" />
       <p v-if="bulkProgress.current" class="muted">当前：{{ bulkProgress.current }}</p>
-    </div>
+    </n-card>
 
-    <div v-if="bulkErrors.length > 0" class="error-panel" role="alert" aria-live="assertive">
-      <div class="error-panel-header">
-        <strong>失败摘要</strong>
-        <button @click="bulkErrors = []">清除</button>
-      </div>
-      <ul>
+    <n-alert
+      v-if="bulkErrors.length > 0"
+      type="error"
+      :show-icon="true"
+      closable
+      class="error-panel"
+      role="alert"
+      aria-live="assertive"
+      @close="bulkErrors = []"
+    >
+      <div class="error-panel-title">失败摘要</div>
+      <ul class="error-list">
         <li v-for="err in bulkErrors" :key="err">{{ err }}</li>
       </ul>
-    </div>
+    </n-alert>
 
-    <div v-if="lastBatchResult" class="batch-result" role="status" aria-live="polite">
-      <div class="batch-result-header">
-        <div>
+    <n-card v-if="lastBatchResult" size="small" class="batch-result" role="status" aria-live="polite">
+      <template #header>
+        <div class="batch-result-header">
           <strong>批量签到结果</strong>
-          <p class="muted">
+          <span class="muted">
             共 {{ lastBatchResult.total }} 个，成功 {{ lastBatchResult.succeeded }} 个，跳过 {{ lastBatchResult.skipped }} 个，失败 {{ lastBatchResult.failed }} 个
-          </p>
+          </span>
         </div>
-        <button @click="lastBatchResult = null">关闭</button>
-      </div>
-      <div class="batch-items">
-        <div v-for="item in lastBatchResult.items" :key="item.accountId" class="batch-item">
-          <span class="batch-name">{{ item.accountName }}</span>
-          <span class="status-pill" :class="batchStatusClass(item.status)">{{ batchStatusText(item.status) }}</span>
-          <span v-if="item.message" class="batch-message" :title="item.message">{{ item.message }}</span>
-        </div>
-      </div>
-    </div>
-
-    <p v-if="loading" class="empty" role="status" aria-live="polite">加载中...</p>
-
-    <div v-if="!loading" class="account-list">
-      <section v-for="group in groupedAccounts" :key="group.key" class="account-group">
-        <div class="group-header">
-          <h3>{{ group.label }}<span v-if="group.isSelf" class="self-tag">我</span></h3>
-          <span class="muted">{{ group.items.length }} 个账户</span>
-          <button
-            class="batch-btn"
-            :disabled="actionBusy"
-            @click="batchCheckin(group.items.map((a) => a.id))"
-          >
-            {{ batchLoading ? '执行中...' : '该组签到' }}
-          </button>
-        </div>
-
-        <article
-          v-for="account in group.items"
-          :key="account.id"
-          class="account-card"
-          :class="{ selected: selectedAccountIds.has(account.id), disabled: !account.enabled }"
-        >
-          <label class="card-select" :title="selectedAccountIds.has(account.id) ? '取消选择' : '选择账户'">
-            <input
-              type="checkbox"
-              :checked="selectedAccountIds.has(account.id)"
-              @change="toggleAccountSelection(account.id, $event)"
-            />
-          </label>
-
-          <div class="account-main">
-            <div class="title-row">
-              <strong>{{ account.name }}</strong>
-              <span class="site-tag">{{ account.siteType }}</span>
-              <span
-                class="status-pill"
-                :class="account.enabled ? accountStatusClass(account.lastStatus) : 'neutral'"
-              >
-                {{ account.enabled ? accountStatusText(account.lastStatus) : '已禁用' }}
-              </span>
-            </div>
-
-            <p class="meta-line">
-              <span>地址 <b>{{ account.baseUrl || '-' }}</b></span>
-              <span>认证 <b>{{ account.authType || '-' }}</b></span>
-              <span>余额 <b>{{ formatBalance(account.lastBalance) }}</b></span>
-              <span>今日 <b>{{ account.todayRuns ?? 0 }} 次</b></span>
-              <span>最近签到 <b>{{ formatDateTime(account.lastRunAt) }}</b></span>
-              <span v-if="account.ownerName">归属 <b>{{ account.ownerName }}</b></span>
-              <span v-if="account.lastBalanceAt">余额刷新 <b>{{ formatDateTime(account.lastBalanceAt) }}</b></span>
-            </p>
-
-            <p v-if="account.lastMessage" class="message" :title="account.lastMessage">
-              {{ account.lastMessage }}
-            </p>
-            <p v-if="account.note" class="note">备注：{{ account.note }}</p>
+      </template>
+      <template #header-extra>
+        <n-button size="tiny" text @click="lastBatchResult = null">关闭</n-button>
+      </template>
+      <n-list>
+        <n-list-item v-for="item in lastBatchResult.items" :key="item.accountId">
+          <div class="batch-item">
+            <span class="batch-name">{{ item.accountName }}</span>
+            <n-tag size="small" :bordered="false" :type="batchStatusTagType(item.status)">
+              {{ batchStatusText(item.status) }}
+            </n-tag>
+            <span v-if="item.message" class="batch-message muted" :title="item.message">{{ item.message }}</span>
           </div>
+        </n-list-item>
+      </n-list>
+    </n-card>
 
-          <div class="card-actions">
-            <button @click="refreshBalance(account.id)" :disabled="isAccountBusy(account.id)">
-              {{ isAccountProcessing(account.id) ? '处理中...' : '刷新余额' }}
-            </button>
-            <button @click="toggleAccountEnabled(account)" :disabled="isAccountBusy(account.id)">
-              {{ account.enabled ? '禁用' : '启用' }}
-            </button>
-            <button @click="openEdit(account)" :disabled="actionBusy">编辑</button>
-            <button class="danger" @click="deleteAccount(account.id)" :disabled="actionBusy">删除</button>
-          </div>
-        </article>
-      </section>
-      <p v-if="accounts.length === 0" class="empty" role="status">暂无账户，可使用右上角“新增账户”开始配置。</p>
-    </div>
+    <n-data-table
+      :columns="columns"
+      :data="accounts"
+      :loading="loading"
+      :row-key="rowKey"
+      :checked-row-keys="checkedRowKeys"
+      :scroll-x="1080"
+      class="accounts-table"
+      @update:checked-row-keys="onCheckedRowKeys"
+    >
+      <template #empty>暂无账户，可使用右上角「新增账户」开始配置。</template>
+    </n-data-table>
 
-    <Teleport to="body">
-      <div v-if="showForm" class="modal" role="presentation" @click.self="closeForm" @keydown.escape="closeForm">
-        <form v-focus-trap class="modal-content" role="dialog" aria-modal="true" aria-labelledby="account-form-title" tabindex="-1" @submit.prevent="submitForm">
-        <h3 id="account-form-title">{{ editingId ? '编辑账户' : '新增账户' }}</h3>
-        <label>名称<input v-model="form.name" required :aria-invalid="formSubmitted && Boolean(formErrors.name)" aria-describedby="account-form-error" /></label>
-        <label>站点类型
-          <select v-model="form.siteType" :disabled="Boolean(editingId)">
-            <option value="new-api">new-api</option>
-            <option value="anyrouter">anyrouter</option>
-            <option value="x666">x666</option>
-          </select>
-        </label>
-        <label>站点地址<input v-model="form.baseUrl" required :aria-invalid="formSubmitted && Boolean(formErrors.baseUrl)" aria-describedby="account-form-error" /></label>
-        <label v-if="formFields.userId">用户ID<input v-model="form.userId" /></label>
-        <label v-if="formFields.authType">认证方式
-          <select v-model="form.authType" :disabled="Boolean(editingId)">
-            <option value="access_token">access_token</option>
-            <option value="cookie">cookie</option>
-          </select>
-        </label>
-        <label v-if="formFields.accessToken">Access Token<input v-model="form.accessToken" type="password" autocomplete="new-password" :aria-invalid="formSubmitted && Boolean(formErrors.accessToken)" aria-describedby="account-form-error" /></label>
-        <label v-if="formFields.cookie">Cookie<textarea v-model="form.cookie" rows="3" :aria-invalid="formSubmitted && Boolean(formErrors.cookie)" aria-describedby="account-form-error"></textarea></label>
-        <label v-if="formFields.customCheckinUrl">
-          自定义签到 URL
-          <input v-model="form.customCheckinUrl" placeholder="/api/user/sign_in" />
-          <small class="field-hint">仅支持相对路径，或与站点地址协议、主机和端口完全一致的 URL。</small>
-        </label>
-        <label class="inline"><input v-model="form.enabled" type="checkbox" /> 启用</label>
-        <label class="inline"><input v-model="form.retryEnabled" type="checkbox" /> 允许重试</label>
-        <label>备注<input v-model="form.note" placeholder="可选，方便识别账户" /></label>
-        <div class="modal-actions">
-          <button class="primary" type="submit" :disabled="formSubmitting">
-            {{ formSubmitting ? '保存中...' : '保存' }}
-          </button>
-          <button type="button" @click="closeForm" :disabled="formSubmitting">取消</button>
-        </div>
-        <p id="account-form-error" class="field-error-slot" :class="{ 'is-empty': !formErrorMessage }" :role="formErrorMessage ? 'alert' : undefined">{{ formErrorMessage || '\u00a0' }}</p>
-        </form>
-      </div>
+    <!-- 账户表单弹窗 -->
+    <n-modal
+      v-model:show="showForm"
+      preset="card"
+      :title="editingId ? '编辑账户' : '新增账户'"
+      style="width: 520px; max-width: 92vw"
+      :mask-closable="!formSubmitting"
+    >
+      <n-form ref="accountFormRef" :model="form" :rules="accountFormRules" label-placement="top">
+        <n-form-item label="名称" path="name">
+          <n-input v-model:value="form.name" :disabled="formSubmitting" />
+        </n-form-item>
+        <n-form-item label="站点类型" path="siteType">
+          <n-select
+            v-model:value="form.siteType"
+            :options="siteTypeFormOptions"
+            :disabled="Boolean(editingId) || formSubmitting"
+          />
+        </n-form-item>
+        <n-form-item label="站点地址" path="baseUrl">
+          <n-input v-model:value="form.baseUrl" :disabled="formSubmitting" />
+        </n-form-item>
+        <n-form-item v-if="formFields.userId" label="用户ID" path="userId">
+          <n-input v-model:value="form.userId" :disabled="formSubmitting" />
+        </n-form-item>
+        <n-form-item v-if="formFields.authType" label="认证方式" path="authType">
+          <n-select
+            v-model:value="form.authType"
+            :options="authTypeOptions"
+            :disabled="Boolean(editingId) || formSubmitting"
+          />
+        </n-form-item>
+        <n-form-item v-if="formFields.accessToken" label="Access Token" path="accessToken">
+          <n-input
+            v-model:value="form.accessToken"
+            type="password"
+            show-password-on="click"
+            autocomplete="new-password"
+            :disabled="formSubmitting"
+          />
+        </n-form-item>
+        <n-form-item v-if="formFields.cookie" label="Cookie" path="cookie">
+          <n-input v-model:value="form.cookie" type="textarea" :rows="3" :disabled="formSubmitting" />
+        </n-form-item>
+        <n-form-item v-if="formFields.customCheckinUrl" label="自定义签到 URL" path="customCheckinUrl">
+          <n-input v-model:value="form.customCheckinUrl" placeholder="/api/user/sign_in" :disabled="formSubmitting" />
+          <template #feedback>仅支持相对路径，或与站点地址协议、主机和端口完全一致的 URL。</template>
+        </n-form-item>
+        <n-space :size="24">
+          <n-checkbox v-model:checked="form.enabled" :disabled="formSubmitting">启用</n-checkbox>
+          <n-checkbox v-model:checked="form.retryEnabled" :disabled="formSubmitting">允许重试</n-checkbox>
+        </n-space>
+        <n-form-item label="备注" path="note">
+          <n-input v-model:value="form.note" placeholder="可选，方便识别账户" :disabled="formSubmitting" />
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button :disabled="formSubmitting" @click="closeForm">取消</n-button>
+          <n-button type="primary" :loading="formSubmitting" @click="submitForm">
+            {{ formSubmitting ? '保存中…' : '保存' }}
+          </n-button>
+        </n-space>
+      </template>
+    </n-modal>
 
-      <div v-if="showImportDialog" class="modal" role="presentation" @click.self="closeImportDialog" @keydown.escape="closeImportDialog">
-        <div v-focus-trap class="modal-content" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title" tabindex="-1">
-        <h3 id="import-dialog-title">批量导入账户</h3>
-        <p class="muted">支持 CSV 格式，需包含 header 行</p>
-
-        <div class="import-instructions">
-          <h4>CSV 格式说明</h4>
-          <p>必填字段：name, siteType, baseUrl, authType</p>
-          <p>可选字段：userId, accessToken, cookie, customCheckinUrl, enabled, retryEnabled, note</p>
-          <details>
-            <summary>查看示例</summary>
-            <pre>name,siteType,baseUrl,authType,accessToken,cookie,enabled
+    <!-- 批量导入弹窗 -->
+    <n-modal
+      v-model:show="showImportDialog"
+      preset="card"
+      title="批量导入账户"
+      style="width: 560px; max-width: 92vw"
+      :mask-closable="!importing"
+    >
+      <p class="muted">支持 CSV 格式，需包含 header 行</p>
+      <n-alert type="info" :show-icon="true" class="import-instructions">
+        <div>必填字段：name, siteType, baseUrl, authType</div>
+        <div>可选字段：userId, accessToken, cookie, customCheckinUrl, enabled, retryEnabled, note</div>
+      </n-alert>
+      <n-collapse>
+        <n-collapse-item title="查看示例" name="sample">
+          <pre class="import-sample">name,siteType,baseUrl,authType,accessToken,cookie,enabled
 测试账户,new-api,https://api.example.com,access_token,sk-xxx,,true</pre>
-          </details>
-        </div>
-
-        <input
-          type="file"
-          accept=".csv"
-          aria-label="选择账户 CSV 文件"
-          @change="handleFileSelect"
-        />
-
-        <div v-if="importResult" class="import-result">
-          <p class="success" v-if="importResult.success > 0">成功导入 {{ importResult.success }} 个账户</p>
-          <p class="error" v-if="importResult.failed > 0">失败 {{ importResult.failed }} 个</p>
-          <div v-if="importResult.errors.length > 0" class="error-list">
-            <details>
-              <summary>查看错误详情</summary>
-              <ul>
-                <li v-for="(err, idx) in importResult.errors" :key="idx">{{ err }}</li>
-              </ul>
-            </details>
-          </div>
-        </div>
-
-        <div class="modal-actions">
-          <button type="button" @click="closeImportDialog" :disabled="importing">关闭</button>
-          <button type="button" class="primary" @click="executeImport" :disabled="!selectedFile || importing">
-            {{ importing ? '导入中...' : '开始导入' }}
-          </button>
-        </div>
-        </div>
+        </n-collapse-item>
+      </n-collapse>
+      <n-upload
+        :show-file-list="false"
+        :default-upload="false"
+        accept=".csv"
+        class="import-upload"
+        @change="handleFileSelect"
+      >
+        <n-button size="small">{{ selectedFile ? selectedFile.name : '选择 CSV 文件' }}</n-button>
+      </n-upload>
+      <div v-if="importResult" class="import-result">
+        <n-alert v-if="importResult.success > 0" type="success" :show-icon="true">
+          成功导入 {{ importResult.success }} 个账户
+        </n-alert>
+        <n-alert v-if="importResult.failed > 0" type="error" :show-icon="true" class="import-error">
+          失败 {{ importResult.failed }} 个
+        </n-alert>
+        <n-collapse v-if="importResult.errors.length > 0">
+          <n-collapse-item title="查看错误详情" name="errors">
+            <ul class="error-list">
+              <li v-for="(err, idx) in importResult.errors" :key="idx">{{ err }}</li>
+            </ul>
+          </n-collapse-item>
+        </n-collapse>
       </div>
-    </Teleport>
+      <template #footer>
+        <n-space justify="end">
+          <n-button :disabled="importing" @click="closeImportDialog">关闭</n-button>
+          <n-button type="primary" :loading="importing" :disabled="!selectedFile" @click="executeImport">
+            {{ importing ? '导入中…' : '开始导入' }}
+          </n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import {
+  NAlert,
+  NButton,
+  NButtonGroup,
+  NCard,
+  NCheckbox,
+  NCollapse,
+  NCollapseItem,
+  NDataTable,
+  NForm,
+  NFormItem,
+  NIcon,
+  NInput,
+  NList,
+  NListItem,
+  NModal,
+  NPopconfirm,
+  NProgress,
+  NSelect,
+  NSpace,
+  NTag,
+  NText,
+  NUpload,
+  useMessage,
+  useThemeVars,
+  type DataTableColumns,
+  type FormInst,
+  type FormRules,
+  type UploadFileInfo,
+} from 'naive-ui'
+import { AddOutline, CloudUploadOutline, DownloadOutline } from '@vicons/ionicons5'
 import { apiUrl, request, responseData } from '../utils/api'
-import { confirmAction, showToast } from '../utils/toast'
-import { vFocusTrap } from '../utils/dialogFocus'
 import { accountFormFields } from '../utils/accountForm'
-import type { CurrentUser, Account, AccountGroup } from '../types'
+import type { CurrentUser, Account } from '../types'
 import { useUsers } from '../composables/useUsers'
 
 interface BatchResultItem {
@@ -324,7 +320,10 @@ const props = defineProps<{
   isAdmin: boolean
 }>()
 
+const message = useMessage()
+const themeVars = useThemeVars()
 const { allUsers, usersLoading, loadUsers } = useUsers(() => props.isAdmin)
+
 const filterUserId = ref('')
 const filterSiteType = ref('')
 const filterEnabled = ref('')
@@ -340,9 +339,8 @@ const editingId = ref('')
 const batchLoading = ref(false)
 const bulkLoading = ref(false)
 const formSubmitting = ref(false)
-const formSubmitted = ref(false)
 const busyAccountIds = ref<Set<string>>(new Set())
-const selectedAccountIds = ref<Set<string>>(new Set())
+const checkedRowKeys = ref<string[]>([])
 const bulkProgress = ref<BulkProgress | null>(null)
 const bulkErrors = ref<string[]>([])
 const lastBatchResult = ref<BatchCheckinResult | null>(null)
@@ -356,12 +354,7 @@ const actionBusy = computed(() => (
 ))
 
 const visibleAccountIds = computed(() => accounts.value.map((account) => account.id))
-const selectedIds = computed(() => visibleAccountIds.value.filter((id) => selectedAccountIds.value.has(id)))
-const allVisibleSelected = computed(() => (
-  visibleAccountIds.value.length > 0
-  && visibleAccountIds.value.every((id) => selectedAccountIds.value.has(id))
-))
-const someVisibleSelected = computed(() => selectedIds.value.length > 0 && !allVisibleSelected.value)
+const selectedIds = computed(() => checkedRowKeys.value.filter((id) => visibleAccountIds.value.includes(id)))
 
 const listSummary = computed(() => {
   let enabled = 0
@@ -384,59 +377,46 @@ const hasActiveFilter = computed(() => {
   return !!(filterSiteType.value || filterEnabled.value || filterLastStatus.value || filterKeyword.value)
 })
 
-const groupedAccounts = computed<AccountGroup[]>(() => {
-  const groups = new Map<string, AccountGroup>()
-  for (const account of accounts.value) {
-    const key = account.ownerId || 'unknown'
-    if (!groups.has(key)) {
-      const label = account.ownerName || (account.ownerId ? `用户 ${account.ownerId.slice(0, 8)}` : '未知用户')
-      groups.set(key, {
-        key,
-        label,
-        isSelf: !!props.currentUser && account.ownerId === props.currentUser.id,
-        items: [],
-      })
-    }
-    groups.get(key)!.items.push(account)
-  }
-  return Array.from(groups.values()).sort((a, b) => {
-    if (a.isSelf !== b.isSelf) return a.isSelf ? -1 : 1
-    return a.label.localeCompare(b.label, 'zh-Hans')
-  })
-})
+const siteTypeOptions = [
+  { label: '全部类型', value: '' },
+  { label: 'new-api', value: 'new-api' },
+  { label: 'anyrouter', value: 'anyrouter' },
+  { label: 'x666', value: 'x666' },
+]
 
-const form = reactive({
-  name: '',
-  siteType: 'new-api',
-  baseUrl: '',
-  userId: '',
-  authType: 'access_token',
-  accessToken: '',
-  cookie: '',
-  customCheckinUrl: '',
-  enabled: true,
-  retryEnabled: true,
-  note: '',
-})
-const formFields = computed(() => accountFormFields(form.siteType, form.authType))
-const formErrors = computed(() => {
-  const errors: Record<string, string> = {}
-  if (!form.name.trim()) errors.name = '请输入账户名称。'
-  if (!form.baseUrl.trim()) {
-    errors.baseUrl = '请输入站点地址。'
-  } else {
-    try {
-      const url = new URL(form.baseUrl)
-      if (!['http:', 'https:'].includes(url.protocol)) errors.baseUrl = '站点地址必须使用 HTTP 或 HTTPS。'
-    } catch {
-      errors.baseUrl = '请输入有效的站点地址。'
-    }
+const siteTypeFormOptions = [
+  { label: 'new-api', value: 'new-api' },
+  { label: 'anyrouter', value: 'anyrouter' },
+  { label: 'x666', value: 'x666' },
+]
+
+const enabledOptions = [
+  { label: '全部状态', value: '' },
+  { label: '已启用', value: 'true' },
+  { label: '已禁用', value: 'false' },
+]
+
+const lastStatusOptions = [
+  { label: '全部签到状态', value: '' },
+  { label: '今日未签到', value: 'not_today' },
+  { label: '成功', value: 'success' },
+  { label: '失败', value: 'failed' },
+  { label: '今日已签', value: 'already_checked' },
+  { label: '从未签到', value: 'never' },
+]
+
+const authTypeOptions = [
+  { label: 'access_token', value: 'access_token' },
+  { label: 'cookie', value: 'cookie' },
+]
+
+const userFilterOptions = computed(() => {
+  const options = [{ label: '全部用户', value: '' }]
+  for (const user of allUsers.value) {
+    options.push({ label: user.username, value: user.id })
   }
-  if (!editingId.value && formFields.value.accessToken && !form.accessToken.trim()) errors.accessToken = '请输入 Access Token。'
-  if (!editingId.value && formFields.value.cookie && !form.cookie.trim()) errors.cookie = '请输入 Cookie。'
-  return errors
+  return options
 })
-const formErrorMessage = computed(() => formSubmitted.value ? Object.values(formErrors.value)[0] || '' : '')
 
 function formatBalance(value: number | string | null | undefined): string {
   if (value === null || value === undefined || value === '') return '未刷新'
@@ -467,10 +447,12 @@ function accountStatusText(status: string | null | undefined): string {
   return status ? (map[status] || status) : '未签到'
 }
 
-function accountStatusClass(status: string | null | undefined): string {
-  if (!status) return 'neutral'
-  if (status === 'already_checked') return 'already'
-  return status
+function statusTagType(status: string | null | undefined): 'default' | 'success' | 'error' | 'warning' {
+  if (!status) return 'default'
+  if (status === 'success' || status === 'already_checked') return 'success'
+  if (status === 'failed') return 'error'
+  if (status === 'pending') return 'warning'
+  return 'default'
 }
 
 function batchStatusText(status: string): string {
@@ -484,10 +466,11 @@ function batchStatusText(status: string): string {
   return map[status] || status
 }
 
-function batchStatusClass(status: string): string {
-  if (status === 'already_checked') return 'already'
-  if (status === 'skipped') return 'neutral'
-  return status
+function batchStatusTagType(status: string): 'default' | 'success' | 'error' | 'warning' {
+  if (status === 'success' || status === 'already_checked') return 'success'
+  if (status === 'failed') return 'error'
+  if (status === 'pending') return 'warning'
+  return 'default'
 }
 
 function clearFilters() {
@@ -499,35 +482,19 @@ function clearFilters() {
 
 function pruneSelection() {
   const visible = new Set(visibleAccountIds.value)
-  selectedAccountIds.value = new Set([...selectedAccountIds.value].filter((id) => visible.has(id)))
-}
-
-function toggleAccountSelection(id: string, event: Event) {
-  const checked = (event.target as HTMLInputElement).checked
-  const next = new Set(selectedAccountIds.value)
-  if (checked) {
-    next.add(id)
-  } else {
-    next.delete(id)
-  }
-  selectedAccountIds.value = next
-}
-
-function toggleSelectAllVisible(event: Event) {
-  const checked = (event.target as HTMLInputElement).checked
-  const next = new Set(selectedAccountIds.value)
-  for (const id of visibleAccountIds.value) {
-    if (checked) {
-      next.add(id)
-    } else {
-      next.delete(id)
-    }
-  }
-  selectedAccountIds.value = next
+  checkedRowKeys.value = checkedRowKeys.value.filter((id) => visible.has(id))
 }
 
 function clearSelection() {
-  selectedAccountIds.value = new Set()
+  checkedRowKeys.value = []
+}
+
+function onCheckedRowKeys(keys: Array<string | number>) {
+  checkedRowKeys.value = keys.map(String)
+}
+
+function rowKey(row: Account): string {
+  return row.id
 }
 
 function setAccountBusy(id: string, busy: boolean) {
@@ -548,9 +515,122 @@ function isAccountProcessing(id: string): boolean {
   return busyAccountIds.value.has(id)
 }
 
-function resetForm() {
-  formSubmitted.value = false
-  Object.assign(form, {
+const columns = computed<DataTableColumns<Account>>(() => {
+  // 显式读取这些响应式状态，保证操作中表格自动重渲染
+  const busy = busyAccountIds.value
+  const busyGlobal = actionBusy.value
+  void busy
+  void busyGlobal
+  void accounts.value
+
+  return [
+    { type: 'selection' },
+    {
+      title: '名称',
+      key: 'name',
+      render: (row) =>
+        h('div', { class: 'account-name-cell' }, [
+          h('span', { class: 'account-name' }, row.name),
+          row.siteType ? h(NTag, { size: 'small', bordered: false }, { default: () => row.siteType }) : null,
+          h('span', { class: 'account-base muted', title: row.baseUrl || '' }, row.baseUrl || '无地址'),
+        ]),
+    },
+    {
+      title: '状态',
+      key: 'lastStatus',
+      width: 110,
+      render: (row) => {
+        if (!row.enabled) {
+          return h(NTag, { size: 'small', bordered: false, type: 'default' }, { default: () => '已禁用' })
+        }
+        return h(
+          NTag,
+          { size: 'small', bordered: false, type: statusTagType(row.lastStatus) },
+          { default: () => accountStatusText(row.lastStatus) },
+        )
+      },
+    },
+    { title: '余额', key: 'lastBalance', width: 90, render: (row) => formatBalance(row.lastBalance) },
+    { title: '今日', key: 'todayRuns', width: 80, render: (row) => `${row.todayRuns ?? 0} 次` },
+    { title: '最近签到', key: 'lastRunAt', width: 130, render: (row) => formatDateTime(row.lastRunAt) },
+    {
+      title: '最近消息',
+      key: 'lastMessage',
+      ellipsis: { tooltip: true },
+      render: (row) => {
+        if (row.lastMessage) return row.lastMessage
+        return row.note ? `备注：${row.note}` : '—'
+      },
+    },
+    ...(props.isAdmin
+      ? [{ title: '归属', key: 'ownerName', width: 110, render: (row: Account) => row.ownerName || '—' }]
+      : []),
+    {
+      title: '操作',
+      key: 'actions',
+      width: 300,
+      render: (row) =>
+        h(NSpace, { size: 4 }, {
+          default: () => [
+            h(
+              NButton,
+              {
+                size: 'tiny',
+                secondary: true,
+                loading: isAccountProcessing(row.id),
+                disabled: isAccountBusy(row.id),
+                onClick: () => refreshBalance(row.id),
+              },
+              { default: () => '刷新余额' },
+            ),
+            h(
+              NButton,
+              {
+                size: 'tiny',
+                tertiary: true,
+                disabled: isAccountBusy(row.id),
+                onClick: () => toggleAccountEnabled(row),
+              },
+              { default: () => (row.enabled ? '禁用' : '启用') },
+            ),
+            h(
+              NButton,
+              {
+                size: 'tiny',
+                tertiary: true,
+                disabled: busyGlobal || busy.size > 0,
+                onClick: () => openEdit(row),
+              },
+              { default: () => '编辑' },
+            ),
+            h(
+              NPopconfirm,
+              {
+                onPositiveClick: () => deleteAccount(row.id),
+              },
+              {
+                trigger: () =>
+                  h(
+                    NButton,
+                    {
+                      size: 'tiny',
+                      tertiary: true,
+                      type: 'error',
+                      disabled: busyGlobal || busy.size > 0,
+                    },
+                    { default: () => '删除' },
+                  ),
+                default: () => '确定要删除此账户吗？',
+              },
+            ),
+          ],
+        }),
+    },
+  ]
+})
+
+function emptyForm() {
+  return {
     name: '',
     siteType: 'new-api',
     baseUrl: '',
@@ -562,7 +642,43 @@ function resetForm() {
     enabled: true,
     retryEnabled: true,
     note: '',
-  })
+  }
+}
+
+const form = reactive(emptyForm())
+const accountFormRef = ref<FormInst | null>(null)
+const formFields = computed(() => accountFormFields(form.siteType, form.authType))
+
+const accountFormRules = computed<FormRules>(() => {
+  const rules: FormRules = {
+    name: { required: true, message: '请输入账户名称。', trigger: ['blur', 'input'] },
+    baseUrl: {
+      required: true,
+      message: '请输入站点地址。',
+      trigger: ['blur', 'input'],
+      validator: (_rule, value: string) => {
+        if (!value) return new Error('请输入站点地址。')
+        try {
+          const url = new URL(value)
+          if (!['http:', 'https:'].includes(url.protocol)) return new Error('站点地址必须使用 HTTP 或 HTTPS。')
+        } catch {
+          return new Error('请输入有效的站点地址。')
+        }
+        return true
+      },
+    },
+  }
+  if (!editingId.value && formFields.value.accessToken) {
+    rules.accessToken = { required: true, message: '请输入 Access Token。', trigger: ['blur', 'input'] }
+  }
+  if (!editingId.value && formFields.value.cookie) {
+    rules.cookie = { required: true, message: '请输入 Cookie。', trigger: ['blur', 'input'] }
+  }
+  return rules
+})
+
+function resetForm() {
+  Object.assign(form, emptyForm())
 }
 
 async function loadAccounts() {
@@ -588,7 +704,7 @@ async function loadAccounts() {
     }
   } catch (error) {
     if (seq === accountRequestSeq) {
-      showToast(error instanceof Error ? error.message : '加载账户失败', 'error')
+      message.error(error instanceof Error ? error.message : '加载账户失败')
     }
   } finally {
     if (seq === accountRequestSeq) {
@@ -626,12 +742,12 @@ async function batchCheckin(accountIds: readonly string[]) {
       current: '已完成',
     }
     if (result.failed > 0) {
-      showToast(`批量签到有 ${result.failed} 个账户失败`, 'error')
+      message.error(`批量签到有 ${result.failed} 个账户失败`)
     }
     await loadAccounts()
   } catch (error) {
     bulkErrors.value = [error instanceof Error ? error.message : '批量签到失败']
-    showToast(bulkErrors.value[0], 'error')
+    message.error(bulkErrors.value[0])
   } finally {
     batchLoading.value = false
   }
@@ -669,8 +785,11 @@ function closeForm() {
 
 async function submitForm() {
   if (formSubmitting.value) return
-  formSubmitted.value = true
-  if (Object.keys(formErrors.value).length > 0) return
+  try {
+    await accountFormRef.value?.validate()
+  } catch {
+    return
+  }
   formSubmitting.value = true
   const optionalString = (value: string) => {
     const trimmed = value.trim()
@@ -703,22 +822,19 @@ async function submitForm() {
     editingId.value = ''
     await loadAccounts()
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '保存失败', 'error')
+    message.error(error instanceof Error ? error.message : '保存失败')
   } finally {
     formSubmitting.value = false
   }
 }
 
 async function deleteAccount(id: string) {
-  if (!(await confirmAction('确定要删除此账户吗？'))) return
   try {
     await request(apiUrl(`/accounts/${id}`), { method: 'DELETE' })
-    const next = new Set(selectedAccountIds.value)
-    next.delete(id)
-    selectedAccountIds.value = next
+    checkedRowKeys.value = checkedRowKeys.value.filter((key) => key !== id)
     await loadAccounts()
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '删除失败', 'error')
+    message.error(error instanceof Error ? error.message : '删除失败')
   }
 }
 
@@ -729,7 +845,7 @@ async function refreshBalance(id: string) {
     await request(apiUrl(`/accounts/${id}/refresh-balance`), { method: 'POST' })
     await loadAccounts()
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '刷新余额失败', 'error')
+    message.error(error instanceof Error ? error.message : '刷新余额失败')
   } finally {
     setAccountBusy(id, false)
   }
@@ -752,7 +868,7 @@ async function toggleAccountEnabled(account: Account) {
     await updateAccountEnabled(account.id, nextEnabled)
     await loadAccounts()
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '更新账户状态失败', 'error')
+    message.error(error instanceof Error ? error.message : '更新账户状态失败')
   } finally {
     setAccountBusy(account.id, false)
   }
@@ -782,8 +898,8 @@ async function bulkRefreshBalance() {
         succeeded += 1
       } catch (error) {
         failed += 1
-        const message = error instanceof Error ? error.message : '刷新失败'
-        bulkErrors.value.push(`${account?.name || id}：${message}`)
+        const err = error instanceof Error ? error.message : '刷新失败'
+        bulkErrors.value.push(`${account?.name || id}：${err}`)
       } finally {
         setAccountBusy(id, false)
       }
@@ -795,7 +911,7 @@ async function bulkRefreshBalance() {
       current: '已完成',
     }
     if (failed > 0) {
-      showToast(`余额刷新有 ${failed} 个账户失败，成功 ${succeeded} 个`, 'error')
+      message.error(`余额刷新有 ${failed} 个账户失败，成功 ${succeeded} 个`)
     }
     await loadAccounts()
   } finally {
@@ -828,8 +944,8 @@ async function bulkSetEnabled(enabled: boolean) {
         succeeded += 1
       } catch (error) {
         failed += 1
-        const message = error instanceof Error ? error.message : `${verb}失败`
-        bulkErrors.value.push(`${account?.name || id}：${message}`)
+        const err = error instanceof Error ? error.message : `${verb}失败`
+        bulkErrors.value.push(`${account?.name || id}：${err}`)
       } finally {
         setAccountBusy(id, false)
       }
@@ -841,7 +957,7 @@ async function bulkSetEnabled(enabled: boolean) {
       current: '已完成',
     }
     if (failed > 0) {
-      showToast(`${verb}操作有 ${failed} 个账户失败，成功 ${succeeded} 个`, 'error')
+      message.error(`${verb}操作有 ${failed} 个账户失败，成功 ${succeeded} 个`)
     }
     await loadAccounts()
   } finally {
@@ -871,10 +987,10 @@ function closeImportDialog() {
   selectedFile.value = null
 }
 
-function handleFileSelect(event: Event) {
-  const target = event.target as HTMLInputElement
-  if (target.files && target.files.length > 0) {
-    selectedFile.value = target.files[0]
+function handleFileSelect(data: { file: UploadFileInfo }) {
+  const raw = data.file.file
+  if (raw) {
+    selectedFile.value = raw
     importResult.value = null
   }
 }
@@ -900,10 +1016,10 @@ async function executeImport() {
     if (importResult.value.success > 0) await loadAccounts()
 
     if (importResult.value.failed > 0) {
-      showToast(`${importResult.value.failed} 个账户导入失败`, 'error')
+      message.error(`${importResult.value.failed} 个账户导入失败`)
     }
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '导入失败', 'error')
+    message.error(error instanceof Error ? error.message : '导入失败')
   } finally {
     importing.value = false
   }
@@ -923,9 +1039,9 @@ async function exportAccounts() {
     document.body.removeChild(a)
     window.URL.revokeObjectURL(url)
 
-    showToast('导出成功', 'success')
+    message.success('导出成功')
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '导出失败', 'error')
+    message.error(error instanceof Error ? error.message : '导出失败')
   }
 }
 
@@ -948,4 +1064,139 @@ onUnmounted(() => {
 })
 </script>
 
-<style scoped src="./AccountPanel.css"></style>
+<style scoped>
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.panel-subtitle {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.filter-bar {
+  margin-bottom: 12px;
+}
+
+.bulk-toolbar {
+  margin-bottom: 12px;
+}
+
+.progress-panel {
+  margin-bottom: 12px;
+}
+
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.error-panel {
+  margin-bottom: 12px;
+}
+
+.error-panel-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.error-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.batch-result {
+  margin-bottom: 12px;
+}
+
+.batch-result-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.batch-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.batch-name {
+  font-weight: 500;
+  flex: none;
+}
+
+.batch-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounts-table {
+  margin-top: 4px;
+}
+
+.account-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.account-name {
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.account-base {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.import-instructions {
+  margin-bottom: 10px;
+}
+
+.import-sample {
+  margin: 0;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.import-upload {
+  margin: 12px 0;
+}
+
+.import-error {
+  margin-top: 8px;
+}
+
+.muted {
+  color: v-bind('themeVars.textColor3');
+}
+
+.error-list li {
+  font-size: 13px;
+}
+</style>
