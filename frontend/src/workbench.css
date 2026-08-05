@@ -855,13 +855,19 @@ a:focus-visible {
   color: var(--color-danger);
 }
 
-.panel-region .modal {
+/* modal 外框属于 app-shell 共享皮肤（design.md CSS ownership）：全局选择器，
+   保证 <Teleport to="body"> 后仍命中；position:fixed + inset:0 覆盖视口,
+   z-index 与 tokens 层级一致。 */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
   display: grid;
   place-items: center;
   background: var(--color-overlay);
 }
 
-.panel-region .modal-content {
+.modal-content {
   width: min(36rem, calc(100% - 2rem));
   max-height: min(80dvh, 44rem);
   overflow: auto;

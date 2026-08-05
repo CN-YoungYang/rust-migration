@@ -1,6 +1,6 @@
 <template>
   <div class="checkin-runs-panel">
-    <div class="header">
+    <div class="panel-header">
       <div>
         <h2>签到记录</h2>
         <p class="panel-subtitle">

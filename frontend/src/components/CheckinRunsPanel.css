@@ -76,7 +76,7 @@
 .summary-strip dd {
   margin: 0;
   color: var(--color-ink);
-  font: 700 var(--text-xl) / 1.15 var(--font-body);
+  font: 700 clamp(var(--text-xl), 3vw, calc(var(--text-xl) + var(--text-sm))) / 1.15 var(--font-body);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.03em;
   overflow-wrap: anywhere;

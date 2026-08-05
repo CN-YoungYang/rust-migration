@@ -213,8 +213,7 @@ button.primary:focus-visible,
 
 /* The workspace shell owns the visible page title; panel titles stay available
    to assistive technology without creating a duplicate heading. */
-.panel-region .panel-header > div:first-child > h2,
-.panel-region .header > div:first-child > h2 {
+.panel-region .panel-header > div:first-child > h2 {
   position: absolute;
   width: 1px;
   height: 1px;
