@@ -38,6 +38,7 @@
 
 ### 修复
 
+- **HTML 错误页消息降噪并带出错误原因**：三个 provider（new-api / anyrouter / x666）遇到 HTML 响应（如 Cloudflare 504 错误页）时不再把整页写入 message，统一经共享 `looks_like_html` / `extract_html_title` 助手提取 `<title>`（如 `站点返回错误页：504: Gateway time-out`），无 `<title>` 时落到 `签到请求失败：HTTP {status}` 通用文案；顺带覆盖"2xx + HTML 错误页"（部分站点把错误也返回 200）的隐性场景。此前 anyrouter 在 JSON 解析失败时会把整段 HTML 原文写入签到记录 `message`，导致失败摘要出现整页源码。
 - **new-api 成功判定回归修复**：`success` 字段显式 `false` 时不再被 `code=200` 兜底覆盖为成功；`code` 兜底扩展为 `0`（微信/钉钉风格）/`200`（HTTP 风格）两种成功码，并用宽松类型承接字符串/浮点写法（`"200"`、`200.0`），避免字段类型不合导致整条响应解析失败。
 - **SSRF 执行期复核按真实失败处理**：签到前 SSRF 复核未通过时，现在更新账户 `lastStatus/lastRunAt`、失败计数并触发通知，与 provider 报错路径一致；此前只写 failed 记录不更新账户状态，导致 `lastRunAt` 停在昨日、关闭重试的账户每轮调度反复尝试。
 - **签到记录日期筛选回归修复**：前端把 `type=date` 选择的日期转成浏览器本地时区日界的 RFC3339 时刻发送，后端对含 `T` 的时间戳原样透传；此前裸 `YYYY-MM-DD` 被后端按服务器时区解释，浏览器与服务器时区不一致时筛错日期。

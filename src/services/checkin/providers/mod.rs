@@ -87,6 +87,27 @@ pub fn read_error_message(payload: Option<&serde_json::Value>) -> Option<String>
         .map(|s| s.to_string())
 }
 
+/// 判断响应文本是否为 HTML 页面（非 JSON），避免把整页当消息或参与关键词判定（M11）
+pub(crate) fn looks_like_html(text: &str) -> bool {
+    text.trim_start().starts_with('<')
+}
+
+/// 从 HTML 错误页提取 `<title>` 文本（trim 后），用于把错误原因带进消息，
+/// 如 Cloudflare 504 页的 "504: Gateway time-out"。提取不到返回 None。
+/// 只读 ASCII 边界（`<title...>` 与 `</title` 均为单字节字符），故字节切片安全。
+pub(crate) fn extract_html_title(text: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let title_start = lower.find("<title")?;
+    let content_start = lower[title_start..].find('>')? + title_start + 1;
+    let content_end = lower[content_start..].find("</title")? + content_start;
+    let title = text[content_start..content_end].trim();
+    if title.is_empty() {
+        None
+    } else {
+        Some(title.to_string())
+    }
+}
+
 /// One API / New API 系列标准换算：500000 quota = 1 美元
 /// 与 Next.js 版本 (QUOTA_PER_USD = 500000) 保持一致
 const QUOTA_PER_USD: f64 = 500_000.0;
@@ -202,5 +223,48 @@ mod tests {
         assert!(!resolve_checkin_success(
             &serde_json::from_str(r#"{"success":false,"code":0}"#).unwrap()
         ));
+    }
+
+    #[test]
+    fn looks_like_html_detects_pages() {
+        assert!(looks_like_html("<!DOCTYPE html>\n<html>"));
+        assert!(looks_like_html("<html><body>acw_sc__v2</body></html>"));
+        assert!(!looks_like_html("{\"success\":true}"));
+        assert!(!looks_like_html("plain text"));
+        assert!(!looks_like_html(""));
+    }
+
+    #[test]
+    fn extract_html_title_reads_cloudflare_error_page() {
+        let html = "<!DOCTYPE html><html><head><title>56321654.xyz | 504: Gateway time-out</title></head></html>";
+        assert_eq!(
+            extract_html_title(html),
+            Some("56321654.xyz | 504: Gateway time-out".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_html_title_handles_attributes_case_and_whitespace() {
+        assert_eq!(
+            extract_html_title(
+                "<html><head><TITLE class=\"x\">  Bad Gateway  </TITLE></head></html>"
+            ),
+            Some("Bad Gateway".to_string())
+        );
+        assert_eq!(
+            extract_html_title("<title>\n  504: Gateway time-out\n</title>"),
+            Some("504: Gateway time-out".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_html_title_returns_none_for_non_html_or_missing() {
+        assert_eq!(extract_html_title("{\"success\":true}"), None);
+        assert_eq!(
+            extract_html_title("<html><body>no title</body></html>"),
+            None
+        );
+        assert_eq!(extract_html_title("<title></title>"), None);
+        assert_eq!(extract_html_title(""), None);
     }
 }

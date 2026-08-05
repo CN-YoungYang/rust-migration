@@ -56,7 +56,7 @@
 - POST `https://up.x666.me/api/checkin/spin` + Cookie
 - 设置 Origin 和 Referer headers
 - 优先检测"已签到"关键词（`今日已签`/`已签到`/`already`）
-- JSON 解析失败时使用原始响应文本
+- JSON 解析失败时使用原始响应文本；HTML 页面（如 Cloudflare 504）提取 `<title>` 带出错误原因（`站点返回错误页：504: Gateway time-out`），无 `<title>` 时落到 `签到请求失败：HTTP {status}`
 - **本次获得额度**：解析 `data.quota` / `quota`，拼入消息「本次获得额度：xxx quota（约 $x.xx）」
 
 **余额查询**
@@ -80,7 +80,7 @@
 
 所有 provider 统一的容错策略：
 
-1. **JSON 解析失败** → 将原始响应文本作为消息使用
+1. **JSON 解析失败** → 非 HTML 时使用原始响应文本；HTML 页面（如 Cloudflare 504 错误页）提取 `<title>` 带出错误原因（`站点返回错误页：504: Gateway time-out`），无 `<title>` 时落到 `签到请求失败：HTTP {status}`（避免整页 HTML 入库）
 2. **HTTP 非 2xx** → 先检查是否"已签到"，再判定失败
 3. **空消息** → 使用默认消息（arrouter 空消息视为已签到）
 4. **HTML 404** → 不再导致 500 错误，正确识别为失败

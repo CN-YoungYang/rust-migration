@@ -1,7 +1,7 @@
 use super::super::{http_client, BrowserProfile};
 use super::{
-    classify_checkin_status, format_awarded_quota, is_already_checked_message, read_error_message,
-    read_number, resolve_checkin_success, CheckinResponse,
+    classify_checkin_status, extract_html_title, format_awarded_quota, is_already_checked_message,
+    read_error_message, read_number, resolve_checkin_success, CheckinResponse,
 };
 use crate::error::Result;
 
@@ -80,10 +80,12 @@ pub async fn checkin(
     if !status_code.is_success() {
         // 非 2xx 也可能表达"已签到"语义（如 HTTP 400 + `{message:"今日已签"}`），
         // 命中关键词时升级为 already_checked，避免把已签账户按失败重试（L9）。
-        // 只对 JSON 解析出的 message 做关键词判定，不匹配整段原始响应（M11）。
+        // 只对 JSON 解析出的 message 做关键词判定，不匹配整段原始响应（M11）；
+        // HTML 错误页（如 Cloudflare 504）提取 <title> 带出错误原因。
         let msg = serde_json::from_str::<CheckinResponse>(&text)
             .ok()
             .and_then(|p| p.message)
+            .or_else(|| extract_html_title(&text).map(|t| format!("站点返回错误页：{}", t)))
             .unwrap_or_default();
         let (status, message) = if is_already_checked_message(&msg) {
             ("already_checked", msg)
@@ -95,10 +97,14 @@ pub async fn checkin(
         return Ok((status.to_string(), message, Some(text)));
     }
 
-    let parsed: CheckinResponse = serde_json::from_str(&text).unwrap_or(CheckinResponse {
+    let parsed: CheckinResponse = serde_json::from_str(&text).unwrap_or_else(|_| CheckinResponse {
         success: None,
         code: None,
-        message: Some("响应解析失败".into()),
+        // 2xx + HTML（部分站点把错误也返回 200）时提取 <title> 带出错误原因，
+        // 提取不到才落到通用"响应解析失败"。
+        message: extract_html_title(&text)
+            .map(|t| format!("站点返回错误页：{}", t))
+            .or_else(|| Some("响应解析失败".into())),
         data: None,
     });
 

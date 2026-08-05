@@ -1,5 +1,5 @@
 use super::super::{http_client, resolve_checkin_url, BrowserProfile};
-use super::{read_error_message, read_number};
+use super::{extract_html_title, looks_like_html, read_error_message, read_number};
 use crate::error::Result;
 
 const DEFAULT_CHECKIN_PATH: &str = "/api/user/sign_in";
@@ -37,11 +37,6 @@ fn is_already_checked_message(message: &str) -> bool {
 fn is_success_message(message: &str) -> bool {
     let lower = message.to_lowercase();
     lower.contains("success") || message.contains("签到成功")
-}
-
-/// 判断响应文本是否为 HTML 页面（非 JSON），避免把整页当消息或参与关键词判定（M11）
-fn looks_like_html(text: &str) -> bool {
-    text.trim_start().starts_with('<')
 }
 
 fn is_challenge_page(response_text: &str, content_type: Option<&str>) -> bool {
@@ -224,12 +219,15 @@ pub async fn checkin(
     }
 
     // 尝试解析 JSON，如果失败则将原始文本作为 message；
-    // HTML 页面（如反爬挑战页）不作为消息，也不参与关键词判定（M11）
+    // HTML 页面（如反爬挑战页）不作为消息，也不参与关键词判定（M11）；
+    // HTML 错误页则提取 <title> 带出错误原因，如 "站点返回错误页：504: Gateway time-out"。
     let payload: Option<serde_json::Value> = serde_json::from_str(&text).ok();
     let response_message = if let Some(ref p) = payload {
         read_message(Some(p))
     } else if looks_like_html(&text) {
-        String::new()
+        extract_html_title(&text)
+            .map(|t| format!("站点返回错误页：{}", t))
+            .unwrap_or_default()
     } else {
         text.clone()
     };

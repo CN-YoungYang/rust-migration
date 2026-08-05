@@ -1,5 +1,8 @@
 use super::super::{http_client, resolve_checkin_url, BrowserProfile};
-use super::{format_awarded_quota, is_already_checked_message, read_number};
+use super::{
+    extract_html_title, format_awarded_quota, is_already_checked_message, looks_like_html,
+    read_number,
+};
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 
@@ -16,11 +19,6 @@ pub struct X666Response {
 const DEFAULT_CHECKIN_PATH: &str = "/api/checkin/spin";
 const DEFAULT_BALANCE_PATH: &str = "/api/checkin/status";
 const DEFAULT_BASE_URL: &str = "https://up.x666.me";
-
-/// 判断响应文本是否为 HTML 页面（非 JSON），避免把整页当消息或参与关键词判定（M11）
-fn looks_like_html(text: &str) -> bool {
-    text.trim_start().starts_with('<')
-}
 
 fn join_url(base_url: &str, path: &str) -> String {
     if path.starts_with("http://") || path.starts_with("https://") {
@@ -100,7 +98,8 @@ pub async fn checkin(
     let payload: Option<X666Response> = serde_json::from_str(&text).ok();
 
     // 提取站点消息：优先 JSON 的 message/error 字段；JSON 解析失败或字段为空时，
-    // 仅当文本不是 HTML 页面才回退为原始文本（避免把整页 HTML 当消息，M11）。
+    // 仅当文本不是 HTML 页面才回退为原始文本（避免把整页 HTML 当消息，M11）；
+    // HTML 错误页则提取 <title> 带出错误原因，如 "站点返回错误页：504: Gateway time-out"。
     let response_msg = if let Some(ref p) = payload {
         let msg = normalize_message(p.message.as_ref().or(p.error.as_ref()));
         if msg.is_empty() && !looks_like_html(&text) {
@@ -109,7 +108,9 @@ pub async fn checkin(
             msg
         }
     } else if looks_like_html(&text) {
-        String::new()
+        extract_html_title(&text)
+            .map(|t| format!("站点返回错误页：{}", t))
+            .unwrap_or_default()
     } else {
         text.clone()
     };
@@ -145,7 +146,11 @@ pub async fn checkin(
     // 默认失败
     Ok((
         "failed".to_string(),
-        format!("签到失败：{}", response_msg),
+        if response_msg.is_empty() {
+            "签到失败：站点未返回成功状态".to_string()
+        } else {
+            format!("签到失败：{}", response_msg)
+        },
         Some(text),
     ))
 }
