@@ -156,6 +156,7 @@ import {
   type DataTableColumns,
 } from 'naive-ui'
 import { apiUrl, request, responseData } from '../utils/api'
+import { formatDateTime } from '../utils/format'
 import type { CurrentUser } from '../types'
 
 interface User {
@@ -242,18 +243,6 @@ function roleTagType(role: string): 'default' | 'info' | 'warning' {
   if (role === 'SUPER_ADMIN') return 'warning'
   if (role === 'ADMIN') return 'info'
   return 'default'
-}
-
-const formatDateTime = (value: string | null | undefined) => {
-  if (!value) return '无记录'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '无记录'
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 const userColumns = computed<DataTableColumns<User>>(() => {

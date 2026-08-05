@@ -186,7 +186,7 @@
                 <p class="failure-message" :title="failure.message || ''">
                   {{ failure.message || '无错误消息' }}
                 </p>
-                <p class="muted failure-time">{{ formatDateTime(failure.createdAt) }}</p>
+                <p class="muted failure-time">{{ formatDateTimeFull(failure.createdAt) }}</p>
               </div>
               <n-button size="small" secondary @click="copyFailureSummary(failure)">复制摘要</n-button>
             </div>
@@ -224,6 +224,8 @@ import {
   type DataTableColumns,
 } from 'naive-ui'
 import { apiUrl, request, responseData } from '../utils/api'
+import { formatDateTimeFull, formatDateInput } from '../utils/format'
+import { copyText } from '../utils/clipboard'
 import type { CurrentUser } from '../types'
 import { useUsers } from '../composables/useUsers'
 
@@ -437,13 +439,6 @@ function inclusiveDayCount(start: string, end: string): number {
   return Math.round((endDateTime.getTime() - startDateTime.getTime()) / 86400000) + 1
 }
 
-function formatDateInput(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
 function formatDate(dateStr: string): string {
   const [year, month, day] = dateStr.split('-')
   const crossesYear = appliedQuery.value.startDate.slice(0, 4) !== appliedQuery.value.endDate.slice(0, 4)
@@ -558,34 +553,17 @@ async function loadStatistics() {
   }
 }
 
-function formatDateTime(time: string): string {
-  const date = new Date(time)
-  if (Number.isNaN(date.getTime())) return '无效时间'
-  return date.toLocaleString('zh-CN')
-}
-
 async function copyFailureSummary(failure: Statistics['recentFailures'][number]) {
   const summary = [
     `账户: ${failure.accountName}`,
     `站点: ${failure.siteType}`,
     `归属: ${failure.ownerName || '-'}`,
-    `时间: ${formatDateTime(failure.createdAt)}`,
+    `时间: ${formatDateTimeFull(failure.createdAt)}`,
     `消息: ${failure.message || '-'}`,
   ].join('\n')
 
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(summary)
-    } else {
-      const textarea = document.createElement('textarea')
-      textarea.value = summary
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
+    await copyText(summary)
     message.success('失败摘要已复制')
   } catch {
     message.error('复制失败，请手动选择消息内容')

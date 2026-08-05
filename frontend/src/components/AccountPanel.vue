@@ -112,8 +112,8 @@
         <n-list-item v-for="item in lastBatchResult.items" :key="item.accountId">
           <div class="batch-item">
             <span class="batch-name">{{ item.accountName }}</span>
-            <n-tag size="small" :bordered="false" :type="batchStatusTagType(item.status)">
-              {{ batchStatusText(item.status) }}
+            <n-tag size="small" :bordered="false" :type="checkinStatusTagType(item.status)">
+              {{ checkinStatusText(item.status) }}
             </n-tag>
             <span v-if="item.message" class="batch-message muted" :title="item.message">{{ item.message }}</span>
           </div>
@@ -290,6 +290,8 @@ import {
 import { AddOutline, CloudUploadOutline, DownloadOutline } from '@vicons/ionicons5'
 import { apiUrl, request, responseData } from '../utils/api'
 import { accountFormFields } from '../utils/accountForm'
+import { formatDateTime } from '../utils/format'
+import { checkinStatusText, checkinStatusTagType } from '../utils/checkinStatus'
 import type { CurrentUser, Account } from '../types'
 import { useUsers } from '../composables/useUsers'
 
@@ -425,54 +427,6 @@ function formatBalance(value: number | string | null | undefined): string {
   return `$${(quota / QUOTA_PER_USD).toFixed(2)}`
 }
 
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return '无记录'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '无记录'
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function accountStatusText(status: string | null | undefined): string {
-  const map: Record<string, string> = {
-    success: '成功',
-    failed: '失败',
-    already_checked: '今日已签',
-    pending: '进行中',
-  }
-  return status ? (map[status] || status) : '未签到'
-}
-
-function statusTagType(status: string | null | undefined): 'default' | 'success' | 'error' | 'warning' {
-  if (!status) return 'default'
-  if (status === 'success' || status === 'already_checked') return 'success'
-  if (status === 'failed') return 'error'
-  if (status === 'pending') return 'warning'
-  return 'default'
-}
-
-function batchStatusText(status: string): string {
-  const map: Record<string, string> = {
-    success: '成功',
-    failed: '失败',
-    skipped: '跳过',
-    already_checked: '今日已签',
-    pending: '进行中',
-  }
-  return map[status] || status
-}
-
-function batchStatusTagType(status: string): 'default' | 'success' | 'error' | 'warning' {
-  if (status === 'success' || status === 'already_checked') return 'success'
-  if (status === 'failed') return 'error'
-  if (status === 'pending') return 'warning'
-  return 'default'
-}
-
 function clearFilters() {
   filterSiteType.value = ''
   filterEnabled.value = ''
@@ -545,8 +499,8 @@ const columns = computed<DataTableColumns<Account>>(() => {
         }
         return h(
           NTag,
-          { size: 'small', bordered: false, type: statusTagType(row.lastStatus) },
-          { default: () => accountStatusText(row.lastStatus) },
+          { size: 'small', bordered: false, type: checkinStatusTagType(row.lastStatus) },
+          { default: () => checkinStatusText(row.lastStatus) },
         )
       },
     },

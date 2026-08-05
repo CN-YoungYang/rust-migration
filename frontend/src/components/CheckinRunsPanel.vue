@@ -128,8 +128,8 @@
         <n-list-item v-for="item in lastBatchResult.items" :key="item.accountId">
           <div class="batch-item">
             <span class="batch-name">{{ item.accountName }}</span>
-            <n-tag size="small" :bordered="false" :type="batchStatusTagType(item.status)">
-              {{ batchStatusText(item.status) }}
+            <n-tag size="small" :bordered="false" :type="checkinStatusTagType(item.status)">
+              {{ checkinStatusText(item.status) }}
             </n-tag>
             <span v-if="item.message" class="batch-message muted" :title="item.message">{{ item.message }}</span>
           </div>
@@ -181,6 +181,9 @@ import {
   type DataTableColumns,
 } from 'naive-ui'
 import { apiUrl, request, responseData } from '../utils/api'
+import { formatDateTime, formatDateTimeFull, formatDateInput } from '../utils/format'
+import { checkinStatusText, checkinStatusTagType, triggerText } from '../utils/checkinStatus'
+import { copyText } from '../utils/clipboard'
 import type { CurrentUser, Account, AccountGroup } from '../types'
 import { useUsers } from '../composables/useUsers'
 import { buildCleanupRequest, cleanupScopeLabel, cleanupTargetText } from '../utils/cleanupRuns'
@@ -612,48 +615,6 @@ const accountOwner = (accountId: string) => {
   return accountById.value.get(accountId)?.ownerName || ''
 }
 
-const statusText = (status: string) => {
-  const normalized = status.toLowerCase()
-  const map: Record<string, string> = {
-    success: '成功',
-    failed: '失败',
-    already_checked: '今日已签',
-    pending: '进行中',
-  }
-  return map[normalized] || status
-}
-
-function statusTagType(status: string): 'default' | 'success' | 'error' | 'warning' {
-  const normalized = status.toLowerCase()
-  if (normalized === 'success' || normalized === 'already_checked') return 'success'
-  if (normalized === 'failed') return 'error'
-  if (normalized === 'pending') return 'warning'
-  return 'default'
-}
-
-const triggerText = (trigger: string) => {
-  const map: Record<string, string> = {
-    manual: '手动',
-    manual_batch: '批量手动',
-    scheduled: '定时',
-  }
-  return map[trigger] || trigger
-}
-
-const formatTime = (time: string) => new Date(time).toLocaleString('zh-CN')
-
-// 记录行内的紧凑时间：MM-DD HH:mm，降低整段信息的视觉重量
-const formatTimeShort = (time: string): string => {
-  const date = new Date(time)
-  if (Number.isNaN(date.getTime())) return '—'
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
 // 把日期选择器的 `YYYY-MM-DD` 转成浏览器本地时区的日界 RFC3339 时刻。
 // 记录在界面上按浏览器本地时间显示，筛选也必须用浏览器本地日界，否则
 // 服务器时区与浏览器时区不一致时会筛错日期（回归修复：此前把裸日期字符串
@@ -661,13 +622,6 @@ const formatTimeShort = (time: string): string => {
 const dayBoundary = (date: string, atEnd: boolean): string => {
   const time = atEnd ? 'T23:59:59.999' : 'T00:00:00'
   return new Date(`${date}${time}`).toISOString()
-}
-
-function formatDateInput(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
 }
 
 watch(dateRange, (range) => {
@@ -681,48 +635,19 @@ watch(dateRange, (range) => {
   filterEndDate.value = formatDateInput(new Date(end))
 })
 
-const batchStatusText = (status: string) => {
-  const map: Record<string, string> = {
-    success: '成功',
-    failed: '失败',
-    skipped: '跳过',
-    already_checked: '今日已签',
-    pending: '进行中',
-  }
-  return map[status] || status
-}
-
-function batchStatusTagType(status: string): 'default' | 'success' | 'error' | 'warning' {
-  if (status === 'success' || status === 'already_checked') return 'success'
-  if (status === 'failed') return 'error'
-  if (status === 'pending') return 'warning'
-  return 'default'
-}
-
 const copyRunSummary = async (run: CheckinRun) => {
   const summary = [
     `账户: ${accountName(run.accountId)}`,
     `站点: ${accountSite(run.accountId) || '-'}`,
-    `状态: ${statusText(run.status)}`,
+    `状态: ${checkinStatusText(run.status)}`,
     `触发: ${triggerText(run.triggeredBy)}`,
-    `时间: ${formatTime(run.createdAt)}`,
+    `时间: ${formatDateTimeFull(run.createdAt)}`,
     `耗时: ${run.durationMs ? `${run.durationMs}ms` : '-'}`,
     `消息: ${run.message || '-'}`,
   ].join('\n')
 
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(summary)
-    } else {
-      const textarea = document.createElement('textarea')
-      textarea.value = summary
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
+    await copyText(summary)
     message.success('摘要已复制')
   } catch {
     message.error('复制失败，请手动选择消息内容')
@@ -745,7 +670,7 @@ const runColumns = computed<DataTableColumns<CheckinRun>>(() => {
       key: 'createdAt',
       width: 120,
       render: (row) =>
-        h('span', { title: formatTime(row.createdAt) }, formatTimeShort(row.createdAt)),
+        h('span', { title: formatDateTimeFull(row.createdAt) }, formatDateTime(row.createdAt, '—')),
     },
     {
       title: '账户',
@@ -765,8 +690,8 @@ const runColumns = computed<DataTableColumns<CheckinRun>>(() => {
       render: (row) =>
         h(
           NTag,
-          { size: 'small', bordered: false, type: statusTagType(row.status) },
-          { default: () => statusText(row.status) },
+          { size: 'small', bordered: false, type: checkinStatusTagType(row.status) },
+          { default: () => checkinStatusText(row.status) },
         ),
     },
     { title: '触发', key: 'triggeredBy', width: 90, render: (row) => triggerText(row.triggeredBy) },
