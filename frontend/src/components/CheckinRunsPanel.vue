@@ -111,6 +111,21 @@
       </n-grid-item>
     </n-grid>
 
+    <!-- 批量重试进度 -->
+    <n-card v-if="bulkProgress" size="small" class="progress-panel" role="status" aria-live="polite">
+      <div class="progress-meta">
+        <strong>{{ bulkProgress.label }}</strong>
+        <span>{{ bulkProgress.completed }} / {{ bulkProgress.total }}</span>
+      </div>
+      <n-progress type="line" :percentage="progressPercent" :height="8" :show-indicator="false" />
+      <div class="progress-row">
+        <p v-if="bulkProgress.current" class="muted">当前：{{ bulkProgress.current }}</p>
+        <n-button v-if="retryingBatch" size="tiny" tertiary type="error" @click="batchAbortRef = true">
+          停止
+        </n-button>
+      </div>
+    </n-card>
+
     <!-- 批量重试结果 -->
     <n-card v-if="lastBatchResult" size="small" class="batch-result" role="status" aria-live="polite">
       <template #header>
@@ -155,7 +170,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref, watch } from 'vue'
+import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -168,6 +183,7 @@ import {
   NList,
   NListItem,
   NPopconfirm,
+  NProgress,
   NRadioButton,
   NRadioGroup,
   NSelect,
@@ -186,6 +202,7 @@ import { checkinStatusText, checkinStatusTagType, triggerText } from '../utils/c
 import { copyText } from '../utils/clipboard'
 import type { CurrentUser, Account, AccountGroup } from '../types'
 import { useUsers } from '../composables/useUsers'
+import { batchSkipReason, randomDelaySecs, shuffleList } from '../utils/batchCheckin'
 import { buildCleanupRequest, cleanupScopeLabel, cleanupTargetText } from '../utils/cleanupRuns'
 
 interface CheckinRun {
@@ -219,6 +236,20 @@ interface CleanupRunsResult {
   resetAccountCount: number
   deletedFailureCounterCount: number
   userId: string | null
+}
+
+interface BulkProgress {
+  label: string
+  completed: number
+  total: number
+  current?: string
+}
+
+interface CheckinSettings {
+  retryEnabled?: boolean
+  maxAttemptsPerDay?: number
+  batchDelayMin?: number
+  batchDelayMax?: number
 }
 
 const props = defineProps<{
@@ -259,6 +290,9 @@ const cleanupTarget = computed(() => {
   return cleanupTargetText(props.isAdmin, filterUserId.value, selectedUsername)
 })
 const lastBatchResult = ref<BatchCheckinResult | null>(null)
+const settings = ref<CheckinSettings | null>(null)
+const batchAbortRef = ref(false)
+const bulkProgress = ref<BulkProgress | null>(null)
 
 // 筛选相关
 const filterStatus = ref('')
@@ -300,6 +334,11 @@ const statusCounts = computed(() => {
 })
 
 const actionBusy = computed(() => executing.value || retryingBatch.value || cleaning.value || Boolean(deletingRunId.value))
+
+const progressPercent = computed(() => {
+  if (!bulkProgress.value || bulkProgress.value.total === 0) return 0
+  return Math.min(100, Math.round((bulkProgress.value.completed / bulkProgress.value.total) * 100))
+})
 
 const accountById = computed(() => {
   return new Map(accounts.value.map((account) => [account.id, account]))
@@ -468,10 +507,12 @@ const loadMoreRuns = () => fetchRuns(true)
 const fetchSettings = async () => {
   try {
     const res = await request(apiUrl('/settings'))
-    const data = await responseData<{ maxAttemptsPerDay?: number }>(res)
+    const data = await responseData<CheckinSettings>(res)
+    settings.value = data
     maxAttemptsPerDay.value = data.maxAttemptsPerDay ?? 3
   } catch {
-    // 使用默认值
+    // 非管理员或获取失败：走默认值
+    settings.value = null
   }
 }
 
@@ -525,27 +566,143 @@ const executeAccountCheckin = async (accountId: string) => {
   }
 }
 
+/** 可中断延迟：分片等待，batchAbortRef 置位时提前返回 false（停止按钮响应及时）。 */
+function abortableDelay(ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const step = 200
+    let waited = 0
+    const tick = () => {
+      if (batchAbortRef.value || waited >= ms) {
+        resolve(!batchAbortRef.value)
+        return
+      }
+      waited += step
+      window.setTimeout(tick, step)
+    }
+    tick()
+  })
+}
+
 const retryFailedRuns = async () => {
-  const accountIds = failedAccountIds.value
-  if (accountIds.length === 0 || retryingBatch.value) return
+  const ids = failedAccountIds.value
+  if (ids.length === 0 || retryingBatch.value) return
 
   retryingBatch.value = true
+  batchAbortRef.value = false
   lastBatchResult.value = null
+  bulkProgress.value = {
+    label: '重试失败账户',
+    completed: 0,
+    total: ids.length,
+    current: '正在准备',
+  }
+
+  // 管理员可读取批量延迟 / 每日上限等设置；普通用户拿不到（GET /api/settings 仅限管理员），
+  // 走默认：不套用每日上限、不设账户间延迟（与"手动单签不受限"的既有语义一致）。
+  const batchSettings = props.isAdmin ? settings.value : null
+
+  const items: BatchResultItem[] = []
+  const toExecute: { id: string; name: string }[] = []
+
+  // 阶段一：按账户当前状态预先跳过（禁用 / 今日已签 / 关闭重试 / 已达日上限），
+  // 与后端 /batch 端点的 skip_reason_for_batch 语义一致。
+  for (const id of ids) {
+    const account = accountById.value.get(id)
+    const reason = batchSkipReason(account, batchSettings)
+    if (reason) {
+      items.push({ accountId: id, accountName: account?.name || id, status: 'skipped', message: reason })
+    } else {
+      toExecute.push({ id, name: account?.name || id })
+    }
+  }
+  bulkProgress.value = { ...bulkProgress.value!, completed: items.length }
+
+  // 阶段二：打乱顺序 + 逐账户串行单签 + 随机间隔，复刻后端批量的防判定行为。
+  // 每个请求都是单签（远低于反代 / Cloudflare 的 ~100s 超时），不会再被整批掐断。
+  const order = shuffleList(toExecute)
+  let stopIndex = order.length
   try {
-    const response = await request(apiUrl('/checkin-runs/batch'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accountIds })
-    })
-    const result = await responseData<BatchCheckinResult>(response)
-    lastBatchResult.value = result
-    if (result.failed > 0) message.error(`重试后仍有 ${result.failed} 个账户失败`)
-    await Promise.all([fetchRuns(), fetchAccounts()])
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : '重试失败账户失败')
+    for (let idx = 0; idx < order.length; idx += 1) {
+      if (batchAbortRef.value) {
+        stopIndex = idx
+        break
+      }
+
+      const { id, name } = order[idx]
+
+      // 首账户不等待，其余按设置随机间隔
+      if (idx > 0) {
+        const delay = batchSettings
+          ? randomDelaySecs(batchSettings.batchDelayMin ?? 0, batchSettings.batchDelayMax ?? 0)
+          : 0
+        if (delay > 0) {
+          bulkProgress.value = { ...bulkProgress.value!, current: `等待 ${delay}s 后重试下一个` }
+          const proceeded = await abortableDelay(delay * 1000)
+          if (!proceeded) {
+            stopIndex = idx
+            break
+          }
+        }
+      }
+      if (batchAbortRef.value) {
+        stopIndex = idx
+        break
+      }
+
+      bulkProgress.value = { ...bulkProgress.value!, current: `正在重试：${name}` }
+      try {
+        const res = await request(apiUrl('/checkin-runs'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accountId: id }),
+        })
+        const run = await responseData<{ status: string; message?: string | null }>(res)
+        items.push({ accountId: id, accountName: name, status: run.status, message: run.message || null })
+      } catch (error) {
+        items.push({
+          accountId: id,
+          accountName: name,
+          status: 'failed',
+          message: error instanceof Error ? error.message : '签到失败',
+        })
+      }
+      bulkProgress.value = { ...bulkProgress.value!, completed: items.length }
+    }
+
+    // 手动停止：未执行账户记为跳过，保证结果完整可对照
+    if (batchAbortRef.value && stopIndex < order.length) {
+      for (let i = stopIndex; i < order.length; i += 1) {
+        items.push({
+          accountId: order[i].id,
+          accountName: order[i].name,
+          status: 'skipped',
+          message: '已手动停止',
+        })
+      }
+      message.warning('批量重试已手动停止')
+    }
   } finally {
     retryingBatch.value = false
   }
+
+  const succeeded = items.filter(
+    (item) => item.status === 'success' || item.status === 'already_checked',
+  ).length
+  const skipped = items.filter((item) => item.status === 'skipped').length
+  const failed = items.filter((item) => item.status === 'failed').length
+
+  lastBatchResult.value = { items, total: items.length, succeeded, skipped, failed }
+  bulkProgress.value = {
+    label: '重试失败账户',
+    completed: items.length,
+    total: ids.length,
+    current: '已完成',
+  }
+
+  if (failed > 0) {
+    message.error(`重试后仍有 ${failed} 个账户失败`)
+  }
+  await Promise.all([fetchRuns(), fetchAccounts()])
 }
 
 const cleanupRuns = async () => {
@@ -781,6 +938,11 @@ watch(filterUserId, () => {
 watch([filterStatus, filterTriggeredBy, filterStartDate, filterEndDate, filterAccountId], () => {
   fetchRuns()
 })
+
+onUnmounted(() => {
+  // 组件被销毁（如登出）时中断进行中的批量重试
+  batchAbortRef.value = true
+})
 </script>
 
 <style scoped>
@@ -835,6 +997,29 @@ watch([filterStatus, filterTriggeredBy, filterStartDate, filterEndDate, filterAc
 
 .batch-result {
   margin-bottom: 12px;
+}
+
+.progress-panel {
+  margin-bottom: 12px;
+}
+
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.progress-row p {
+  margin: 0;
 }
 
 .batch-result-header {
