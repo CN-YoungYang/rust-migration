@@ -87,9 +87,14 @@ pub fn read_error_message(payload: Option<&serde_json::Value>) -> Option<String>
         .map(|s| s.to_string())
 }
 
-/// 判断响应文本是否为 HTML 页面（非 JSON），避免把整页当消息或参与关键词判定（M11）
+/// 判断响应文本是否为 HTML 页面（非 JSON），避免把整页当消息或参与关键词判定（M11）。
+/// 先剥离可能的 BOM（U+FEFF）：`char::is_whitespace` 不把 U+FEFF 视为空白，
+/// 若代理在响应前附加 BOM，`trim_start().starts_with('<')` 会误判为 false，
+/// 导致整页 HTML 绕过守卫进入消息。
 pub(crate) fn looks_like_html(text: &str) -> bool {
-    text.trim_start().starts_with('<')
+    text.trim_start_matches('\u{FEFF}')
+        .trim_start()
+        .starts_with('<')
 }
 
 /// 从 HTML 错误页提取 `<title>` 文本（trim 后），用于把错误原因带进消息，
@@ -232,6 +237,8 @@ mod tests {
         assert!(!looks_like_html("{\"success\":true}"));
         assert!(!looks_like_html("plain text"));
         assert!(!looks_like_html(""));
+        // BOM 开头不被误判为非 HTML（char::is_whitespace 不把 U+FEFF 当空白）
+        assert!(looks_like_html("\u{FEFF}<!DOCTYPE html><html></html>"));
     }
 
     #[test]

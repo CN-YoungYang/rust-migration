@@ -114,9 +114,16 @@ pub fn validate_public_host(host: &str, field_name: &str) -> Result<()> {
 
 pub async fn validate_public_host_resolved(host: &str, port: u16, field_name: &str) -> Result<()> {
     validate_public_host(host, field_name)?;
-    let addrs = lookup_host((host, port)).await.map_err(|_| {
-        AppError::Validation(format!("{} DNS 解析失败，无法确认目标是否安全", field_name))
-    })?;
+    // DNS 解析加超时：解析器慢/丢包时不能无限挂起，否则批量/定时签到会卡死在
+    // 第一个账户的 SSRF 复核上（前端表现为"批量签到 0/N"长期不动）。
+    let addrs = tokio::time::timeout(std::time::Duration::from_secs(5), lookup_host((host, port)))
+        .await
+        .map_err(|_| {
+            AppError::Validation(format!("{} DNS 解析超时，无法确认目标是否安全", field_name))
+        })?
+        .map_err(|_| {
+            AppError::Validation(format!("{} DNS 解析失败，无法确认目标是否安全", field_name))
+        })?;
 
     let mut resolved_any = false;
     for addr in addrs {
