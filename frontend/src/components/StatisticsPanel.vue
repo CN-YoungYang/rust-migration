@@ -648,6 +648,7 @@ watch(() => props.isAdmin, (isAdmin) => {
   font-size: 24px;
   font-weight: 600;
   line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-unit {
@@ -666,6 +667,7 @@ watch(() => props.isAdmin, (isAdmin) => {
 .table-card,
 .failure-card {
   margin-bottom: 14px;
+  font-variant-numeric: tabular-nums;
 }
 
 .chart-heading {
@@ -742,7 +744,7 @@ watch(() => props.isAdmin, (isAdmin) => {
 }
 
 .bar-group.selected {
-  background: rgba(128, 128, 128, 0.12);
+  background: color-mix(in srgb, v-bind('themeVars.primaryColor') 10%, transparent);
 }
 
 .bar-group:focus-visible {
@@ -774,11 +776,13 @@ watch(() => props.isAdmin, (isAdmin) => {
   font-size: 10px;
   font-weight: 600;
   color: v-bind('themeVars.textColor1');
+  font-variant-numeric: tabular-nums;
 }
 
 .bar-rate {
   font-size: 10px;
   color: v-bind('themeVars.textColor3');
+  font-variant-numeric: tabular-nums;
 }
 
 .trend-detail {

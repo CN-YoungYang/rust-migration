@@ -128,9 +128,11 @@
             :aria-label="`${currentViewLabel}面板`"
             tabindex="-1"
           >
-            <KeepAlive :include="cachedPanelNames">
-              <component :is="activePanelComponent" v-bind="activePanelProps" />
-            </KeepAlive>
+            <Transition name="panel-fade" mode="out-in">
+              <KeepAlive :include="cachedPanelNames">
+                <component :is="activePanelComponent" v-bind="activePanelProps" />
+              </KeepAlive>
+            </Transition>
           </div>
         </n-layout-content>
       </n-layout>
@@ -499,6 +501,11 @@ onUnmounted(() => {
   justify-content: center;
   gap: 12px;
   padding: 24px;
+  background: radial-gradient(
+    ellipse 90% 60% at 50% -10%,
+    color-mix(in srgb, v-bind('themeVars.primaryColor') 8%, transparent),
+    transparent 70%
+  );
 }
 
 .login-loading-text {
@@ -565,12 +572,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 16px 14px;
+  padding: 16px 14px 15px;
+  border-bottom: 1px solid v-bind('themeVars.borderColor');
 }
 
 .sider-brand.collapsed {
   justify-content: center;
-  padding: 16px 0;
+  padding: 16px 0 15px;
 }
 
 .sider-title {
@@ -596,7 +604,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 24px;
+  padding: 10px 28px;
   flex-wrap: wrap;
 }
 
@@ -633,6 +641,22 @@ onUnmounted(() => {
 .panel-region {
   outline: none;
   min-height: 100%;
+}
+
+/* 面板切换：轻量淡入，避免生硬跳变；偏好减少动态时关闭 */
+.panel-fade-enter-active,
+.panel-fade-leave-active {
+  transition: opacity 0.13s ease;
+}
+.panel-fade-enter-from,
+.panel-fade-leave-to {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-fade-enter-active,
+  .panel-fade-leave-active {
+    transition: none;
+  }
 }
 
 .muted {

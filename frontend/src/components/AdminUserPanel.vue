@@ -474,6 +474,7 @@ onMounted(fetchUsers)
 
 .user-list {
   margin-top: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .user-name-cell {

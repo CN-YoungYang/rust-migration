@@ -376,7 +376,7 @@ const progressPercent = computed(() => {
 })
 
 const hasActiveFilter = computed(() => {
-  return !!(filterSiteType.value || filterEnabled.value || filterLastStatus.value || filterKeyword.value)
+  return !!(filterUserId.value || filterSiteType.value || filterEnabled.value || filterLastStatus.value || filterKeyword.value)
 })
 
 const siteTypeOptions = [
@@ -428,6 +428,7 @@ function formatBalance(value: number | string | null | undefined): string {
 }
 
 function clearFilters() {
+  filterUserId.value = ''
   filterSiteType.value = ''
   filterEnabled.value = ''
   filterLastStatus.value = ''
@@ -1104,6 +1105,7 @@ onUnmounted(() => {
 
 .accounts-table {
   margin-top: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .account-name-cell {

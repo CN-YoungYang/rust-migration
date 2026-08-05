@@ -339,10 +339,11 @@ const runSummary = computed(() => {
 })
 
 const hasActiveFilter = computed(() => {
-  return !!(filterStatus.value || filterTriggeredBy.value || filterStartDate.value || filterEndDate.value || filterAccountId.value)
+  return !!(filterUserId.value || filterStatus.value || filterTriggeredBy.value || filterStartDate.value || filterEndDate.value || filterAccountId.value)
 })
 
 function clearFilters() {
+  filterUserId.value = ''
   filterStatus.value = ''
   filterTriggeredBy.value = ''
   filterStartDate.value = ''
@@ -819,11 +820,12 @@ watch([filterStatus, filterTriggeredBy, filterStartDate, filterEndDate, filterAc
   margin-left: 4px;
   border-radius: 9px;
   font-size: 12px;
-  background: rgba(128, 128, 128, 0.15);
+  background: color-mix(in srgb, v-bind('themeVars.textColor3') 16%, transparent);
 }
 
 .summary-grid {
   margin-bottom: 14px;
+  font-variant-numeric: tabular-nums;
 }
 
 .unit {
@@ -879,6 +881,7 @@ watch([filterStatus, filterTriggeredBy, filterStartDate, filterEndDate, filterAc
 
 .runs-table {
   margin-top: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .load-more {
