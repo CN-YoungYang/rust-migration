@@ -18,10 +18,14 @@
         <template #header>
           <div class="create-head">
             <n-icon :component="PersonAddOutline" class="create-head-icon" aria-hidden="true" />
-            <h3 id="create-user-title" class="form-title">新建用户</h3>
+            <div class="create-head-titles">
+              <h3 id="create-user-title" class="form-title">新建用户</h3>
+              <p class="create-head-desc muted">创建后即可登录平台</p>
+            </div>
           </div>
         </template>
         <n-form :model="newUser" label-placement="top" :disabled="creating">
+          <p class="field-section-label muted">身份</p>
           <n-grid :cols="2" :x-gap="16" responsive="screen" item-responsive>
             <n-grid-item>
               <n-form-item label="用户名" :show-feedback="false">
@@ -43,6 +47,10 @@
                 />
               </n-form-item>
             </n-grid-item>
+          </n-grid>
+
+          <p class="field-section-label muted">权限</p>
+          <n-grid :cols="2" :x-gap="16" responsive="screen" item-responsive>
             <n-grid-item>
               <n-form-item label="角色" :show-feedback="false">
                 <n-select v-model:value="newUser.role" :options="roleOptions" />
@@ -54,7 +62,8 @@
               </n-form-item>
             </n-grid-item>
           </n-grid>
-          <n-form-item label="备注" :show-feedback="false">
+
+          <n-form-item label="备注" :show-feedback="false" class="field-section-note">
             <n-input v-model:value="newUser.note" placeholder="可选，方便管理员标识用户" />
           </n-form-item>
 
@@ -62,12 +71,12 @@
             {{ createErrorMessage }}
           </n-alert>
 
-          <n-space :size="8" class="form-actions">
+          <div class="form-actions">
+            <n-button :disabled="creating" @click="closeCreateForm">取消</n-button>
             <n-button type="primary" :loading="creating" :disabled="creating" @click="createUser">
               {{ creating ? '创建中…' : '创建用户' }}
             </n-button>
-            <n-button :disabled="creating" @click="closeCreateForm">取消</n-button>
-          </n-space>
+          </div>
         </n-form>
       </n-card>
     </Transition>
@@ -129,9 +138,15 @@
       @close="closeEditModal"
     >
       <n-form v-if="editingUser" :model="editingUser" label-placement="top" :disabled="saving">
+        <!-- 用户名：不可改，显式只读行而非灰色 disabled input -->
         <n-form-item label="用户名" :show-feedback="false">
-          <n-input :value="editingUser.username" disabled />
+          <div class="readonly-field">
+            <span class="readonly-value">{{ editingUser.username }}</span>
+            <n-tag size="small" :bordered="false" type="default">不可修改</n-tag>
+          </div>
         </n-form-item>
+
+        <p class="field-section-label muted">身份</p>
         <n-form-item label="新密码（留空则不修改，至少 8 位）" :show-feedback="false">
           <n-input
             v-model:value="editingUser.password"
@@ -141,8 +156,14 @@
             :status="editSubmitted && editPasswordInvalid ? 'error' : undefined"
           />
         </n-form-item>
+
+        <p class="field-section-label muted">权限</p>
+        <!-- 自改时角色不可改：显式只读行 + 原因，而非灰色 select -->
         <n-form-item v-if="editingUser.id === currentUser?.id" label="角色" :show-feedback="false">
-          <n-input :value="roleText(editingUser.role)" disabled />
+          <div class="readonly-field">
+            <n-tag size="small" :bordered="false" :type="roleTagType(editingUser.role)">{{ roleText(editingUser.role) }}</n-tag>
+            <span class="readonly-reason muted">不能修改自己的角色</span>
+          </div>
         </n-form-item>
         <n-form-item v-else label="角色" :show-feedback="false">
           <n-select
@@ -158,7 +179,8 @@
         </n-form-item>
         <p v-if="!editingUser.enabled" class="hint">禁用后，该用户的账户不会参与自动签到。</p>
         <p v-if="editingUser.id === currentUser?.id" class="hint">不能禁用当前登录账号，防止唯一管理员被禁用后无法恢复。</p>
-        <n-form-item label="备注" :show-feedback="false">
+
+        <n-form-item label="备注" :show-feedback="false" class="field-section-note">
           <n-input v-model:value="editingUser.note" placeholder="可选，方便管理员标识用户" />
         </n-form-item>
 
@@ -166,12 +188,12 @@
           {{ editErrorMessage }}
         </n-alert>
 
-        <n-space :size="8" class="modal-actions">
+        <div class="form-actions">
+          <n-button :disabled="saving" @click="closeEditModal">取消</n-button>
           <n-button type="primary" :loading="saving" :disabled="saving" @click="updateUser">
             {{ saving ? '保存中…' : '保存' }}
           </n-button>
-          <n-button :disabled="saving" @click="closeEditModal">取消</n-button>
-        </n-space>
+        </div>
       </n-form>
     </n-modal>
   </div>
@@ -605,11 +627,59 @@ onMounted(fetchUsers)
   white-space: nowrap;
 }
 
+.create-head-titles {
+  min-width: 0;
+}
+
+.create-head-desc {
+  margin: 2px 0 0;
+  font-size: 12px;
+}
+
+/* 表单内小节标签：身份 / 权限。轻量分组，不引入二级卡片 */
+.field-section-label {
+  margin: 18px 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: v-bind('themeVars.textColor3');
+}
+.field-section-label:first-child {
+  margin-top: 4px;
+}
+.field-section-note {
+  margin-top: 4px;
+}
+
+/* 只读字段：把不可改项从“灰色 disabled input”改为显式只读行 */
+.readonly-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 30px;
+}
+
+.readonly-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.readonly-reason {
+  font-size: 12px;
+}
+
 .form-error {
   margin-bottom: 14px;
 }
 
+/* 表单操作区：取消左、主操作右收口 */
 .form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
   margin-top: 4px;
 }
 
@@ -699,10 +769,6 @@ onMounted(fetchUsers)
   margin: 0 0 12px;
   font-size: 12px;
   color: v-bind('themeVars.textColor3');
-}
-
-.modal-actions {
-  margin-top: 8px;
 }
 
 .muted {
