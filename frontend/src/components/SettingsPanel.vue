@@ -55,7 +55,7 @@
 
       <n-grid :cols="2" :x-gap="16" responsive="screen" item-responsive>
         <n-grid-item>
-          <n-form-item label="批量/定时签到最小延迟（秒）" :show-feedback="false">
+          <n-form-item label="批量手动签到最小延迟（秒）" :show-feedback="false">
             <n-input-number
               v-model:value="settings.batchDelayMin"
               :min="0"
@@ -67,12 +67,39 @@
           </n-form-item>
         </n-grid-item>
         <n-grid-item>
-          <n-form-item label="批量/定时签到最大延迟（秒）" :show-feedback="false">
+          <n-form-item label="批量手动签到最大延迟（秒）" :show-feedback="false">
             <n-input-number
               v-model:value="settings.batchDelayMax"
               :min="0"
               :max="600"
               :status="invalidFields.batchDelayMax ? 'error' : undefined"
+              @update:value="markDirty"
+              style="width: 100%"
+            />
+          </n-form-item>
+        </n-grid-item>
+      </n-grid>
+
+      <n-grid :cols="2" :x-gap="16" responsive="screen" item-responsive>
+        <n-grid-item>
+          <n-form-item label="定时签到最小延迟（秒）" :show-feedback="false">
+            <n-input-number
+              v-model:value="settings.scheduledDelayMin"
+              :min="0"
+              :max="600"
+              :status="invalidFields.scheduledDelayMin ? 'error' : undefined"
+              @update:value="markDirty"
+              style="width: 100%"
+            />
+          </n-form-item>
+        </n-grid-item>
+        <n-grid-item>
+          <n-form-item label="定时签到最大延迟（秒）" :show-feedback="false">
+            <n-input-number
+              v-model:value="settings.scheduledDelayMax"
+              :min="0"
+              :max="600"
+              :status="invalidFields.scheduledDelayMax ? 'error' : undefined"
               @update:value="markDirty"
               style="width: 100%"
             />
@@ -124,6 +151,7 @@
           <n-card size="small">
             <p class="policy-label">批量节奏</p>
             <p class="policy-value">{{ delaySummary }}</p>
+            <p class="policy-sub">定时：{{ scheduledDelaySummary }}</p>
           </n-card>
         </n-grid-item>
         <n-grid-item>
@@ -170,6 +198,8 @@ interface Settings {
   maxAttemptsPerDay: number
   batchDelayMin: number
   batchDelayMax: number
+  scheduledDelayMin: number
+  scheduledDelayMax: number
   cleanupKeepLatest: number
   updatedAt?: string
 }
@@ -184,6 +214,8 @@ const settings = ref<Settings>({
   maxAttemptsPerDay: 3,
   batchDelayMin: 3,
   batchDelayMax: 10,
+  scheduledDelayMin: 3,
+  scheduledDelayMax: 10,
   cleanupKeepLatest: 500,
 })
 const loading = ref(true)
@@ -212,10 +244,19 @@ const validationErrors = computed(() => {
     errors.push('批量延迟不能小于 0 秒。')
   }
   if (settings.value.batchDelayMin > settings.value.batchDelayMax) {
-    errors.push('最小延迟不能大于最大延迟。')
+    errors.push('批量最小延迟不能大于最大延迟。')
   }
   if (settings.value.batchDelayMax > 600) {
-    errors.push('最大延迟不能超过 600 秒。')
+    errors.push('批量最大延迟不能超过 600 秒。')
+  }
+  if (settings.value.scheduledDelayMin < 0 || settings.value.scheduledDelayMax < 0) {
+    errors.push('定时延迟不能小于 0 秒。')
+  }
+  if (settings.value.scheduledDelayMin > settings.value.scheduledDelayMax) {
+    errors.push('定时最小延迟不能大于最大延迟。')
+  }
+  if (settings.value.scheduledDelayMax > 600) {
+    errors.push('定时最大延迟不能超过 600 秒。')
   }
   if (settings.value.cleanupKeepLatest < 0 || settings.value.cleanupKeepLatest > 10000) {
     errors.push('清理保留条数必须在 0 到 10000 之间。')
@@ -229,18 +270,27 @@ const invalidFields = computed(() => ({
   maxAttemptsPerDay: settings.value.maxAttemptsPerDay < 1 || settings.value.maxAttemptsPerDay > 100,
   batchDelayMin: settings.value.batchDelayMin < 0 || settings.value.batchDelayMin > settings.value.batchDelayMax,
   batchDelayMax: settings.value.batchDelayMax < 0 || settings.value.batchDelayMax > 600 || settings.value.batchDelayMax < settings.value.batchDelayMin,
+  scheduledDelayMin: settings.value.scheduledDelayMin < 0 || settings.value.scheduledDelayMin > settings.value.scheduledDelayMax,
+  scheduledDelayMax: settings.value.scheduledDelayMax < 0 || settings.value.scheduledDelayMax > 600 || settings.value.scheduledDelayMax < settings.value.scheduledDelayMin,
   cleanupKeepLatest: settings.value.cleanupKeepLatest < 0 || settings.value.cleanupKeepLatest > 10000,
 }))
 
-const delaySummary = computed(() => {
-  if (settings.value.batchDelayMin === 0 && settings.value.batchDelayMax === 0) {
+function summarizeDelay(min: number, max: number): string {
+  if (min === 0 && max === 0) {
     return '不等待'
   }
-  if (settings.value.batchDelayMin === settings.value.batchDelayMax) {
-    return `${settings.value.batchDelayMin} 秒固定间隔`
+  if (min === max) {
+    return `${min} 秒固定间隔`
   }
-  return `${settings.value.batchDelayMin} 到 ${settings.value.batchDelayMax} 秒随机间隔`
-})
+  return `${min} 到 ${max} 秒随机间隔`
+}
+
+const delaySummary = computed(() =>
+  summarizeDelay(settings.value.batchDelayMin, settings.value.batchDelayMax),
+)
+const scheduledDelaySummary = computed(() =>
+  summarizeDelay(settings.value.scheduledDelayMin, settings.value.scheduledDelayMax),
+)
 
 function minutesOf(value: string): number | null {
   const [hour, minute] = value.split(':').map(Number)
@@ -403,6 +453,12 @@ onMounted(fetchSettings)
   margin: 0;
   font-size: 14px;
   font-weight: 600;
+}
+
+.policy-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: v-bind('themeVars.textColor3');
 }
 
 .muted {

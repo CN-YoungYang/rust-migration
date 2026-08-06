@@ -70,12 +70,16 @@ CREATE TABLE IF NOT EXISTS CheckinSetting (
     maxAttemptsPerDay INTEGER NOT NULL DEFAULT 3,
     batchDelayMin INTEGER NOT NULL DEFAULT 3,
     batchDelayMax INTEGER NOT NULL DEFAULT 10,
+    -- 定时调度签到专用的相邻账户随机延迟（秒）；批量手动签到用 batchDelayMin/Max。
+    scheduledDelayMin INTEGER NOT NULL DEFAULT 3,
+    scheduledDelayMax INTEGER NOT NULL DEFAULT 10,
     cleanupKeepLatest INTEGER NOT NULL DEFAULT 500,
     updatedAt TEXT NOT NULL
 );
 
--- 注意：此处不写入 batchDelayMin / batchDelayMax。这两列在 v2.2.2 才引入，
--- 旧库的 CheckinSetting 可能尚未包含（CREATE TABLE IF NOT EXISTS 不会给老表补列）。
+-- 注意：此处不写入 batchDelayMin / batchDelayMax / scheduledDelayMin / scheduledDelayMax。
+-- batchDelayMin/Max 在 v2.2.2 才引入，scheduledDelayMin/Max 在本次拆分才引入，
+-- 旧库的 CheckinSetting 可能尚未包含这些列（CREATE TABLE IF NOT EXISTS 不会给老表补列）。
 -- 在此 INSERT 引用缺失列会导致启动报错：
 --   "table CheckinSetting has no column named batchDelayMin"
 -- 新库通过上面的列定义 DEFAULT 取得 3 / 10；

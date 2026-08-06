@@ -73,6 +73,10 @@ pub struct UpdateSettingsRequest {
     pub batch_delay_min: Option<i32>,
     #[serde(alias = "batch_delay_max")]
     pub batch_delay_max: Option<i32>,
+    #[serde(alias = "scheduled_delay_min")]
+    pub scheduled_delay_min: Option<i32>,
+    #[serde(alias = "scheduled_delay_max")]
+    pub scheduled_delay_max: Option<i32>,
     #[serde(alias = "cleanup_keep_latest")]
     pub cleanup_keep_latest: Option<i32>,
 }
@@ -92,6 +96,8 @@ mod tests {
                 "maxAttemptsPerDay": 4,
                 "batchDelayMin": 1,
                 "batchDelayMax": 9,
+                "scheduledDelayMin": 2,
+                "scheduledDelayMax": 8,
                 "cleanupKeepLatest": 321
             }"#,
         )
@@ -104,6 +110,8 @@ mod tests {
         assert_eq!(req.max_attempts_per_day, Some(4));
         assert_eq!(req.batch_delay_min, Some(1));
         assert_eq!(req.batch_delay_max, Some(9));
+        assert_eq!(req.scheduled_delay_min, Some(2));
+        assert_eq!(req.scheduled_delay_max, Some(8));
         assert_eq!(req.cleanup_keep_latest, Some(321));
     }
 
@@ -117,6 +125,8 @@ mod tests {
                 "max_attempts_per_day": 5,
                 "batch_delay_min": 2,
                 "batch_delay_max": 8,
+                "scheduled_delay_min": 3,
+                "scheduled_delay_max": 7,
                 "cleanup_keep_latest": 654
             }"#,
         )
@@ -128,6 +138,8 @@ mod tests {
         assert_eq!(req.max_attempts_per_day, Some(5));
         assert_eq!(req.batch_delay_min, Some(2));
         assert_eq!(req.batch_delay_max, Some(8));
+        assert_eq!(req.scheduled_delay_min, Some(3));
+        assert_eq!(req.scheduled_delay_max, Some(7));
         assert_eq!(req.cleanup_keep_latest, Some(654));
     }
 }

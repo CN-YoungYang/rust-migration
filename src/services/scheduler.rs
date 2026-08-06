@@ -120,10 +120,11 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
         }
 
         // 首个账户不延迟，其余账户签到前随机 sleep（按管理员设置）
+        // 定时调度专用 scheduledDelayMin/Max，与批量手动签到的 batchDelayMin/Max 解耦。
         if executed > 0 {
             if let Some(secs) = crate::services::checkin::random_delay_secs(
-                settings.batch_delay_min,
-                settings.batch_delay_max,
+                settings.scheduled_delay_min,
+                settings.scheduled_delay_max,
             ) {
                 tracing::debug!(
                     "Scheduled checkin: account {} waiting {}s",

@@ -130,6 +130,14 @@ pub struct CheckinSetting {
     #[serde(rename = "batchDelayMax")]
     #[sqlx(rename = "batchDelayMax")]
     pub batch_delay_max: i32,
+    /// 定时调度签到时，相邻账户之间的最小随机延迟（秒）
+    #[serde(rename = "scheduledDelayMin")]
+    #[sqlx(rename = "scheduledDelayMin")]
+    pub scheduled_delay_min: i32,
+    /// 定时调度签到时，相邻账户之间的最大随机延迟（秒）
+    #[serde(rename = "scheduledDelayMax")]
+    #[sqlx(rename = "scheduledDelayMax")]
+    pub scheduled_delay_max: i32,
     /// 定时清理时保留的最新签到记录条数（0 表示清除全部）
     #[serde(rename = "cleanupKeepLatest")]
     #[sqlx(rename = "cleanupKeepLatest")]

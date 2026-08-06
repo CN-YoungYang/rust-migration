@@ -67,6 +67,18 @@ pub async fn update(
             "batchDelayMin 和 batchDelayMax 必须同时提供".into(),
         ));
     }
+    // 定时调度签到随机延迟范围校验（秒），规则同上但独立于批量手动签到。
+    if let (Some(min), Some(max)) = (payload.scheduled_delay_min, payload.scheduled_delay_max) {
+        if min < 0 || max < 0 || min > max || max > 600 {
+            return Err(AppError::Validation(
+                "scheduledDelayMin/Max 必须满足 0 <= min <= max <= 600（秒）".into(),
+            ));
+        }
+    } else if payload.scheduled_delay_min.is_some() || payload.scheduled_delay_max.is_some() {
+        return Err(AppError::Validation(
+            "scheduledDelayMin 和 scheduledDelayMax 必须同时提供".into(),
+        ));
+    }
     if let Some(keep) = payload.cleanup_keep_latest {
         if !(0..=10000).contains(&keep) {
             return Err(AppError::Validation(

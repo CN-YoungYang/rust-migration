@@ -19,7 +19,12 @@ fn settings_cache() -> &'static RwLock<Option<(CheckinSetting, Instant)>> {
 /// Existing databases need these columns added. SQLite doesn't support ADD COLUMN IF NOT EXISTS,
 /// so we try + ignore "duplicate column" errors.
 pub async fn ensure_setting_columns(db: &SqlitePool) -> Result<()> {
-    for (col, default_value) in [("batchDelayMin", 3), ("batchDelayMax", 10)] {
+    for (col, default_value) in [
+        ("batchDelayMin", 3),
+        ("batchDelayMax", 10),
+        ("scheduledDelayMin", 3),
+        ("scheduledDelayMax", 10),
+    ] {
         let sql = format!(
             "ALTER TABLE CheckinSetting ADD COLUMN {} INTEGER NOT NULL DEFAULT {}",
             col, default_value
@@ -88,7 +93,8 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
 
     let settings = sqlx::query_as::<_, CheckinSetting>(
         "SELECT id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, \
-         batchDelayMin, batchDelayMax, cleanupKeepLatest, updatedAt \
+         batchDelayMin, batchDelayMax, scheduledDelayMin, scheduledDelayMax, \
+         cleanupKeepLatest, updatedAt \
          FROM CheckinSetting WHERE id = 'global'",
     )
     .fetch_optional(db)
@@ -105,19 +111,32 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
             s.batch_delay_max = s.batch_delay_min;
             needs_update = true;
         }
+        if s.scheduled_delay_min < 0 {
+            s.scheduled_delay_min = 0;
+            needs_update = true;
+        }
+        if s.scheduled_delay_max < s.scheduled_delay_min {
+            s.scheduled_delay_max = s.scheduled_delay_min;
+            needs_update = true;
+        }
         if s.cleanup_keep_latest < 0 {
             s.cleanup_keep_latest = 500;
             needs_update = true;
         }
         if needs_update {
             if let Err(e) = sqlx::query(
-                "UPDATE CheckinSetting SET batchDelayMin = ?, batchDelayMax = ?, cleanupKeepLatest = ? WHERE id = 'global'"
+                "UPDATE CheckinSetting SET batchDelayMin = ?, batchDelayMax = ?, \
+                 scheduledDelayMin = ?, scheduledDelayMax = ?, cleanupKeepLatest = ? \
+                 WHERE id = 'global'",
             )
             .bind(s.batch_delay_min)
             .bind(s.batch_delay_max)
+            .bind(s.scheduled_delay_min)
+            .bind(s.scheduled_delay_max)
             .bind(s.cleanup_keep_latest)
             .execute(db)
-            .await {
+            .await
+            {
                 tracing::warn!("Failed to write back settings defaults: {}", e);
             }
         }
@@ -131,7 +150,7 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
         // Create default settings
         let now = Utc::now();
         sqlx::query(
-            "INSERT INTO CheckinSetting (id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, batchDelayMin, batchDelayMax, cleanupKeepLatest, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO CheckinSetting (id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, batchDelayMin, batchDelayMax, scheduledDelayMin, scheduledDelayMax, cleanupKeepLatest, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind("global")
         .bind(false)
@@ -141,6 +160,8 @@ pub async fn get_settings(db: &SqlitePool) -> Result<CheckinSetting> {
         .bind(3)
         .bind(3)   // batchDelayMin default 3 seconds
         .bind(10)  // batchDelayMax default 10 seconds
+        .bind(3)   // scheduledDelayMin default 3 seconds
+        .bind(10)  // scheduledDelayMax default 10 seconds
         .bind(500) // cleanupKeepLatest default 500 records
         .bind(now)
         .execute(db)
@@ -159,7 +180,7 @@ pub async fn update_settings(
     let current = Box::pin(get_settings(db)).await?;
 
     let settings = sqlx::query_as::<_, CheckinSetting>(
-        "UPDATE CheckinSetting SET enabled = ?, windowStart = ?, windowEnd = ?, retryEnabled = ?, maxAttemptsPerDay = ?, batchDelayMin = ?, batchDelayMax = ?, cleanupKeepLatest = ?, updatedAt = ? WHERE id = 'global' RETURNING *"
+        "UPDATE CheckinSetting SET enabled = ?, windowStart = ?, windowEnd = ?, retryEnabled = ?, maxAttemptsPerDay = ?, batchDelayMin = ?, batchDelayMax = ?, scheduledDelayMin = ?, scheduledDelayMax = ?, cleanupKeepLatest = ?, updatedAt = ? WHERE id = 'global' RETURNING *"
     )
     .bind(req.enabled.unwrap_or(current.enabled))
     .bind(req.window_start.as_ref().unwrap_or(&current.window_start))
@@ -168,6 +189,8 @@ pub async fn update_settings(
     .bind(req.max_attempts_per_day.unwrap_or(current.max_attempts_per_day))
     .bind(req.batch_delay_min.unwrap_or(current.batch_delay_min))
     .bind(req.batch_delay_max.unwrap_or(current.batch_delay_max))
+    .bind(req.scheduled_delay_min.unwrap_or(current.scheduled_delay_min))
+    .bind(req.scheduled_delay_max.unwrap_or(current.scheduled_delay_max))
     .bind(req.cleanup_keep_latest.unwrap_or(current.cleanup_keep_latest))
     .bind(now)
     .fetch_one(db)
@@ -222,6 +245,8 @@ mod tests {
             &UpdateSettingsRequest {
                 batch_delay_min: Some(0),
                 batch_delay_max: Some(0),
+                scheduled_delay_min: Some(0),
+                scheduled_delay_max: Some(0),
                 cleanup_keep_latest: Some(0),
                 ..Default::default()
             },
@@ -234,6 +259,26 @@ mod tests {
 
         assert_eq!(settings.batch_delay_min, 0);
         assert_eq!(settings.batch_delay_max, 0);
+        assert_eq!(settings.scheduled_delay_min, 0);
+        assert_eq!(settings.scheduled_delay_max, 0);
         assert_eq!(settings.cleanup_keep_latest, 0);
+    }
+
+    #[tokio::test]
+    async fn get_settings_rewrites_invalid_scheduled_delay_range() {
+        // 旧库可能因手动改库出现 max<min 或负值，get_settings 的回写兜底应修正。
+        let pool = setup_db().await;
+        sqlx::query(
+            "UPDATE CheckinSetting SET scheduledDelayMin = -1, scheduledDelayMax = -5 \
+             WHERE id = 'global'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        clear_settings_cache_for_test();
+        let settings = get_settings(&pool).await.unwrap();
+
+        assert_eq!(settings.scheduled_delay_min, 0);
+        assert_eq!(settings.scheduled_delay_max, 0);
     }
 }
