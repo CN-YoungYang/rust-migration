@@ -74,15 +74,18 @@ CREATE TABLE IF NOT EXISTS CheckinSetting (
     scheduledDelayMin INTEGER NOT NULL DEFAULT 3,
     scheduledDelayMax INTEGER NOT NULL DEFAULT 10,
     cleanupKeepLatest INTEGER NOT NULL DEFAULT 500,
+    -- 调度触发计划：标准 5 段 cron 表达式的 JSON 数组，命中任一即触发一轮签到。
+    -- v2.6.0 起替代 windowStart/windowEnd（列保留但不再读写）。
+    scheduleCron TEXT NOT NULL DEFAULT '["*/5 2-5 * * *"]',
     updatedAt TEXT NOT NULL
 );
 
--- 注意：此处不写入 batchDelayMin / batchDelayMax / scheduledDelayMin / scheduledDelayMax。
--- batchDelayMin/Max 在 v2.2.2 才引入，scheduledDelayMin/Max 在本次拆分才引入，
+-- 注意：此处不写入 batchDelayMin / batchDelayMax / scheduledDelayMin / scheduledDelayMax / scheduleCron。
+-- batchDelayMin/Max 在 v2.2.2 才引入，scheduledDelayMin/Max 在本次拆分才引入，scheduleCron 在 v2.6.0 引入。
 -- 旧库的 CheckinSetting 可能尚未包含这些列（CREATE TABLE IF NOT EXISTS 不会给老表补列）。
 -- 在此 INSERT 引用缺失列会导致启动报错：
 --   "table CheckinSetting has no column named batchDelayMin"
--- 新库通过上面的列定义 DEFAULT 取得 3 / 10；
+-- 新库通过上面的列定义 DEFAULT 取得 3 / 10 / 默认 cron；
 -- 旧库由 db::ensure_setting_columns() 运行时补列并修正默认值。
 INSERT OR IGNORE INTO CheckinSetting (id, enabled, windowStart, windowEnd, retryEnabled, maxAttemptsPerDay, updatedAt)
 VALUES ('global', 0, '02:00', '05:00', 1, 3, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));

@@ -61,10 +61,8 @@ pub struct UpdateAccountRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSettingsRequest {
     pub enabled: Option<bool>,
-    #[serde(alias = "window_start")]
-    pub window_start: Option<String>,
-    #[serde(alias = "window_end")]
-    pub window_end: Option<String>,
+    #[serde(alias = "schedule_cron")]
+    pub schedule_cron: Option<Vec<String>>,
     #[serde(alias = "retry_enabled")]
     pub retry_enabled: Option<bool>,
     #[serde(alias = "max_attempts_per_day")]
@@ -90,8 +88,7 @@ mod tests {
         let req: UpdateSettingsRequest = serde_json::from_str(
             r#"{
                 "enabled": true,
-                "windowStart": "03:00",
-                "windowEnd": "06:30",
+                "scheduleCron": ["*/5 2-5 * * *", "0 20 * * *"],
                 "retryEnabled": false,
                 "maxAttemptsPerDay": 4,
                 "batchDelayMin": 1,
@@ -104,8 +101,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(req.enabled, Some(true));
-        assert_eq!(req.window_start, Some("03:00".to_string()));
-        assert_eq!(req.window_end, Some("06:30".to_string()));
+        assert_eq!(
+            req.schedule_cron,
+            Some(vec!["*/5 2-5 * * *".to_string(), "0 20 * * *".to_string()])
+        );
         assert_eq!(req.retry_enabled, Some(false));
         assert_eq!(req.max_attempts_per_day, Some(4));
         assert_eq!(req.batch_delay_min, Some(1));
@@ -119,8 +118,7 @@ mod tests {
     fn settings_update_request_keeps_snake_case_compatibility() {
         let req: UpdateSettingsRequest = serde_json::from_str(
             r#"{
-                "window_start": "04:00",
-                "window_end": "07:30",
+                "schedule_cron": ["*/10 2-4 * * *"],
                 "retry_enabled": true,
                 "max_attempts_per_day": 5,
                 "batch_delay_min": 2,
@@ -132,8 +130,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(req.window_start, Some("04:00".to_string()));
-        assert_eq!(req.window_end, Some("07:30".to_string()));
+        assert_eq!(req.schedule_cron, Some(vec!["*/10 2-4 * * *".to_string()]));
         assert_eq!(req.retry_enabled, Some(true));
         assert_eq!(req.max_attempts_per_day, Some(5));
         assert_eq!(req.batch_delay_min, Some(2));

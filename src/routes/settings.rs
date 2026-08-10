@@ -8,6 +8,8 @@ use axum::{
     extract::{Extension, State},
     Json,
 };
+use croner::Cron;
+use std::str::FromStr;
 use std::sync::Arc;
 
 fn require_admin(user: &AppUser) -> Result<()> {
@@ -32,18 +34,34 @@ pub async fn update(
     Json(payload): Json<db::UpdateSettingsRequest>,
 ) -> Result<Json<serde_json::Value>> {
     require_admin(&user)?;
-    if let Some(ref start) = payload.window_start {
-        if start.parse::<chrono::NaiveTime>().is_err() {
+    // cron 调度计划校验：非空、数量封顶、每条必须是合法的标准 5 段 cron 表达式。
+    if let Some(list) = &payload.schedule_cron {
+        if list.is_empty() {
             return Err(AppError::Validation(
-                "签到窗口开始时间格式应为 HH:MM".into(),
+                "调度计划至少需要一个 cron 表达式".into(),
             ));
         }
-    }
-    if let Some(ref end) = payload.window_end {
-        if end.parse::<chrono::NaiveTime>().is_err() {
-            return Err(AppError::Validation(
-                "签到窗口结束时间格式应为 HH:MM".into(),
-            ));
+        if list.len() > 20 {
+            return Err(AppError::Validation(format!(
+                "调度计划最多支持 20 个 cron 表达式，收到 {} 个",
+                list.len()
+            )));
+        }
+        for expr in list {
+            // croner 默认支持 5~7 段（秒可选），但调度器按分钟粒度截断到秒=0 匹配，
+            // 6/7 段表达式里显式的秒字段会永不命中。因此强制标准 5 段。
+            let fields: Vec<&str> = expr.split_whitespace().collect();
+            if fields.len() != 5 {
+                return Err(AppError::Validation(format!(
+                    "cron 表达式应为标准 5 段（分 时 日 月 周），当前 {} 段: {expr}",
+                    fields.len()
+                )));
+            }
+            if Cron::from_str(expr).is_err() {
+                return Err(AppError::Validation(format!(
+                    "cron 表达式无效: {expr}（标准 5 段：分 时 日 月 周）"
+                )));
+            }
         }
     }
     if let Some(max) = payload.max_attempts_per_day {

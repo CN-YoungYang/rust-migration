@@ -137,7 +137,7 @@ ADMIN_PASSWORD=<至少 8 位的初始密码>
 | 字段 | 说明 |
 |------|------|
 | `enabled` | 是否启用自动签到 |
-| `windowStart` / `windowEnd` | 签到窗口，本地时间，格式 `HH:MM` |
+| `scheduleCron` | 调度触发计划：标准 5 段 cron 表达式的 JSON 数组（如 `["*/5 2-5 * * *"]`），命中任一即触发一轮签到。仅接受 5 段（秒级 6/7 段会被拒绝，因为调度按分钟粒度匹配） |
 | `retryEnabled` | 是否启用失败重试 |
 | `maxAttemptsPerDay` | 每账户每日最大尝试次数 |
 | `batchDelayMin` / `batchDelayMax` | 批量和定时签到的账户间随机延迟 |
@@ -148,6 +148,8 @@ ADMIN_PASSWORD=<至少 8 位的初始密码>
 - `maxAttemptsPerDay`：`1~100`
 - `batchDelayMin` / `batchDelayMax`：`0 <= min <= max <= 600`
 - `cleanupKeepLatest`：`0~10000`
+
+升级注意：从旧版（仅有 `windowStart`/`windowEnd` 时间窗口）升级时，非默认窗口会自动按小时粒度近似转换为 cron 计划（跨午夜拆成两条表达式），默认窗口（02:00–05:00）保持默认计划；升级日志会打印迁移结果。若库中 `scheduleCron` 出现非法或非 5 段条目，读取时会被自动过滤，过滤后为空则回写默认计划。
 
 ## 推荐验证流程
 

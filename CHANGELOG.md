@@ -11,6 +11,8 @@
 
 ### 功能
 
+- **调度改为 cron 触发计划**：`CheckinSetting` 用 `scheduleCron`（标准 5 段 cron 表达式 JSON 数组，支持多个）替代 `windowStart`/`windowEnd` 时间窗口（列保留兼容旧库但不再读写）；调度器改为每 1 分钟 tick 一次、命中任一 cron 表达式才触发一轮签到，每次触发独立成一轮、轮首从 DB 实时重算各账户今日次数（跨多次触发仍按 `maxAttemptsPerDay` 封顶）。新增 `croner` 依赖、调度器 `cron_now_matches` 单测、前端 `utils/cron.ts` 5 段 cron 校验（含单测）。
+- **cron 迁移与校验加固**：旧库升级（只有窗口、无 `scheduleCron` 列）时，非默认窗口按小时粒度近似转换为 cron 计划（跨午夜拆成两条表达式），默认窗口保持默认计划，避免升级后调度被默认计划静默替换；`get_settings` 自动过滤非法或非 5 段 cron 条目并回写；路由校验拒绝 6/7 段带秒表达式（调度按分钟粒度匹配秒=0，带秒永不触发）；前端 cron 校验与后端 croner 对齐——接受 `?`（仅日/星期）、`L`/`W`/`#` 修饰符、字母星期环回（`SAT-SUN`/`SUN-SAT`）、逗号列表空 token 容忍，拒绝 6/7 段与数值星期环回，纯字母降序组合（如 `FRI-MON`）前端放宽、由后端 `Cron::from_str` 权威拒绝。
 - **签到记录单条删除**：新增 `DELETE /api/checkin-runs/{id}`，按归属校验权限（管理员可删任意账户记录，普通用户仅可删自己的）；签到记录面板增加单条删除入口。
 
 ### 安全

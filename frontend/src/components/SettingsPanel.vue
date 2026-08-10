@@ -9,7 +9,7 @@
         <n-tag round :bordered="false" :type="settings.enabled ? 'success' : 'default'">
           {{ settings.enabled ? '启用' : '停用' }}
         </n-tag>
-        <n-tag round :bordered="false" type="info">{{ settings.windowStart }} - {{ settings.windowEnd }}</n-tag>
+        <n-tag round :bordered="false" type="info">{{ scheduleSummary }}</n-tag>
       </n-space>
     </div>
 
@@ -22,24 +22,39 @@
     </div>
 
     <n-form v-else class="settings-form" :model="settings" :disabled="saving" label-placement="left" label-width="180" @submit.prevent="saveSettings">
-      <!-- 调度窗口 -->
+      <!-- 调度计划 -->
       <section class="field-group">
         <header class="field-group-head">
           <n-icon :component="TimeOutline" class="field-group-icon" aria-hidden="true" />
           <div class="field-group-titles">
-            <h3 class="field-group-title">调度窗口</h3>
-            <p class="field-group-desc muted">每日运行时段，支持跨午夜</p>
+            <h3 class="field-group-title">调度计划</h3>
+            <p class="field-group-desc muted">标准 5 段 cron，命中任一表达式即触发一轮签到</p>
           </div>
         </header>
         <div class="field-group-body">
           <n-form-item label="启用自动签到" :show-feedback="false">
             <n-switch v-model:value="settings.enabled" @update:value="markDirty" />
           </n-form-item>
-          <n-form-item label="签到窗口" :show-feedback="false" :validation-status="invalidFields.windowStart || invalidFields.windowEnd ? 'error' : undefined">
-            <div class="time-range">
-              <n-time-picker v-model:value="windowStartPicker" format="HH:mm" clearable />
-              <span class="time-range-sep muted" aria-hidden="true">→</span>
-              <n-time-picker v-model:value="windowEndPicker" format="HH:mm" clearable />
+          <n-form-item label="触发时间" :show-feedback="false" :validation-status="invalidFields.scheduleCron ? 'error' : undefined">
+            <div class="cron-list">
+              <div v-for="(expr, index) in settings.scheduleCron" :key="index" class="cron-row">
+                <n-input
+                  v-model:value="settings.scheduleCron[index]"
+                  placeholder="如 */5 2-5 * * *"
+                  :status="validateCronExpr(expr) ? 'error' : undefined"
+                  @update:value="markDirty"
+                />
+                <n-button size="small" quaternary circle :disabled="settings.scheduleCron.length <= 1" aria-label="删除该触发时间" @click="removeCronRow(index)">
+                  <template #icon><n-icon :component="CloseOutline" /></template>
+                </n-button>
+              </div>
+              <div class="cron-actions">
+                <n-button size="small" dashed @click="addCronRow">
+                  <template #icon><n-icon :component="AddOutline" /></template>
+                  添加触发时间
+                </n-button>
+                <span class="cron-hint muted">语法：分 时 日 月 周，支持 * 、*/n 、a-b 、逗号列表</span>
+              </div>
             </div>
           </n-form-item>
         </div>
@@ -189,9 +204,9 @@
           <n-card size="small" class="policy-card">
             <div class="policy-head">
               <n-icon :component="TimeOutline" class="policy-icon" aria-hidden="true" />
-              <p class="policy-label">签到窗口</p>
+              <p class="policy-label">签到计划</p>
             </div>
-            <p class="policy-value">{{ nextWindowText }}</p>
+            <p class="policy-value">{{ schedulePlanText }}</p>
           </n-card>
         </n-grid-item>
         <n-grid-item>
@@ -238,18 +253,20 @@ import {
   NGrid,
   NGridItem,
   NIcon,
+  NInput,
   NInputNumber,
   NSpace,
   NSpin,
   NSwitch,
   NTag,
   NText,
-  NTimePicker,
   useMessage,
   useThemeVars,
 } from 'naive-ui'
 import {
+  AddOutline,
   CheckmarkOutline,
+  CloseOutline,
   HandRightOutline,
   RefreshOutline,
   TimeOutline,
@@ -257,12 +274,12 @@ import {
   TrashOutline,
 } from '@vicons/ionicons5'
 import { apiUrl, request, responseData } from '../utils/api'
+import { validateCronExpr } from '../utils/cron'
 
 interface Settings {
   id?: string
   enabled: boolean
-  windowStart: string
-  windowEnd: string
+  scheduleCron: string[]
   retryEnabled: boolean
   maxAttemptsPerDay: number
   batchDelayMin: number
@@ -277,8 +294,7 @@ const message = useMessage()
 const themeVars = useThemeVars()
 const settings = ref<Settings>({
   enabled: false,
-  windowStart: '02:00',
-  windowEnd: '05:00',
+  scheduleCron: ['*/5 2-5 * * *'],
   retryEnabled: true,
   maxAttemptsPerDay: 3,
   batchDelayMin: 3,
@@ -302,11 +318,19 @@ const settingsStatusText = computed(() => {
 
 const validationErrors = computed(() => {
   const errors: string[] = []
-  if (minutesOf(settings.value.windowStart) === null) {
-    errors.push('签到窗口开始时间格式无效。')
+  const cronList = settings.value.scheduleCron
+  if (cronList.length === 0 || cronList.every((e) => !e.trim())) {
+    errors.push('至少配置一个触发时间。')
   }
-  if (minutesOf(settings.value.windowEnd) === null) {
-    errors.push('签到窗口结束时间格式无效。')
+  if (cronList.length > 20) {
+    errors.push('触发时间最多 20 个。')
+  }
+  for (const expr of cronList) {
+    const err = validateCronExpr(expr)
+    if (err) {
+      errors.push(`触发时间「${expr.trim() || '(空)'}」${err}。`)
+      break
+    }
   }
   if (settings.value.maxAttemptsPerDay < 1 || settings.value.maxAttemptsPerDay > 100) {
     errors.push('每天最大尝试次数必须在 1 到 100 之间。')
@@ -336,8 +360,9 @@ const validationErrors = computed(() => {
 })
 
 const invalidFields = computed(() => ({
-  windowStart: minutesOf(settings.value.windowStart) === null,
-  windowEnd: minutesOf(settings.value.windowEnd) === null,
+  scheduleCron:
+    settings.value.scheduleCron.length === 0 ||
+    settings.value.scheduleCron.some((e) => validateCronExpr(e) !== null),
   maxAttemptsPerDay: settings.value.maxAttemptsPerDay < 1 || settings.value.maxAttemptsPerDay > 100,
   batchDelayMin: settings.value.batchDelayMin < 0 || settings.value.batchDelayMin > settings.value.batchDelayMax,
   batchDelayMax: settings.value.batchDelayMax < 0 || settings.value.batchDelayMax > 600 || settings.value.batchDelayMax < settings.value.batchDelayMin,
@@ -363,62 +388,31 @@ const scheduledDelaySummary = computed(() =>
   summarizeDelay(settings.value.scheduledDelayMin, settings.value.scheduledDelayMax),
 )
 
-function minutesOf(value: string): number | null {
-  const [hour, minute] = value.split(':').map(Number)
-  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
-  return hour * 60 + minute
-}
+// 面板头部/政策卡展示的调度计划摘要
+const scheduleSummary = computed(() => {
+  const list = settings.value.scheduleCron.filter((e) => e.trim() !== '')
+  if (list.length === 0) return '未配置触发时间'
+  return list.length === 1 ? list[0] : `${list[0]} 等 ${list.length} 个`
+})
 
-const nextWindowText = computed(() => {
+const schedulePlanText = computed(() => {
   if (!settings.value.enabled) return '自动签到未启用'
-  const start = minutesOf(settings.value.windowStart)
-  const end = minutesOf(settings.value.windowEnd)
-  if (start === null || end === null) return '时间格式无效'
-
-  const now = new Date()
-  const current = now.getHours() * 60 + now.getMinutes()
-  const range = `${settings.value.windowStart} - ${settings.value.windowEnd}`
-
-  if (start <= end) {
-    if (current >= start && current <= end) return `当前窗口内，${range}`
-    if (current < start) return `今日 ${range}`
-    return `明日 ${range}`
-  }
-
-  if (current >= start || current <= end) return `当前跨日窗口内，${range}`
-  return `今日 ${range}`
+  const list = settings.value.scheduleCron.filter((e) => e.trim() !== '')
+  if (list.length === 0) return '未配置触发时间'
+  return list.join(' · ')
 })
 
-// NTimePicker 用时间戳作为值，这里与设置的 "HH:MM" 字符串互转
-function timeToTimestamp(value: string): number | null {
-  const minutes = minutesOf(value)
-  if (minutes === null) return null
-  const date = new Date()
-  date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0)
-  return date.getTime()
+const addCronRow = () => {
+  if (settings.value.scheduleCron.length >= 20) return
+  settings.value.scheduleCron.push('')
+  markDirty()
 }
 
-function timestampToTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+const removeCronRow = (index: number) => {
+  if (settings.value.scheduleCron.length <= 1) return
+  settings.value.scheduleCron.splice(index, 1)
+  markDirty()
 }
-
-const windowStartPicker = computed<number | null>({
-  get: () => timeToTimestamp(settings.value.windowStart),
-  set: (value) => {
-    settings.value.windowStart = value !== null ? timestampToTime(value) : ''
-    markDirty()
-  },
-})
-
-const windowEndPicker = computed<number | null>({
-  get: () => timeToTimestamp(settings.value.windowEnd),
-  set: (value) => {
-    settings.value.windowEnd = value !== null ? timestampToTime(value) : ''
-    markDirty()
-  },
-})
 
 // dirty：本地相对远端最近一次保存值有改动；保存成功后重新对齐快照
 const dirty = computed(() => {
@@ -427,8 +421,7 @@ const dirty = computed(() => {
   const s = settings.value
   return (
     s.enabled !== p.enabled ||
-    s.windowStart !== p.windowStart ||
-    s.windowEnd !== p.windowEnd ||
+    s.scheduleCron.join('\n') !== p.scheduleCron.join('\n') ||
     s.retryEnabled !== p.retryEnabled ||
     s.maxAttemptsPerDay !== p.maxAttemptsPerDay ||
     s.batchDelayMin !== p.batchDelayMin ||
@@ -588,17 +581,35 @@ onMounted(fetchSettings)
   padding-right: 12px;
 }
 
-/* 时间区间：两个时间选择器并排，中间一个箭头 */
-.time-range {
+/* cron 触发时间列表：每行输入框 + 删除按钮，下方添加按钮与语法提示 */
+.cron-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 520px;
+}
+
+.cron-row {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.cron-row :deep(.n-input) {
+  flex: 1;
+  min-width: 0;
+}
+
+.cron-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
-.time-range-sep {
-  font-size: 14px;
-  line-height: 1;
+.cron-hint {
+  font-size: 12px;
 }
 
 /* 延迟区间：min / max / 速览文案一行 */

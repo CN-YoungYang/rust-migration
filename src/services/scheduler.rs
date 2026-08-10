@@ -2,9 +2,10 @@ use crate::{
     db,
     services::checkin::runner::{execute_checkin, skip_reason_for_batch},
 };
-use chrono::{Local, NaiveTime};
+use chrono::{DateTime, Local, Timelike};
+use croner::Cron;
 use sqlx::SqlitePool;
-use std::{sync::Arc, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::{sync::Mutex, time::MissedTickBehavior};
 
 pub async fn start_scheduler(db: SqlitePool) {
@@ -19,7 +20,9 @@ async fn run_scheduler(db: SqlitePool) {
 
     let checkin_db = db.clone();
     let checkin_task = async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(5 * 60));
+        // 每分钟 tick 一次，命中任一 cron 表达式才触发一轮签到（cron 粒度为分钟）。
+        // 每 60s 一次 tick 保证相邻 tick 恒跨分钟，同一分钟内不会重复触发。
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         interval.tick().await;
         loop {
@@ -30,6 +33,9 @@ async fn run_scheduler(db: SqlitePool) {
                 let _guard = match lock.try_lock() {
                     Ok(guard) => guard,
                     Err(_) => {
+                        // 上一轮跨过本分钟触发时该轮被放弃（cron 触发是瞬时点，错过不回补，
+                        // 与系统 cron 的语义一致）；但下一轮 60s 后会重新判 cron，默认
+                        // */5 计划很快再命中，只有稀疏计划（如每日一次）在长轮占锁时才会漏一次。
                         tracing::warn!("上一轮定时签到仍在执行，跳过本轮以避免重复触发");
                         return;
                     }
@@ -64,6 +70,20 @@ async fn cleanup_old_runs(db: &SqlitePool) {
     }
 }
 
+/// 判断当前时间是否命中任一 cron 表达式（标准 5 段：分 时 日 月 周，粒度为分钟）。
+/// 先把 now 截断到整分（秒/纳秒清零），避免 is_time_matching 校验秒字段导致同一分钟内漏判。
+fn cron_now_matches(exprs: &[String], now: DateTime<Local>) -> bool {
+    let Some(truncated) = now.with_second(0).and_then(|t| t.with_nanosecond(0)) else {
+        return false;
+    };
+    exprs.iter().any(|expr| {
+        Cron::from_str(expr)
+            .ok()
+            .and_then(|c| c.is_time_matching(&truncated).ok())
+            .unwrap_or(false)
+    })
+}
+
 async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()> {
     let settings = db::get_settings(db).await?;
 
@@ -71,17 +91,9 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
         return Ok(());
     }
 
-    let now = Local::now().time();
-    let window_start = NaiveTime::parse_from_str(&settings.window_start, "%H:%M")?;
-    let window_end = NaiveTime::parse_from_str(&settings.window_end, "%H:%M")?;
-
-    let in_window = if window_start <= window_end {
-        now >= window_start && now <= window_end
-    } else {
-        now >= window_start || now <= window_end
-    };
-
-    if !in_window {
+    // cron 触发：当前分钟命中任一配置表达式才进入本轮。
+    // 每次触发独立成一轮，下方仍从 DB 实时重算今日各账户次数（不做跨触发内存累计）。
+    if !cron_now_matches(&settings.schedule_cron, Local::now()) {
         return Ok(());
     }
 
@@ -151,4 +163,88 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn local_at(ymd_hms: &str) -> DateTime<Local> {
+        let nd = chrono::NaiveDateTime::parse_from_str(ymd_hms, "%Y-%m-%dT%H:%M:%S").unwrap();
+        Local.from_local_datetime(&nd).single().unwrap()
+    }
+
+    #[test]
+    fn cron_matches_at_minute_start() {
+        assert!(cron_now_matches(
+            &["*/5 2-5 * * *".to_string()],
+            local_at("2026-08-10T02:00:00")
+        ));
+        assert!(cron_now_matches(
+            &["*/5 2-5 * * *".to_string()],
+            local_at("2026-08-10T04:55:00")
+        ));
+    }
+
+    #[test]
+    fn cron_matches_within_the_minute() {
+        // 02:00:37 截断到整分后仍命中，避免秒字段漏判
+        assert!(cron_now_matches(
+            &["*/5 2-5 * * *".to_string()],
+            local_at("2026-08-10T02:00:37")
+        ));
+    }
+
+    #[test]
+    fn cron_not_matching_outside_schedule() {
+        assert!(!cron_now_matches(
+            &["*/5 2-5 * * *".to_string()],
+            local_at("2026-08-10T06:00:00")
+        ));
+        assert!(!cron_now_matches(
+            &["*/5 2-5 * * *".to_string()],
+            local_at("2026-08-10T01:59:00")
+        ));
+    }
+
+    #[test]
+    fn cron_any_of_multiple_expressions() {
+        let exprs = vec!["0 8 * * *".to_string(), "30 20 * * *".to_string()];
+        assert!(cron_now_matches(&exprs, local_at("2026-08-10T08:00:00")));
+        assert!(cron_now_matches(&exprs, local_at("2026-08-10T20:30:00")));
+        assert!(!cron_now_matches(&exprs, local_at("2026-08-10T08:30:00")));
+    }
+
+    #[test]
+    fn cron_daily_hourly_and_step() {
+        assert!(cron_now_matches(
+            &["0 3 * * *".to_string()],
+            local_at("2026-08-10T03:00:00")
+        ));
+        assert!(!cron_now_matches(
+            &["0 3 * * *".to_string()],
+            local_at("2026-08-10T03:30:00")
+        ));
+        assert!(cron_now_matches(
+            &["*/30 * * * *".to_string()],
+            local_at("2026-08-10T09:00:00")
+        ));
+        assert!(cron_now_matches(
+            &["*/30 * * * *".to_string()],
+            local_at("2026-08-10T09:30:00")
+        ));
+        assert!(!cron_now_matches(
+            &["*/30 * * * *".to_string()],
+            local_at("2026-08-10T09:15:00")
+        ));
+    }
+
+    #[test]
+    fn invalid_cron_expression_is_ignored() {
+        assert!(!cron_now_matches(
+            &["not-a-cron".to_string()],
+            local_at("2026-08-10T08:00:00")
+        ));
+    }
 }

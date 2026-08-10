@@ -250,8 +250,7 @@ PUT /api/settings
 ```json
 {
   "enabled": true,
-  "windowStart": "02:00",
-  "windowEnd": "05:00",
+  "scheduleCron": ["*/5 2-5 * * *", "0 20 * * *"],
   "retryEnabled": true,
   "maxAttemptsPerDay": 3,
   "batchDelayMin": 3,
@@ -265,7 +264,7 @@ PUT /api/settings
 | 字段 | 说明 |
 |------|------|
 | `enabled` | 是否启用自动签到 |
-| `windowStart` / `windowEnd` | 自动签到时间窗口，本地时间，格式 `HH:MM` |
+| `scheduleCron` | 调度触发计划：标准 5 段 cron 表达式的 JSON 数组（如 `["*/5 2-5 * * *"]`），命中任一即触发一轮签到。仅接受 5 段（秒级 6/7 段会被拒绝，因为调度按分钟粒度匹配） |
 | `retryEnabled` | 是否启用失败重试 |
 | `maxAttemptsPerDay` | 每个账户每天最大尝试次数，范围 `1~100` |
 | `batchDelayMin` / `batchDelayMax` | 批量和定时签到的账户间随机延迟，范围 `0~600` 秒 |

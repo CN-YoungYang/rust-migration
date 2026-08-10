@@ -110,12 +110,12 @@ pub struct CheckinRun {
 pub struct CheckinSetting {
     pub id: String,
     pub enabled: bool,
-    #[serde(rename = "windowStart")]
-    #[sqlx(rename = "windowStart")]
-    pub window_start: String,
-    #[serde(rename = "windowEnd")]
-    #[sqlx(rename = "windowEnd")]
-    pub window_end: String,
+    /// 调度触发计划：标准 5 段 cron 表达式的 JSON 数组（命中任一即触发一轮签到）。
+    /// v2.6.0 起替代 windowStart/windowEnd（列保留但不再读写）。
+    #[serde(rename = "scheduleCron")]
+    #[sqlx(rename = "scheduleCron")]
+    #[sqlx(json)]
+    pub schedule_cron: Vec<String>,
     #[serde(rename = "retryEnabled")]
     #[sqlx(rename = "retryEnabled")]
     pub retry_enabled: bool,
