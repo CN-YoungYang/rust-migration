@@ -133,6 +133,7 @@ POST /api/accounts/import
 - 对当前失败账户批量重试。
 - 对单条失败记录重试。
 - 复制签到摘要。
+- 勾选删除多条记录（单条或批量），任一记录缺失或越权即整体拒绝。
 - 清理全部记录或保留最新 N 条。
 
 常用接口：
@@ -142,6 +143,8 @@ GET /api/checkin-runs
 GET /api/checkin-runs?userId=:user_id&status=failed
 POST /api/checkin-runs
 POST /api/checkin-runs/batch
+POST /api/checkin-runs/batch-delete
+DELETE /api/checkin-runs/:id
 POST /api/checkin-runs/cleanup
 ```
 
@@ -175,6 +178,18 @@ POST /api/checkin-runs/cleanup
 - `userId` 为可选字段，仅管理员可指定；管理员省略时清理全局，普通用户始终限制为本人。
 - `resetState` 仅可与 `keepLatest = 0` 同时使用；启用后清空账户 `lastStatus`、`lastMessage`、`lastRunAt` 和对应 `FailureCounter`，但保留余额。
 - 响应包含 `deletedCount`、`resetAccountCount` 和 `deletedFailureCounterCount`。
+
+批量删除记录：
+
+```json
+{
+  "runIds": ["run_id_1", "run_id_2"]
+}
+```
+
+- `runIds` 去重后上限 500；任一记录不存在（含并发清理导致）或非管理员越权即整体拒绝，不删除任何记录。
+- 删除后逐受影响账户重算最近状态与连续失败计数。
+- 响应包含 `deletedCount`。
 
 ### 数据统计
 
