@@ -207,47 +207,123 @@ pub async fn find_run_by_id(db: &SqlitePool, id: &str) -> Result<Option<CheckinR
     Ok(run)
 }
 
+/// Find multiple runs by id (rawResponse omitted, same column list as list).
+pub async fn find_runs_by_ids(db: &SqlitePool, ids: &[String]) -> Result<Vec<CheckinRun>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT {} FROM CheckinRun WHERE id IN ({placeholders})",
+        RUN_LIST_COLUMNS
+    );
+    let mut query = sqlx::query_as::<_, CheckinRun>(&sql);
+    for id in ids {
+        query = query.bind(id);
+    }
+    Ok(query.fetch_all(db).await?)
+}
+
 /// Delete a single check-in run by id. Returns true if a row was deleted.
 ///
-/// L1：删除后在**同一事务**内把账户的 `lastStatus/lastMessage/lastRunAt` 重算为
-/// “现存最新一条记录”的值（无剩余记录则置空）。这样删除今日唯一 success 记录后，
+/// 薄包装：委托给 [`delete_runs_by_ids`]，使单条与批量删除共享同一套
+/// “删除后按剩余历史重算账户状态与失败计数”的语义。
+pub async fn delete_run(db: &SqlitePool, id: &str) -> Result<bool> {
+    let deleted = delete_runs_by_ids(db, &[id.to_string()], false).await?;
+    Ok(deleted > 0)
+}
+
+/// Delete a set of check-in runs atomically, then reconcile each affected
+/// account's `lastStatus/lastMessage/lastRunAt` and `FailureCounter` against
+/// its remaining history — identical semantics to the legacy single-record
+/// delete, but each affected account is reconciled **exactly once**, after all
+/// of its selected rows are removed (instead of once per deleted row).
+///
+/// L1 语义：删除后在同一事务内把受影响账户的最近状态重算为“现存最新一条记录”
+/// 的值（无剩余记录则置空）。这样删除今日唯一 success 记录后，
 /// `skip_reason_for_batch` 不再判 `already_succeeded_today`，调度器/批量可重签；
 /// 删除失败记录也会同步放宽今日计数，两个方向保持一致。余额列不受影响。
+/// 失败计数按剩余历史从最新向前重算，最新非 failed 时删除计数器行，避免与
+/// 回退后的 `lastStatus` 视图分叉、失败通知的“连续失败 N 次”与可见历史不符。
 ///
-/// 同步重算该账户 `FailureCounter.consecutiveFailures`（按现存记录从最新向前的
-/// 连续 failed 数；最新非 failed 则为 0 并删除计数器行），避免与 `lastStatus`
-/// 回退后视图分叉、失败通知的“连续失败 N 次”与实际可见历史不符（Low-XX）。
-pub async fn delete_run(db: &SqlitePool, id: &str) -> Result<bool> {
+/// `strict` 为 true 时全或无：在同一事务内核对目标行全部存在，缺失（含并发
+/// 清理在路由层校验与删除之间的 TOCTOU 窗口导致的缺失）即整体拒绝、不删除
+/// 任何记录，返回 `Validation`。路由层应先做存在性/归属权预检给出干净的
+/// 400/403，再以 `strict = true` 关闭竞态；单条删除已先查存在性，用 false
+/// 保持宽容语义。
+///
+/// 返回实际删除的行数。整个批量在同一事务内原子提交：要么全部删除并重算，
+/// 要么无任何改动。
+pub async fn delete_runs_by_ids(db: &SqlitePool, ids: &[String], strict: bool) -> Result<usize> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    const ID_CHUNK: usize = 500;
     let mut tx = db.begin().await?;
 
-    let target = sqlx::query_as::<_, (String, DateTime<Utc>)>(
-        "SELECT accountId, createdAt FROM CheckinRun WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_optional(&mut *tx)
-    .await?;
-
-    let Some((account_id, _)) = target else {
-        tx.commit().await?;
-        return Ok(false);
-    };
-
-    let deleted = sqlx::query("DELETE FROM CheckinRun WHERE id = ?")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-    if deleted.rows_affected() == 0 {
-        tx.commit().await?;
-        return Ok(false);
+    // 全或无：同一事务内核对目标行全部存在，缺失（含并发清理导致）即整体拒绝。
+    if strict {
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!("SELECT COUNT(*) FROM CheckinRun WHERE id IN ({placeholders})");
+        let mut query = sqlx::query_scalar::<_, i64>(&sql);
+        for id in ids {
+            query = query.bind(id);
+        }
+        let found = query.fetch_one(&mut *tx).await? as usize;
+        if found != ids.len() {
+            return Err(AppError::Validation(format!(
+                "部分记录不存在或已被删除（请求 {} 条，仅找到 {} 条），未删除任何记录",
+                ids.len(),
+                found
+            )));
+        }
     }
 
+    // 受影响账户：按仍存在的 id 去重收集（缺失 id 不产生账户，不触发重算）。
+    let account_ids: Vec<String> = {
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!("SELECT DISTINCT accountId FROM CheckinRun WHERE id IN ({placeholders})");
+        let mut query = sqlx::query_scalar::<_, String>(&sql);
+        for id in ids {
+            query = query.bind(id);
+        }
+        query.fetch_all(&mut *tx).await?
+    };
+
+    // 删除目标行。路由层已把数量封顶在 500，单条 IN 子句在 SQLite 占位符上限内；
+    // 仍分块以规避变量上限、缩短单次写锁持有。
+    let mut deleted = 0usize;
+    for chunk in ids.chunks(ID_CHUNK) {
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!("DELETE FROM CheckinRun WHERE id IN ({placeholders})");
+        let mut query = sqlx::query(&sql);
+        for id in chunk {
+            query = query.bind(id);
+        }
+        deleted += query.execute(&mut *tx).await?.rows_affected() as usize;
+    }
+
+    // 逐受影响账户重算一次（基于全部删除完成后的剩余历史）。
+    for account_id in &account_ids {
+        reconcile_account_after_delete(&mut tx, account_id).await?;
+    }
+
+    tx.commit().await?;
+    Ok(deleted)
+}
+
+/// 重算单个账户删除后的最近状态与失败计数，供单条/批量删除共用。
+async fn reconcile_account_after_delete(
+    conn: &mut sqlx::SqliteConnection,
+    account_id: &str,
+) -> Result<()> {
     // 重算账户状态：取现存最新一条记录（与记录列表一致的时间序）。
     let latest = sqlx::query_as::<_, (String, Option<String>, DateTime<Utc>)>(
         "SELECT status, message, createdAt FROM CheckinRun
          WHERE accountId = ? ORDER BY createdAt DESC, id DESC LIMIT 1",
     )
-    .bind(&account_id)
-    .fetch_optional(&mut *tx)
+    .bind(account_id)
+    .fetch_optional(&mut *conn)
     .await?;
 
     // 保存最新记录是否 failed（用于下方失败计数重算）；match 会 move latest
@@ -265,8 +341,8 @@ pub async fn delete_run(db: &SqlitePool, id: &str) -> Result<bool> {
             .bind(message)
             .bind(created_at)
             .bind(Utc::now())
-            .bind(&account_id)
-            .execute(&mut *tx)
+            .bind(account_id)
+            .execute(&mut *conn)
             .await?;
         }
         None => {
@@ -274,8 +350,8 @@ pub async fn delete_run(db: &SqlitePool, id: &str) -> Result<bool> {
                 "UPDATE CheckinAccount SET lastStatus = NULL, lastMessage = NULL, lastRunAt = NULL, updatedAt = ? WHERE id = ?",
             )
             .bind(Utc::now())
-            .bind(&account_id)
-            .execute(&mut *tx)
+            .bind(account_id)
+            .execute(&mut *conn)
             .await?;
         }
     }
@@ -294,14 +370,14 @@ pub async fn delete_run(db: &SqlitePool, id: &str) -> Result<bool> {
                AND r2.status != 'failed'
            )",
     )
-    .bind(&account_id)
-    .fetch_one(&mut *tx)
+    .bind(account_id)
+    .fetch_one(&mut *conn)
     .await?;
 
     if consecutive_failures == 0 {
         sqlx::query("DELETE FROM FailureCounter WHERE accountId = ?")
-            .bind(&account_id)
-            .execute(&mut *tx)
+            .bind(account_id)
+            .execute(&mut *conn)
             .await?;
     } else {
         sqlx::query(
@@ -312,16 +388,14 @@ pub async fn delete_run(db: &SqlitePool, id: &str) -> Result<bool> {
                  lastFailedAt = excluded.lastFailedAt,
                  updatedAt = excluded.updatedAt",
         )
-        .bind(&account_id)
+        .bind(account_id)
         .bind(consecutive_failures)
         .bind(latest_failed_at)
         .bind(Utc::now())
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
     }
-
-    tx.commit().await?;
-    Ok(true)
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1081,5 +1155,217 @@ mod tests {
                 .await
                 .expect("count should succeed");
         assert_eq!(remaining, 0);
+    }
+
+    #[tokio::test]
+    async fn delete_runs_batch_removes_all_and_reconciles_each_account_once() {
+        let pool = pool_with_account().await;
+        // 插入 acc-2（另一账户），验证重算范围不扩散
+        let now = Utc::now();
+        sqlx::query(
+            "INSERT INTO CheckinAccount (
+                id, name, siteType, baseUrl, ownerId, authType, enabled, retryEnabled,
+                createdAt, updatedAt
+             ) VALUES ('acc-2', 'B', 'new-api', 'http://example.net', NULL,
+                'access_token', 1, 1, ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("other account should be inserted");
+
+        // acc-1 按时间 oldest→newest: success, failed, success（最新为今日唯一）
+        let oldest = create_run_with_status_update(
+            &pool,
+            "acc-1",
+            "success",
+            Some("ok"),
+            Some(1),
+            "manual",
+            None,
+        )
+        .await
+        .expect("oldest run should be created");
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        let middle = create_run_with_status_update(
+            &pool,
+            "acc-1",
+            "failed",
+            Some("timeout"),
+            Some(2),
+            "manual",
+            None,
+        )
+        .await
+        .expect("middle run should be created");
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        let newest = create_run_with_status_update(
+            &pool,
+            "acc-1",
+            "success",
+            Some("ok"),
+            Some(3),
+            "manual",
+            None,
+        )
+        .await
+        .expect("newest run should be created");
+        // acc-2 一条 failed
+        let other = create_run_with_status_update(
+            &pool,
+            "acc-2",
+            "failed",
+            Some("x"),
+            Some(4),
+            "manual",
+            None,
+        )
+        .await
+        .expect("other run should be created");
+
+        // 批量删除 newest + middle + other：同账户两条 + 另一账户一条
+        let deleted = delete_runs_by_ids(
+            &pool,
+            &[newest.id.clone(), middle.id.clone(), other.id.clone()],
+            true,
+        )
+        .await
+        .expect("batch delete should succeed");
+        assert_eq!(deleted, 3);
+        assert_eq!(count_runs(&pool, "acc-1").await, 1);
+        assert_eq!(count_runs(&pool, "acc-2").await, 0);
+
+        // acc-1 状态回退到 oldest success；acc-2 无剩余记录状态清空
+        let (s1,): (Option<String>,) =
+            sqlx::query_as("SELECT lastStatus FROM CheckinAccount WHERE id = 'acc-1'")
+                .fetch_one(&pool)
+                .await
+                .expect("acc-1 should remain");
+        assert_eq!(s1.as_deref(), Some("success"));
+        let (s2,): (Option<String>,) =
+            sqlx::query_as("SELECT lastStatus FROM CheckinAccount WHERE id = 'acc-2'")
+                .fetch_one(&pool)
+                .await
+                .expect("acc-2 should remain");
+        assert!(s2.is_none());
+
+        // 全或无（strict=true）：任一 id 缺失（含并发清理导致）→ 整体拒绝，
+        // 一条都不删，返回 Validation 而非静默少删
+        let strict_err =
+            delete_runs_by_ids(&pool, &[oldest.id.clone(), "run-nope".to_string()], true)
+                .await
+                .expect_err("strict batch delete with a missing id should be rejected");
+        assert!(matches!(strict_err, AppError::Validation(_)));
+        assert_eq!(count_runs(&pool, "acc-1").await, 1); // oldest 仍在
+        assert_eq!(count_runs(&pool, "acc-2").await, 0);
+
+        // 宽容模式（strict=false，单条删除走此路径）：缺失 id 不报错、不重算
+        let missing = delete_runs_by_ids(&pool, &["run-nope".to_string()], false)
+            .await
+            .expect("tolerant missing batch should succeed");
+        assert_eq!(missing, 0);
+        let mixed = delete_runs_by_ids(&pool, &[oldest.id.clone(), "run-nope".to_string()], false)
+            .await
+            .expect("tolerant mixed batch should succeed");
+        assert_eq!(mixed, 1);
+        assert_eq!(count_runs(&pool, "acc-1").await, 0);
+        // acc-1 记录全部删光后状态清空
+        let (s1,): (Option<String>,) =
+            sqlx::query_as("SELECT lastStatus FROM CheckinAccount WHERE id = 'acc-1'")
+                .fetch_one(&pool)
+                .await
+                .expect("acc-1 should remain");
+        assert!(s1.is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_runs_batch_reconciles_failure_counter_with_remaining_history() {
+        let pool = pool_with_account().await;
+        // acc-1 按时间 oldest→newest: failed, success, failed
+        let failed_old = create_run_with_status_update(
+            &pool,
+            "acc-1",
+            "failed",
+            Some("timeout"),
+            Some(1),
+            "manual",
+            None,
+        )
+        .await
+        .expect("oldest failed run should be created");
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        let success = create_run_with_status_update(
+            &pool,
+            "acc-1",
+            "success",
+            Some("ok"),
+            Some(2),
+            "manual",
+            None,
+        )
+        .await
+        .expect("middle success run should be created");
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        let failed_new = create_run_with_status_update(
+            &pool,
+            "acc-1",
+            "failed",
+            Some("timeout"),
+            Some(3),
+            "manual",
+            None,
+        )
+        .await
+        .expect("newest failed run should be created");
+
+        // 写入一个失同步的计数（create_* 不会维护 FailureCounter），
+        // 验证批量删除会按剩余历史重算而不是遗留陈旧值。
+        sqlx::query(
+            "INSERT INTO FailureCounter (accountId, consecutiveFailures, lastFailedAt, updatedAt)
+             VALUES ('acc-1', 9, NULL, ?)",
+        )
+        .bind(Utc::now())
+        .execute(&pool)
+        .await
+        .expect("stale counter should be inserted");
+
+        // 删除中间 success → 剩余 failed, failed → 连续失败 = 2
+        let deleted = delete_runs_by_ids(&pool, &[success.id.clone()], true)
+            .await
+            .expect("delete middle should succeed");
+        assert_eq!(deleted, 1);
+        let (count,): (i64,) = sqlx::query_as(
+            "SELECT consecutiveFailures FROM FailureCounter WHERE accountId = 'acc-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("counter should remain");
+        assert_eq!(count, 2);
+
+        // 再删最新 failed → 剩余 failed → 连续失败 = 1
+        let deleted = delete_runs_by_ids(&pool, &[failed_new.id.clone()], true)
+            .await
+            .expect("delete newest should succeed");
+        assert_eq!(deleted, 1);
+        let (count,): (i64,) = sqlx::query_as(
+            "SELECT consecutiveFailures FROM FailureCounter WHERE accountId = 'acc-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("counter should remain");
+        assert_eq!(count, 1);
+
+        // 删光剩余 failed → 无失败记录 → 计数器行删除
+        let deleted = delete_runs_by_ids(&pool, &[failed_old.id.clone()], true)
+            .await
+            .expect("delete last should succeed");
+        assert_eq!(deleted, 1);
+        let counter_rows: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM FailureCounter WHERE accountId = 'acc-1'")
+                .fetch_one(&pool)
+                .await
+                .expect("counter count should be readable");
+        assert_eq!(counter_rows, 0);
     }
 }

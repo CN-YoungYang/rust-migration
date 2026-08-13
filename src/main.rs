@@ -130,6 +130,10 @@ async fn main() -> anyhow::Result<()> {
             post(routes::checkin_runs::cleanup_runs),
         )
         .route(
+            "/api/checkin-runs/batch-delete",
+            post(routes::checkin_runs::batch_delete_runs),
+        )
+        .route(
             "/api/checkin-runs/:id",
             delete(routes::checkin_runs::delete_run),
         )

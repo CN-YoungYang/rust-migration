@@ -152,12 +152,28 @@
       </n-list>
     </n-card>
 
+    <!-- 勾选删除工具条 -->
+    <div v-if="checkedRunKeys.length > 0" class="selection-toolbar">
+      <n-text depth="3">已选 {{ checkedRunKeys.length }} 条记录</n-text>
+      <n-button
+        size="small"
+        type="error"
+        :loading="deletingSelected"
+        :disabled="actionBusy"
+        @click="deleteSelectedRuns"
+      >
+        {{ deletingSelected ? '删除中…' : `删除选中 ${checkedRunKeys.length} 条` }}
+      </n-button>
+    </div>
+
     <!-- 记录表 -->
     <n-data-table
       :columns="runColumns"
       :data="runs"
       :loading="runsLoading"
       :row-key="(row: CheckinRun) => row.id"
+      :checked-row-keys="checkedRunKeys"
+      @update:checked-row-keys="onCheckedRunKeysChange"
       :scroll-x="900"
       class="runs-table"
     >
@@ -277,6 +293,8 @@ const executingAccountId = ref('')
 const retryingBatch = ref(false)
 const cleaning = ref(false)
 const deletingRunId = ref('')
+const deletingSelected = ref(false)
+const checkedRunKeys = ref<string[]>([])
 const PAGE_SIZE = 100
 let accountRequestSeq = 0
 let runsRequestSeq = 0
@@ -333,7 +351,7 @@ const statusCounts = computed(() => {
   return counts
 })
 
-const actionBusy = computed(() => executing.value || retryingBatch.value || cleaning.value || Boolean(deletingRunId.value))
+const actionBusy = computed(() => executing.value || retryingBatch.value || cleaning.value || deletingSelected.value || Boolean(deletingRunId.value))
 
 const progressPercent = computed(() => {
   if (!bulkProgress.value || bulkProgress.value.total === 0) return 0
@@ -490,6 +508,9 @@ const fetchRuns = async (append = false) => {
     } else {
       runs.value = data
       runsOffset.value = 0
+      // 非追加刷新（筛选/动作后重载）时清空勾选：已勾选记录可能已不在新数据中，
+      // 残留的 key 会引用已删/已不在列表的 id。“加载更多”走 append，勾选跨页保留。
+      checkedRunKeys.value = []
     }
     runsOffset.value += data.length
     hasMore.value = data.length >= PAGE_SIZE
@@ -761,6 +782,35 @@ const deleteRun = async (run: CheckinRun) => {
   }
 }
 
+const onCheckedRunKeysChange = (keys: Array<string | number>) => {
+  // row-key 恒为字符串 id，过滤掉理论上的 number 键
+  checkedRunKeys.value = keys.filter((key): key is string => typeof key === 'string')
+}
+
+/** 批量删除勾选的记录：弹窗确认后调 batch-delete，成功后清空勾选并刷新列表与概览。 */
+const deleteSelectedRuns = async () => {
+  const ids = checkedRunKeys.value
+  if (ids.length === 0 || deletingSelected.value) return
+  const msg = `确定删除选中的 ${ids.length} 条签到记录吗？此操作不可撤销。`
+  if (!(await confirmWarning(msg))) return
+  deletingSelected.value = true
+  try {
+    const response = await request(apiUrl('/checkin-runs/batch-delete'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runIds: ids }),
+    })
+    const result = await responseData<{ deletedCount: number }>(response)
+    message.success(`已删除 ${result.deletedCount} 条签到记录`)
+    checkedRunKeys.value = []
+    await Promise.all([fetchRuns(), fetchAccounts()])
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '删除选中记录失败')
+  } finally {
+    deletingSelected.value = false
+  }
+}
+
 const accountName = (accountId: string) => {
   return accountById.value.get(accountId)?.name || accountId
 }
@@ -823,6 +873,10 @@ const runColumns = computed<DataTableColumns<CheckinRun>>(() => {
   void accounts.value
 
   return [
+    {
+      type: 'selection' as const,
+      disabled: () => actionBusy.value,
+    },
     {
       title: '时间',
       key: 'createdAt',
@@ -1067,6 +1121,13 @@ onUnmounted(() => {
 .runs-table {
   margin-top: 4px;
   font-variant-numeric: tabular-nums;
+}
+
+.selection-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 10px;
 }
 
 .load-more {

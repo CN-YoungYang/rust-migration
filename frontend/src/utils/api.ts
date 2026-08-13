@@ -18,7 +18,9 @@ async function errorMessage(response: Response): Promise<string> {
   const text = await response.text()
   try {
     const json = JSON.parse(text)
-    return json.error || json.message || json.details || `HTTP ${response.status}`
+    // details 是后端填的具体原因（如 Validation 的"部分记录不存在或已被删除"），
+    // error 是通用分类文案（"输入验证失败"），优先展示前者，用户才知道怎么处理。
+    return json.details || json.error || json.message || `HTTP ${response.status}`
   } catch {
     return text || `HTTP ${response.status}`
   }

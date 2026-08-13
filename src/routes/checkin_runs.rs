@@ -47,12 +47,17 @@ pub struct BatchCheckinResponse {
     failed: usize,
 }
 
-/// 批量签到请求去重（Low2）：同一账户重复提交只执行一次，保持首次出现顺序。
-fn dedupe_account_ids(ids: Vec<String>) -> Vec<String> {
+/// 批量请求去重（Low2）：同一 id 重复提交只执行一次，保持首次出现顺序。
+fn dedupe_ids(ids: Vec<String>) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     ids.into_iter()
         .filter(|id| seen.insert(id.clone()))
         .collect()
+}
+
+/// 批量签到账户去重（保留旧函数名以兼容既有调用与测试）。
+fn dedupe_account_ids(ids: Vec<String>) -> Vec<String> {
+    dedupe_ids(ids)
 }
 
 pub async fn list(
@@ -365,6 +370,105 @@ pub async fn delete_run(
     Ok(crate::routes::data(json!({ "success": true, "id": id })))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct BatchDeleteRunsRequest {
+    #[serde(rename = "runIds")]
+    pub run_ids: Vec<String>,
+}
+
+/// 批量删除签到记录：一次事务内删除所选记录并逐账户重算状态。
+///
+/// 全或无：任一 id 不存在（含并发清理导致的缺失）或归属权越权即整体拒绝，
+/// 不删除任何记录——与批量签到 `execute_batch` 的“任一账户无归属权即整体拒绝”
+/// 哲学一致，也避免前端面对“删了一半”的中间状态。
+pub async fn batch_delete_runs(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AppUser>,
+    Json(payload): Json<BatchDeleteRunsRequest>,
+) -> Result<Json<Value>> {
+    // 去重并限制批量数量（与 execute_batch 一致）：IN 子句占位符受 SQLite
+    // 绑定上限约束，且避免同一记录重复提交造成重复删除语义混淆。
+    let run_ids = dedupe_ids(payload.run_ids);
+    check_batch_delete_size(&run_ids)?;
+
+    let is_admin = user.role == "ADMIN" || user.role == "SUPER_ADMIN";
+
+    // 前置解析：一次查出目标 run 行（存在性校验交给 validate_batch_delete_targets）。
+    let runs = db::find_runs_by_ids(&state.db, &run_ids).await?;
+    let account_map = if is_admin {
+        std::collections::HashMap::new()
+    } else {
+        let account_ids: Vec<String> = runs.iter().map(|r| r.account_id.clone()).collect();
+        db::find_accounts_by_ids(&state.db, &account_ids).await?
+    };
+    validate_batch_delete_targets(&run_ids, &runs, is_admin, &user.id, &account_map)?;
+
+    // strict=true：删除事务内重新核验全部目标行存在，关闭“预检与删除之间”的
+    // TOCTOU 窗口（10 分钟清理并发删行时仍满足全或无契约）。
+    let deleted = db::delete_runs_by_ids(&state.db, &run_ids, true).await?;
+    tracing::info!(
+        operator_id = %user.id,
+        run_count = deleted,
+        "批量删除签到记录完成"
+    );
+
+    Ok(crate::routes::data(json!({ "deletedCount": deleted })))
+}
+
+/// 批量删除请求的数量校验（全或无）：空列表与超过上限（500）整体拒绝。
+/// 必须在查询前调用：超量的 IN 子句会突破 SQLite 占位符上限，应先给出干净的 400。
+fn check_batch_delete_size(run_ids: &[String]) -> Result<()> {
+    if run_ids.is_empty() {
+        return Err(AppError::Validation("runIds 不能为空".into()));
+    }
+    if run_ids.len() > 500 {
+        return Err(AppError::Validation(format!(
+            "runIds 数量不能超过 500，收到 {} 个（已去重）",
+            run_ids.len()
+        )));
+    }
+    Ok(())
+}
+
+/// 批量删除目标记录的存在性与归属权校验（全或无）：
+/// 查得条数 != 请求条数（含并发清理导致的缺失）即整体拒绝；非管理员任一记录
+/// 无归属权也整体拒绝（与批量签到一致）。
+fn validate_batch_delete_targets(
+    run_ids: &[String],
+    runs: &[crate::models::CheckinRun],
+    is_admin: bool,
+    user_id: &str,
+    account_map: &std::collections::HashMap<String, crate::models::CheckinAccount>,
+) -> Result<()> {
+    if runs.len() != run_ids.len() {
+        return Err(AppError::Validation(format!(
+            "部分记录不存在或已被删除（请求 {} 条，仅找到 {} 条），未删除任何记录",
+            run_ids.len(),
+            runs.len()
+        )));
+    }
+    if !is_admin {
+        ensure_runs_owned_by_user(user_id, runs, account_map)?;
+    }
+    Ok(())
+}
+
+/// 校验批量删除目标记录的归属权：非管理员必须全部属于本人。
+/// 任一无权（记录对应的账户不存在 / 归属他人）即返回错误，调用方据此整体拒绝。
+fn ensure_runs_owned_by_user(
+    user_id: &str,
+    runs: &[crate::models::CheckinRun],
+    account_map: &std::collections::HashMap<String, crate::models::CheckinAccount>,
+) -> Result<()> {
+    for run in runs {
+        let account = account_map.get(&run.account_id).ok_or(AppError::NotFound)?;
+        if account.owner_id.as_deref() != Some(user_id) {
+            return Err(AppError::Forbidden);
+        }
+    }
+    Ok(())
+}
+
 pub async fn cleanup_runs(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<crate::models::AppUser>,
@@ -411,8 +515,13 @@ pub async fn cleanup_runs(
 }
 #[cfg(test)]
 mod tests {
-    use super::{dedupe_account_ids, resolve_cleanup_owner_scope};
+    use super::{
+        check_batch_delete_size, dedupe_account_ids, ensure_runs_owned_by_user,
+        resolve_cleanup_owner_scope, validate_batch_delete_targets,
+    };
     use crate::error::AppError;
+    use crate::models::{CheckinAccount, CheckinRun};
+    use chrono::Utc;
 
     #[test]
     fn cleanup_scope_enforces_user_ownership_and_admin_targeting() {
@@ -446,5 +555,146 @@ mod tests {
             dedupe_account_ids(vec!["x".into(), "x".into()]),
             vec!["x".to_string()]
         );
+    }
+
+    fn account(id: &str, owner: Option<&str>) -> CheckinAccount {
+        let now = Utc::now();
+        CheckinAccount {
+            id: id.to_string(),
+            name: format!("acct-{id}"),
+            site_type: "new-api".into(),
+            base_url: "http://example.com".into(),
+            user_id: None,
+            owner_id: owner.map(str::to_string),
+            auth_type: "access_token".into(),
+            access_token_enc: None,
+            cookie_enc: None,
+            custom_checkin_url: None,
+            enabled: true,
+            retry_enabled: true,
+            last_balance: None,
+            last_balance_at: None,
+            last_status: None,
+            last_message: None,
+            last_run_at: None,
+            note: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn run(id: &str, account_id: &str) -> CheckinRun {
+        CheckinRun {
+            id: id.to_string(),
+            account_id: account_id.to_string(),
+            status: "success".into(),
+            message: None,
+            duration_ms: None,
+            triggered_by: "manual".into(),
+            raw_response: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn batch_delete_ownership_is_all_or_nothing() {
+        let accounts = std::collections::HashMap::from([
+            ("acc-1".to_string(), account("acc-1", Some("user-1"))),
+            ("acc-2".to_string(), account("acc-2", Some("user-2"))),
+        ]);
+
+        // 全部属于本人 → 通过
+        assert!(ensure_runs_owned_by_user(
+            "user-1",
+            &[run("r1", "acc-1"), run("r2", "acc-1")],
+            &accounts
+        )
+        .is_ok());
+
+        // 任一无权 → Forbidden（整体拒绝，与批量签到一致）
+        assert!(matches!(
+            ensure_runs_owned_by_user(
+                "user-1",
+                &[run("r1", "acc-1"), run("r3", "acc-2")],
+                &accounts,
+            ),
+            Err(AppError::Forbidden)
+        ));
+
+        // 记录对应的账户不存在 → NotFound
+        assert!(matches!(
+            ensure_runs_owned_by_user("user-1", &[run("r9", "acc-missing")], &accounts),
+            Err(AppError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn batch_delete_size_rejects_empty_and_over_cap() {
+        // 空 → Validation：缺 id 查不到时不能把空请求误当成功（全或无的边界）
+        assert!(matches!(
+            check_batch_delete_size(&[]),
+            Err(AppError::Validation(_))
+        ));
+
+        // 恰好 500（去重后）→ Ok，占位符上限内
+        let at_cap: Vec<String> = (0..500).map(|i| format!("id-{i}")).collect();
+        assert!(check_batch_delete_size(&at_cap).is_ok());
+
+        // 501 → Validation，必须在查询前拦截（超量 IN 子句会突破 SQLite 占位符上限）
+        let over_cap: Vec<String> = (0..501).map(|i| format!("id-{i}")).collect();
+        assert!(matches!(
+            check_batch_delete_size(&over_cap),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn batch_delete_targets_reject_missing_ids_all_or_nothing() {
+        let accounts = std::collections::HashMap::from([(
+            "acc-1".to_string(),
+            account("acc-1", Some("user-1")),
+        )]);
+
+        // 缺 id（请求 2 条、只找到 1 条）→ Validation 整体拒绝，管理员同样拒绝
+        assert!(matches!(
+            validate_batch_delete_targets(
+                &["r1".into(), "r2".into()],
+                &[run("r1", "acc-1")],
+                false,
+                "user-1",
+                &accounts,
+            ),
+            Err(AppError::Validation(_))
+        ));
+        assert!(matches!(
+            validate_batch_delete_targets(
+                &["r1".into(), "r2".into()],
+                &[run("r1", "acc-1")],
+                true,
+                "admin",
+                &accounts,
+            ),
+            Err(AppError::Validation(_))
+        ));
+
+        // 全部找到 + 归属通过 → Ok
+        assert!(validate_batch_delete_targets(
+            &["r1".into()],
+            &[run("r1", "acc-1")],
+            false,
+            "user-1",
+            &accounts,
+        )
+        .is_ok());
+
+        // 管理员跳过归属校验 → Ok
+        assert!(validate_batch_delete_targets(
+            &["r1".into()],
+            &[run("r1", "acc-1")],
+            true,
+            "admin",
+            &accounts,
+        )
+        .is_ok());
     }
 }

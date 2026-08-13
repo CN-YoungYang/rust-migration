@@ -14,6 +14,7 @@
 - **调度改为 cron 触发计划**：`CheckinSetting` 用 `scheduleCron`（标准 5 段 cron 表达式 JSON 数组，支持多个）替代 `windowStart`/`windowEnd` 时间窗口（列保留兼容旧库但不再读写）；调度器改为每 1 分钟 tick 一次、命中任一 cron 表达式才触发一轮签到，每次触发独立成一轮、轮首从 DB 实时重算各账户今日次数（跨多次触发仍按 `maxAttemptsPerDay` 封顶）。新增 `croner` 依赖、调度器 `cron_now_matches` 单测、前端 `utils/cron.ts` 5 段 cron 校验（含单测）。
 - **cron 迁移与校验加固**：旧库升级（只有窗口、无 `scheduleCron` 列）时，非默认窗口按小时粒度近似转换为 cron 计划（跨午夜拆成两条表达式），默认窗口保持默认计划，避免升级后调度被默认计划静默替换；`get_settings` 自动过滤非法或非 5 段 cron 条目并回写；路由校验拒绝 6/7 段带秒表达式（调度按分钟粒度匹配秒=0，带秒永不触发）；前端 cron 校验与后端 croner 对齐——接受 `?`（仅日/星期）、`L`/`W`/`#` 修饰符、字母星期环回（`SAT-SUN`/`SUN-SAT`）、逗号列表空 token 容忍，拒绝 6/7 段与数值星期环回，纯字母降序组合（如 `FRI-MON`）前端放宽、由后端 `Cron::from_str` 权威拒绝。
 - **签到记录单条删除**：新增 `DELETE /api/checkin-runs/{id}`，按归属校验权限（管理员可删任意账户记录，普通用户仅可删自己的）；签到记录面板增加单条删除入口。
+- **签到记录批量勾选删除**：新增 `POST /api/checkin-runs/batch-delete`，请求 `{ runIds }`（去重、上限 500、前置解析任一 id 缺失或非管理员越权即整体拒绝、不删任何记录），单事务原子删除并逐受影响账户重算最近状态与失败计数；删除内核 `db::delete_runs_by_ids` 抽出供单条/批量共用，单条删除改为其薄包装（同账户多选只重算一次）。签到记录面板新增勾选列（`checked-row-keys` 跨页保留，筛选/刷新清空）+「删除选中 N 条」工具条，`NDialog` 确认后批量删除并同步刷新列表与概览。
 
 ### 安全
 
@@ -42,6 +43,8 @@
 
 ### 修复
 
+- **批量删除全或无原子化（TOCTOU 修复）**：`delete_runs_by_ids` 新增 `strict` 模式，在删除事务内重新核验目标行全部存在，缺失（含 10 分钟清理与删除之间的并发删行）即整体拒绝、一条不删；批量删除路由以 `strict=true` 调用，关闭「路由层预检与删除之间」的竞态窗口，单条删除维持宽容语义（已先查存在性）。此前批量删除仅靠路由层预检，预检通过后若记录被并发清理删掉，会返回 200 `deletedCount` 小于请求数，静默违反「任一缺失即整体拒绝」契约。
+- **后端校验错误具体原因不再被前端遮蔽**：`errorMessage` 改为优先展示后端 `details`（如「部分记录不存在或已被删除」「runIds 数量不能超过 500」），`error` 仅作兜底分类文案；此前固定取 `json.error`（"输入验证失败"），批量删除等所有 Validation/Conflict 错误的具体原因一律不显示。
 - **HTML 错误页消息降噪并带出错误原因**：三个 provider（new-api / anyrouter / x666）遇到 HTML 响应（如 Cloudflare 504 错误页）时不再把整页写入 message，统一经共享 `looks_like_html` / `extract_html_title` 助手提取 `<title>`（如 `站点返回错误页：504: Gateway time-out`），无 `<title>` 时落到 `签到请求失败：HTTP {status}` 通用文案；顺带覆盖"2xx + HTML 错误页"（部分站点把错误也返回 200）的隐性场景。此前 anyrouter 在 JSON 解析失败时会把整段 HTML 原文写入签到记录 `message`，导致失败摘要出现整页源码。`looks_like_html` 额外剥离 BOM（U+FEFF）——`char::is_whitespace` 不把 U+FEFF 视为空白，代理在响应前附加 BOM 时若不做处理会误判为非 HTML 而绕过守卫。
 - **new-api 成功判定回归修复**：`success` 字段显式 `false` 时不再被 `code=200` 兜底覆盖为成功；`code` 兜底扩展为 `0`（微信/钉钉风格）/`200`（HTTP 风格）两种成功码，并用宽松类型承接字符串/浮点写法（`"200"`、`200.0`），避免字段类型不合导致整条响应解析失败。
 - **SSRF 执行期复核按真实失败处理**：签到前 SSRF 复核未通过时，现在更新账户 `lastStatus/lastRunAt`、失败计数并触发通知，与 provider 报错路径一致；此前只写 failed 记录不更新账户状态，导致 `lastRunAt` 停在昨日、关闭重试的账户每轮调度反复尝试。
