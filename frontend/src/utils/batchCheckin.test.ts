@@ -4,6 +4,7 @@ import {
   batchSkipReason,
   isSameLocalDay,
   randomDelaySecs,
+  summarizeBatchItems,
   shuffleList,
 } from './batchCheckin.ts'
 
@@ -143,5 +144,27 @@ describe('shuffleList', () => {
 
   it('空数组返回空数组', () => {
     assert.deepEqual(shuffleList([]), [])
+  })
+})
+
+describe('summarizeBatchItems', () => {
+  it('把今日已签到与本次新成功分开统计，并排除进行中项', () => {
+    assert.deepEqual(
+      summarizeBatchItems([
+        { status: 'success' },
+        { status: 'already_checked' },
+        { status: 'failed' },
+        { status: 'skipped' },
+        { status: 'pending' },
+      ]),
+      {
+        total: 5,
+        completed: 4,
+        succeeded: 1,
+        alreadyChecked: 1,
+        skipped: 1,
+        failed: 1,
+      },
+    )
   })
 })

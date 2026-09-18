@@ -1,18 +1,20 @@
 use super::providers::{anyrouter, new_api, x666};
 use super::BrowserProfile;
 use crate::{
+    business_time,
     crypto::decrypt,
     db,
-    error::{AppError, Result},
+    error::{sanitize_user_message, AppError, Result},
     models::{CheckinAccount, CheckinRun, CheckinSetting},
 };
-use chrono::Local;
 use sqlx::SqlitePool;
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-// ── 防并发签到：同一账户同时只能有一个签到任务在执行 ──────────────────────
+const QUOTA_PER_USD: f64 = 500_000.0;
+
+// ── 防并发签到：同一账户同时只能有一个签到操作在执行 ──────────────────────
 // 定时签到、手动单个签到、手动批量签到共用此锁，避免同一账户被重复签到。
 fn in_flight_accounts() -> &'static Mutex<HashSet<String>> {
     static INSTANCE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -52,31 +54,54 @@ impl Drop for InFlightGuard {
 /// 批量/定时签到前对单个账户的跳过判断（不涉及 DB 计数查询，便于复用）。
 /// 返回 `Some(reason)` 表示应跳过该账户，`None` 表示需要继续执行。
 ///
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BatchSkipReason {
+    AccountDisabled,
+    AlreadyChecked,
+    RetryDisabled,
+}
+
+impl BatchSkipReason {
+    pub fn status(self) -> &'static str {
+        match self {
+            Self::AlreadyChecked => "already_checked",
+            Self::AccountDisabled | Self::RetryDisabled => "skipped",
+        }
+    }
+
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::AccountDisabled => "账户已禁用",
+            Self::AlreadyChecked => "今日已签到",
+            Self::RetryDisabled => "重试已关闭",
+        }
+    }
+}
+
 /// 与 `scheduler` 内联判断保持一致：
-/// - 已禁用 -> account_disabled
-/// - 今日已 success/already_checked -> already_succeeded_today
-/// - 今日已尝试且（全局或账户）关闭重试 -> retry_disabled
+/// - 已禁用 -> 账户已禁用
+/// - 今日已 success/already_checked -> 今日已签到
+/// - 今日已尝试且（全局或账户）关闭重试 -> 重试已关闭
 pub fn skip_reason_for_batch(
     account: &CheckinAccount,
     settings: &CheckinSetting,
     today_local: chrono::NaiveDate,
-) -> Option<&'static str> {
+) -> Option<BatchSkipReason> {
     if !account.enabled {
-        return Some("account_disabled");
+        return Some(BatchSkipReason::AccountDisabled);
     }
 
     if let Some(last_run) = account.last_run_at {
-        let last_run_local = last_run.with_timezone(&Local);
-        if last_run_local.date_naive() == today_local {
+        if business_time::date_in_business_timezone(last_run) == today_local {
             if let Some(status) = &account.last_status {
                 if status == "success" || status == "already_checked" {
-                    return Some("already_succeeded_today");
+                    return Some(BatchSkipReason::AlreadyChecked);
                 }
             }
 
             // 今日已尝试且未成功：仅当全局和账户都允许重试时才继续
             if !settings.retry_enabled || !account.retry_enabled {
-                return Some("retry_disabled");
+                return Some(BatchSkipReason::RetryDisabled);
             }
         }
     }
@@ -92,7 +117,7 @@ pub async fn execute_checkin(
 ) -> Result<CheckinRun> {
     let start = Instant::now();
 
-    // 防并发：同一账户同时只能有一个签到任务（定时/手动/批量共用）
+    // 防并发：同一账户同时只能有一个签到操作（定时/手动/批量共用）
     let _guard = match InFlightGuard::try_acquire(account_id) {
         Some(g) => g,
         None => {
@@ -103,6 +128,7 @@ pub async fn execute_checkin(
                 "该账户正在签到中，请稍后再试",
                 triggered_by,
                 start,
+                "skipped",
             ));
         }
     };
@@ -112,15 +138,27 @@ pub async fn execute_checkin(
         .ok_or(AppError::NotFound)?;
 
     if !account.enabled {
-        return Ok(skipped_run(account_id, "账户已禁用", triggered_by, start));
+        return Ok(skipped_run(
+            account_id,
+            "账户已禁用",
+            triggered_by,
+            start,
+            "skipped",
+        ));
     }
 
     // TOCTOU 重检查：用刚从 DB 取到的最新账户状态再做一次 skip 判断，
     // 避免调用方的 skip_reason_for_batch 与实际执行之间账户状态已变化。
     if let Some(s) = settings {
-        let today_local = chrono::Local::now().date_naive();
+        let today_local = business_time::today();
         if let Some(reason) = skip_reason_for_batch(&account, s, today_local) {
-            return Ok(skipped_run(account_id, reason, triggered_by, start));
+            return Ok(skipped_run(
+                account_id,
+                reason.message(),
+                triggered_by,
+                start,
+                reason.status(),
+            ));
         }
 
         // M5：在单飞锁内用最新 DB 计数复核每日上限，关闭“调度与手动批量同时通过
@@ -128,7 +166,13 @@ pub async fn execute_checkin(
         let today_runs = db::count_runs_today(db, account_id).await?;
         if today_runs >= s.max_attempts_per_day.max(1) {
             let msg = format!("已达到今日最大尝试次数 ({})", s.max_attempts_per_day);
-            return Ok(skipped_run(account_id, &msg, triggered_by, start));
+            return Ok(skipped_run(
+                account_id,
+                &msg,
+                triggered_by,
+                start,
+                "skipped",
+            ));
         }
     }
 
@@ -138,8 +182,9 @@ pub async fn execute_checkin(
     if let Err(e) =
         crate::security::validate_public_http_url_resolved(&account.base_url, "签到地址").await
     {
-        let msg = e.to_string();
-        tracing::warn!(account_id = %account_id, error = %msg, "签到前 SSRF 复核未通过");
+        let detail = e.to_string();
+        let msg = sanitize_user_message(&e.user_message());
+        tracing::warn!(account_id = %account_id, error = %detail, "签到前 SSRF 复核未通过");
         // 视为一次真实失败尝试：更新账户 lastStatus/lastRunAt、失败计数并触发通知，
         // 与 provider 报错路径一致。否则 lastRunAt 停在昨日，`skip_reason_for_batch`
         // 的 retry_disabled 分支永不触发——关闭重试的账户会在每轮调度中反复尝试（回归修复）。
@@ -175,23 +220,25 @@ pub async fn execute_checkin(
 
     match result {
         Ok((status, message, raw_response)) => {
+            let message = sanitize_user_message(&message);
             // 签到成功或今日已签时刷新余额（参考 Next.js runner.ts）
             // 余额刷新失败了不影响签到结果，仅在消息中追加提示。
             // 余额刷新为网络请求，无法并入 DB 事务；但其写库与状态更新、记录创建
             // 通过 create_run_with_status_update_and_balance 在同一事务原子提交，
             // 避免崩溃时出现"余额已更新但无签到记录"的部分写入。
-            let mut notification_balance = account.last_balance;
+            let mut notification_balance = account.last_balance.map(|quota| quota / QUOTA_PER_USD);
             let (balance_to_store, final_message) = if status.as_str() == "success"
                 || status.as_str() == "already_checked"
             {
                 match fetch_account_balance(&account, profile).await {
                     Ok(quota) => {
-                        notification_balance = Some(quota);
+                        notification_balance = Some(quota / QUOTA_PER_USD);
                         (Some(quota), message)
                     }
                     Err(e) => {
-                        let msg = e.to_string();
-                        tracing::warn!(account_id = %account_id, error = %msg, "签到后余额刷新失败");
+                        let detail = e.to_string();
+                        let msg = sanitize_user_message(&e.user_message());
+                        tracing::warn!(account_id = %account_id, error = %detail, "签到后余额刷新失败");
                         (None, format!("{}；余额刷新失败：{}", message, msg))
                     }
                 }
@@ -200,6 +247,7 @@ pub async fn execute_checkin(
             };
 
             // 原子操作：状态更新 + 余额写入（可选）+ 记录创建放在同一事务中
+            let final_message = sanitize_user_message(&final_message);
             let run = db::create_run_with_status_update_and_balance(
                 db,
                 account_id,
@@ -228,7 +276,13 @@ pub async fn execute_checkin(
                             "跨实例竞态：撤销超出每日上限的签到记录"
                         );
                         let _ = db::delete_run(db, &run.id).await;
-                        return Ok(skipped_run(account_id, &msg, triggered_by, start));
+                        return Ok(skipped_run(
+                            account_id,
+                            &msg,
+                            triggered_by,
+                            start,
+                            "skipped",
+                        ));
                     }
                 }
             }
@@ -237,7 +291,9 @@ pub async fn execute_checkin(
             Ok(run)
         }
         Err(e) => {
-            let msg = e.to_string();
+            let detail = e.to_string();
+            let msg = sanitize_user_message(&e.user_message());
+            tracing::warn!(account_id = %account_id, error = %detail, "签到执行失败");
             let run = db::create_run_with_status_update(
                 db,
                 account_id,
@@ -248,7 +304,14 @@ pub async fn execute_checkin(
                 None,
             )
             .await?;
-            handle_notifications(db, &account, "failed", &msg, account.last_balance).await;
+            handle_notifications(
+                db,
+                &account,
+                "failed",
+                &msg,
+                account.last_balance.map(|quota| quota / QUOTA_PER_USD),
+            )
+            .await;
             Ok(run)
         }
     }
@@ -393,11 +456,17 @@ pub async fn fetch_account_balance(
 /// 构造一个“已跳过”的签到结果：不落库、不计入每日尝试上限、不触发通知。
 /// 用于抢占、账户禁用、二次重检拦截、达到每日上限等非真实尝试路径（M6），
 /// 与批量/定时前置跳过（status='skipped' 但不写记录）保持同一语义。
-fn skipped_run(account_id: &str, message: &str, triggered_by: &str, start: Instant) -> CheckinRun {
+fn skipped_run(
+    account_id: &str,
+    message: &str,
+    triggered_by: &str,
+    start: Instant,
+    status: &str,
+) -> CheckinRun {
     CheckinRun {
         id: uuid::Uuid::new_v4().to_string(),
         account_id: account_id.to_string(),
-        status: "skipped".to_string(),
+        status: status.to_string(),
         message: Some(message.to_string()),
         duration_ms: Some(start.elapsed().as_millis().min(i64::MAX as u128) as i64),
         triggered_by: triggered_by.to_string(),
@@ -484,5 +553,102 @@ async fn handle_notifications(
         if let Err(e) = db::update_last_notified(db, &account.id).await {
             tracing::warn!(account_id = %account.id, error = %e, "更新通知时间失败");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{skip_reason_for_batch, BatchSkipReason};
+    use crate::models::{CheckinAccount, CheckinSetting};
+    use chrono::{Duration, Utc};
+
+    fn account() -> CheckinAccount {
+        let now = Utc::now();
+        CheckinAccount {
+            id: "account-1".into(),
+            name: "测试账户".into(),
+            site_type: "new-api".into(),
+            base_url: "https://example.com".into(),
+            user_id: None,
+            owner_id: Some("user-1".into()),
+            auth_type: "access_token".into(),
+            access_token_enc: None,
+            cookie_enc: None,
+            custom_checkin_url: None,
+            enabled: true,
+            retry_enabled: true,
+            last_balance: None,
+            last_balance_at: None,
+            last_status: None,
+            last_message: None,
+            last_run_at: None,
+            note: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn settings() -> CheckinSetting {
+        CheckinSetting {
+            id: "global".into(),
+            enabled: true,
+            schedule_cron: vec![],
+            retry_enabled: true,
+            max_attempts_per_day: 3,
+            batch_delay_min: 0,
+            batch_delay_max: 0,
+            scheduled_delay_min: 0,
+            scheduled_delay_max: 0,
+            cleanup_keep_latest: 100,
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn batch_skip_reason_exposes_user_facing_status_and_message() {
+        assert_eq!(BatchSkipReason::AccountDisabled.status(), "skipped");
+        assert_eq!(BatchSkipReason::AccountDisabled.message(), "账户已禁用");
+        assert_eq!(BatchSkipReason::AlreadyChecked.status(), "already_checked");
+        assert_eq!(BatchSkipReason::AlreadyChecked.message(), "今日已签到");
+        assert_eq!(BatchSkipReason::RetryDisabled.status(), "skipped");
+        assert_eq!(BatchSkipReason::RetryDisabled.message(), "重试已关闭");
+    }
+
+    #[test]
+    fn batch_skip_reason_keeps_today_and_retry_rules_consistent() {
+        let today = crate::business_time::today();
+        let setting = settings();
+
+        let mut disabled = account();
+        disabled.enabled = false;
+        assert_eq!(
+            skip_reason_for_batch(&disabled, &setting, today),
+            Some(BatchSkipReason::AccountDisabled)
+        );
+
+        let mut already_checked = account();
+        already_checked.last_status = Some("success".into());
+        already_checked.last_run_at = Some(Utc::now());
+        assert_eq!(
+            skip_reason_for_batch(&already_checked, &setting, today),
+            Some(BatchSkipReason::AlreadyChecked)
+        );
+
+        let mut retry_disabled = account();
+        retry_disabled.last_status = Some("failed".into());
+        retry_disabled.last_run_at = Some(Utc::now());
+        retry_disabled.retry_enabled = false;
+        assert_eq!(
+            skip_reason_for_batch(&retry_disabled, &setting, today),
+            Some(BatchSkipReason::RetryDisabled)
+        );
+
+        let mut yesterday_failed = account();
+        yesterday_failed.last_status = Some("failed".into());
+        yesterday_failed.last_run_at = Some(Utc::now() - Duration::days(2));
+        assert_eq!(
+            skip_reason_for_batch(&yesterday_failed, &setting, today),
+            None
+        );
     }
 }

@@ -106,6 +106,65 @@ pub struct CheckinRun {
     pub created_at: DateTime<Utc>,
 }
 
+/// 持久化签到批次的生命周期与汇总。
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CheckinBatch {
+    pub id: String,
+    #[serde(rename = "createdBy")]
+    #[sqlx(rename = "createdBy")]
+    pub created_by: String,
+    #[serde(rename = "triggeredBy")]
+    #[sqlx(rename = "triggeredBy")]
+    pub triggered_by: String,
+    pub status: String,
+    pub total: i64,
+    pub completed: i64,
+    pub succeeded: i64,
+    #[serde(rename = "alreadyChecked")]
+    #[sqlx(rename = "alreadyChecked")]
+    pub already_checked: i64,
+    pub skipped: i64,
+    pub failed: i64,
+    #[serde(rename = "idempotencyKey", skip_serializing_if = "Option::is_none")]
+    #[sqlx(rename = "idempotencyKey")]
+    pub idempotency_key: Option<String>,
+    #[serde(rename = "createdAt")]
+    #[sqlx(rename = "createdAt")]
+    pub created_at: DateTime<Utc>,
+    #[serde(rename = "startedAt")]
+    #[sqlx(rename = "startedAt")]
+    pub started_at: Option<DateTime<Utc>>,
+    #[serde(rename = "finishedAt")]
+    #[sqlx(rename = "finishedAt")]
+    pub finished_at: Option<DateTime<Utc>>,
+}
+
+/// 签到批次中的账号范围快照与逐账号结果。
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CheckinBatchItem {
+    #[serde(rename = "batchId")]
+    #[sqlx(rename = "batchId")]
+    pub batch_id: String,
+    #[serde(rename = "accountId")]
+    #[sqlx(rename = "accountId")]
+    pub account_id: String,
+    #[serde(rename = "accountName")]
+    #[sqlx(rename = "accountName")]
+    pub account_name: String,
+    pub position: i64,
+    pub status: String,
+    pub message: Option<String>,
+    #[serde(rename = "runId")]
+    #[sqlx(rename = "runId")]
+    pub run_id: Option<String>,
+    #[serde(rename = "createdAt")]
+    #[sqlx(rename = "createdAt")]
+    pub created_at: DateTime<Utc>,
+    #[serde(rename = "updatedAt")]
+    #[sqlx(rename = "updatedAt")]
+    pub updated_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct CheckinSetting {
     pub id: String,

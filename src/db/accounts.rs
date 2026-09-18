@@ -5,7 +5,7 @@ use chrono::Utc;
 use sqlx::SqlitePool;
 
 /// Column list for account queries (excludes encrypted fields to reduce I/O)
-const ACCOUNT_LIST_COLUMNS: &str = "\
+pub(crate) const ACCOUNT_LIST_COLUMNS: &str = "\
     id, name, siteType, baseUrl, userId, ownerId, authType, \
     NULL as accessTokenEnc, NULL as cookieEnc, \
     customCheckinUrl, enabled, retryEnabled, note, \
@@ -45,6 +45,12 @@ async fn list_accounts_with_columns(
     columns: &str,
 ) -> Result<Vec<CheckinAccount>> {
     let mut sql = format!("SELECT {columns} FROM CheckinAccount WHERE 1=1");
+    let business_day_start = match filter.last_status.as_deref() {
+        Some("not_today") => Some(crate::business_time::day_start_utc(
+            crate::business_time::today(),
+        )?),
+        _ => None,
+    };
 
     if filter.owner_id.is_some() {
         sql.push_str(" AND ownerId = ?");
@@ -59,8 +65,8 @@ async fn list_accounts_with_columns(
         if status == "never" {
             sql.push_str(" AND lastStatus IS NULL");
         } else if status == "not_today" {
-            // 今日未签到：lastRunAt 为 NULL 或不在今天（本地时区）
-            sql.push_str(" AND (lastRunAt IS NULL OR DATE(lastRunAt, 'localtime') < DATE('now', 'localtime'))");
+            // 今日未签到：按平台业务日期判断，而不是使用服务器本地时区。
+            sql.push_str(" AND (lastRunAt IS NULL OR lastRunAt < ?)");
         } else {
             sql.push_str(" AND lastStatus = ?");
         }
@@ -85,7 +91,11 @@ async fn list_accounts_with_columns(
         query = query.bind(e);
     }
     if let Some(ref status) = filter.last_status {
-        if status != "never" && status != "not_today" {
+        if status == "not_today" {
+            query = query.bind(business_day_start.ok_or_else(|| {
+                crate::error::AppError::Internal("无法计算业务日期开始时间".into())
+            })?);
+        } else if status != "never" {
             query = query.bind(status);
         }
     }

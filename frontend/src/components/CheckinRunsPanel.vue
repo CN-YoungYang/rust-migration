@@ -85,6 +85,9 @@
         size="small"
         style="width: 180px"
       />
+      <n-tag v-if="filterBatchId" size="small" :bordered="false" type="info" :title="filterBatchId">
+        当前批次：{{ filterBatchId.slice(0, 8) }}…
+      </n-tag>
       <n-button v-if="hasActiveFilter" size="small" @click="clearFilters">清除筛选</n-button>
       <n-text depth="3" class="filter-count">{{ runs.length }} 条记录</n-text>
     </n-space>
@@ -120,9 +123,6 @@
       <n-progress type="line" :percentage="progressPercent" :height="8" :show-indicator="false" />
       <div class="progress-row">
         <p v-if="bulkProgress.current" class="muted">当前：{{ bulkProgress.current }}</p>
-        <n-button v-if="retryingBatch" size="tiny" tertiary type="error" @click="batchAbortRef = true">
-          停止
-        </n-button>
       </div>
     </n-card>
 
@@ -132,7 +132,7 @@
         <div class="batch-result-header">
           <strong>批量重试结果</strong>
           <span class="muted">
-            共 {{ lastBatchResult.total }} 个，成功 {{ lastBatchResult.succeeded }} 个，跳过 {{ lastBatchResult.skipped }} 个，失败 {{ lastBatchResult.failed }} 个
+            共 {{ lastBatchResult.total }} 个，完成 {{ lastBatchResult.completed }} 个，本次成功 {{ lastBatchResult.succeeded }} 个，今日已签到 {{ lastBatchResult.alreadyChecked }} 个，跳过 {{ lastBatchResult.skipped }} 个，失败 {{ lastBatchResult.failed }} 个
           </span>
         </div>
       </template>
@@ -186,7 +186,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -213,12 +213,12 @@ import {
   type DataTableColumns,
 } from 'naive-ui'
 import { apiUrl, request, responseData } from '../utils/api'
-import { formatDateTime, formatDateTimeFull, formatDateInput } from '../utils/format'
+import { businessDayBoundary, formatDateTime, formatDateTimeFull, formatDateInput } from '../utils/format'
 import { checkinStatusText, checkinStatusTagType, triggerText } from '../utils/checkinStatus'
 import { copyText } from '../utils/clipboard'
 import type { CurrentUser, Account, AccountGroup } from '../types'
 import { useUsers } from '../composables/useUsers'
-import { batchSkipReason, randomDelaySecs, shuffleList } from '../utils/batchCheckin'
+import { summarizeBatchItems } from '../utils/batchCheckin'
 import { buildCleanupRequest, cleanupScopeLabel, cleanupTargetText } from '../utils/cleanupRuns'
 
 interface CheckinRun {
@@ -241,8 +241,20 @@ interface BatchResultItem {
 
 interface BatchCheckinResult {
   items: BatchResultItem[]
+  total?: number
+  completed?: number
+  succeeded?: number
+  alreadyChecked?: number
+  skipped?: number
+  failed?: number
+}
+
+interface NormalizedBatchCheckinResult {
+  items: BatchResultItem[]
   total: number
+  completed: number
   succeeded: number
+  alreadyChecked: number
   skipped: number
   failed: number
 }
@@ -271,6 +283,11 @@ interface CheckinSettings {
 const props = defineProps<{
   currentUser: CurrentUser | null
   isAdmin: boolean
+  initialFilter?: {
+    accountId?: string
+    status?: string
+    batchId?: string
+  } | null
 }>()
 
 const message = useMessage()
@@ -307,9 +324,8 @@ const cleanupTarget = computed(() => {
   const selectedUsername = allUsers.value.find((user) => user.id === filterUserId.value)?.username || ''
   return cleanupTargetText(props.isAdmin, filterUserId.value, selectedUsername)
 })
-const lastBatchResult = ref<BatchCheckinResult | null>(null)
+const lastBatchResult = ref<NormalizedBatchCheckinResult | null>(null)
 const settings = ref<CheckinSettings | null>(null)
-const batchAbortRef = ref(false)
 const bulkProgress = ref<BulkProgress | null>(null)
 
 // 筛选相关
@@ -318,6 +334,7 @@ const filterTriggeredBy = ref('')
 const filterStartDate = ref('')
 const filterEndDate = ref('')
 const filterAccountId = ref('')
+const filterBatchId = ref('')
 const dateRange = ref<[number, number] | null>(null)
 
 const statusOptions = [
@@ -396,7 +413,15 @@ const runSummary = computed(() => {
 })
 
 const hasActiveFilter = computed(() => {
-  return !!(filterUserId.value || filterStatus.value || filterTriggeredBy.value || filterStartDate.value || filterEndDate.value || filterAccountId.value)
+  return !!(
+    filterUserId.value ||
+    filterStatus.value ||
+    filterTriggeredBy.value ||
+    filterStartDate.value ||
+    filterEndDate.value ||
+    filterAccountId.value ||
+    filterBatchId.value
+  )
 })
 
 function clearFilters() {
@@ -406,7 +431,19 @@ function clearFilters() {
   filterStartDate.value = ''
   filterEndDate.value = ''
   filterAccountId.value = ''
+  filterBatchId.value = ''
   dateRange.value = null
+}
+
+function applyInitialFilter(filter: typeof props.initialFilter) {
+  filterAccountId.value = filter?.accountId || ''
+  filterBatchId.value = filter?.batchId || ''
+  filterStatus.value = filter?.status || ''
+  filterTriggeredBy.value = ''
+  filterStartDate.value = ''
+  filterEndDate.value = ''
+  dateRange.value = null
+  if (filter) void fetchRuns()
 }
 
 // 按账户归属用户分组下拉框选项
@@ -496,6 +533,9 @@ const fetchRuns = async (append = false) => {
     }
     if (filterAccountId.value) {
       params.append('accountId', filterAccountId.value)
+    }
+    if (filterBatchId.value) {
+      params.append('batchId', filterBatchId.value)
     }
 
     url += `?${params.toString()}`
@@ -587,143 +627,49 @@ const executeAccountCheckin = async (accountId: string) => {
   }
 }
 
-/** 可中断延迟：分片等待，batchAbortRef 置位时提前返回 false（停止按钮响应及时）。 */
-function abortableDelay(ms: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const step = 200
-    let waited = 0
-    const tick = () => {
-      if (batchAbortRef.value || waited >= ms) {
-        resolve(!batchAbortRef.value)
-        return
-      }
-      waited += step
-      window.setTimeout(tick, step)
-    }
-    tick()
-  })
-}
-
 const retryFailedRuns = async () => {
   const ids = failedAccountIds.value
   if (ids.length === 0 || retryingBatch.value) return
 
   retryingBatch.value = true
-  batchAbortRef.value = false
   lastBatchResult.value = null
   bulkProgress.value = {
     label: '重试失败账户',
     completed: 0,
     total: ids.length,
-    current: '正在准备',
+    current: '后端正在按统一规则执行',
   }
-
-  // 管理员可读取批量延迟 / 每日上限等设置；普通用户拿不到（GET /api/settings 仅限管理员），
-  // 走默认：不套用每日上限、不设账户间延迟（与"手动单签不受限"的既有语义一致）。
-  const batchSettings = props.isAdmin ? settings.value : null
-
-  const items: BatchResultItem[] = []
-  const toExecute: { id: string; name: string }[] = []
-
-  // 阶段一：按账户当前状态预先跳过（禁用 / 今日已签 / 关闭重试 / 已达日上限），
-  // 与后端 /batch 端点的 skip_reason_for_batch 语义一致。
-  for (const id of ids) {
-    const account = accountById.value.get(id)
-    const reason = batchSkipReason(account, batchSettings)
-    if (reason) {
-      items.push({ accountId: id, accountName: account?.name || id, status: 'skipped', message: reason })
-    } else {
-      toExecute.push({ id, name: account?.name || id })
-    }
-  }
-  bulkProgress.value = { ...bulkProgress.value!, completed: items.length }
-
-  // 阶段二：打乱顺序 + 逐账户串行单签 + 随机间隔，复刻后端批量的防判定行为。
-  // 每个请求都是单签（远低于反代 / Cloudflare 的 ~100s 超时），不会再被整批掐断。
-  const order = shuffleList(toExecute)
-  let stopIndex = order.length
   try {
-    for (let idx = 0; idx < order.length; idx += 1) {
-      if (batchAbortRef.value) {
-        stopIndex = idx
-        break
-      }
-
-      const { id, name } = order[idx]
-
-      // 首账户不等待，其余按设置随机间隔
-      if (idx > 0) {
-        const delay = batchSettings
-          ? randomDelaySecs(batchSettings.batchDelayMin ?? 0, batchSettings.batchDelayMax ?? 0)
-          : 0
-        if (delay > 0) {
-          bulkProgress.value = { ...bulkProgress.value!, current: `等待 ${delay}s 后重试下一个` }
-          const proceeded = await abortableDelay(delay * 1000)
-          if (!proceeded) {
-            stopIndex = idx
-            break
-          }
-        }
-      }
-      if (batchAbortRef.value) {
-        stopIndex = idx
-        break
-      }
-
-      bulkProgress.value = { ...bulkProgress.value!, current: `正在重试：${name}` }
-      try {
-        const res = await request(apiUrl('/checkin-runs'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ accountId: id }),
-        })
-        const run = await responseData<{ status: string; message?: string | null }>(res)
-        items.push({ accountId: id, accountName: name, status: run.status, message: run.message || null })
-      } catch (error) {
-        items.push({
-          accountId: id,
-          accountName: name,
-          status: 'failed',
-          message: error instanceof Error ? error.message : '签到失败',
-        })
-      }
-      bulkProgress.value = { ...bulkProgress.value!, completed: items.length }
+    const response = await request(apiUrl('/checkin-runs/batch'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountIds: ids }),
+    })
+    const result = await responseData<BatchCheckinResult>(response)
+    const summary = summarizeBatchItems(result.items)
+    const normalized: NormalizedBatchCheckinResult = {
+      items: result.items,
+      total: result.total ?? summary.total,
+      completed: result.completed ?? summary.completed,
+      succeeded: result.succeeded ?? summary.succeeded,
+      alreadyChecked: result.alreadyChecked ?? summary.alreadyChecked,
+      skipped: result.skipped ?? summary.skipped,
+      failed: result.failed ?? summary.failed,
     }
-
-    // 手动停止：未执行账户记为跳过，保证结果完整可对照
-    if (batchAbortRef.value && stopIndex < order.length) {
-      for (let i = stopIndex; i < order.length; i += 1) {
-        items.push({
-          accountId: order[i].id,
-          accountName: order[i].name,
-          status: 'skipped',
-          message: '已手动停止',
-        })
-      }
-      message.warning('批量重试已手动停止')
+    lastBatchResult.value = normalized
+    bulkProgress.value = {
+      label: '重试失败账户',
+      completed: normalized.completed,
+      total: normalized.total,
+      current: '已完成',
     }
+    if (normalized.failed > 0) message.error(`重试后仍有 ${normalized.failed} 个账户失败`)
+    await Promise.all([fetchRuns(), fetchAccounts()])
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '重试失败账户失败')
   } finally {
     retryingBatch.value = false
   }
-
-  const succeeded = items.filter(
-    (item) => item.status === 'success' || item.status === 'already_checked',
-  ).length
-  const skipped = items.filter((item) => item.status === 'skipped').length
-  const failed = items.filter((item) => item.status === 'failed').length
-
-  lastBatchResult.value = { items, total: items.length, succeeded, skipped, failed }
-  bulkProgress.value = {
-    label: '重试失败账户',
-    completed: items.length,
-    total: ids.length,
-    current: '已完成',
-  }
-
-  if (failed > 0) {
-    message.error(`重试后仍有 ${failed} 个账户失败`)
-  }
-  await Promise.all([fetchRuns(), fetchAccounts()])
 }
 
 const cleanupRuns = async () => {
@@ -823,13 +769,10 @@ const accountOwner = (accountId: string) => {
   return accountById.value.get(accountId)?.ownerName || ''
 }
 
-// 把日期选择器的 `YYYY-MM-DD` 转成浏览器本地时区的日界 RFC3339 时刻。
-// 记录在界面上按浏览器本地时间显示，筛选也必须用浏览器本地日界，否则
-// 服务器时区与浏览器时区不一致时会筛错日期（回归修复：此前把裸日期字符串
-// 交给后端按服务器时区解释）。后端对含 `T` 的时间戳原样透传，作为绝对时刻比较。
+// 把日期选择器的 `YYYY-MM-DD` 转成平台业务时区（Asia/Shanghai）的日界。
+// 日期筛选必须和后端统计、签到跳过规则使用同一业务日期，不能依赖浏览器所在时区。
 const dayBoundary = (date: string, atEnd: boolean): string => {
-  const time = atEnd ? 'T23:59:59.999' : 'T00:00:00'
-  return new Date(`${date}${time}`).toISOString()
+  return businessDayBoundary(date, atEnd)
 }
 
 watch(dateRange, (range) => {
@@ -975,12 +918,17 @@ const runColumns = computed<DataTableColumns<CheckinRun>>(() => {
 })
 
 onMounted(async () => {
+  applyInitialFilter(props.initialFilter)
   try {
     await Promise.all([fetchAccounts(), fetchRuns(), fetchUsers(), fetchSettings()])
   } catch (error) {
     message.error(error instanceof Error ? error.message : '加载失败')
   }
 })
+
+watch(() => props.initialFilter, (filter) => {
+  applyInitialFilter(filter)
+}, { deep: true })
 
 watch(filterUserId, () => {
   selectedAccountId.value = ''
@@ -989,14 +937,10 @@ watch(filterUserId, () => {
   fetchRuns()
 })
 
-watch([filterStatus, filterTriggeredBy, filterStartDate, filterEndDate, filterAccountId], () => {
+watch([filterStatus, filterTriggeredBy, filterStartDate, filterEndDate, filterAccountId, filterBatchId], () => {
   fetchRuns()
 })
 
-onUnmounted(() => {
-  // 组件被销毁（如登出）时中断进行中的批量重试
-  batchAbortRef.value = true
-})
 </script>
 
 <style scoped>

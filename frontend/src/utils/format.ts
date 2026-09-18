@@ -28,3 +28,9 @@ export function formatDateInput(date: Date): string {
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
+
+/** 把平台业务日期（Asia/Shanghai）转换为 UTC 查询边界。 */
+export function businessDayBoundary(date: string, atEnd: boolean): string {
+  const time = atEnd ? '23:59:59.999' : '00:00:00'
+  return new Date(`${date}T${time}+08:00`).toISOString()
+}

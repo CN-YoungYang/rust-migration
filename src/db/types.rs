@@ -17,6 +17,7 @@ pub struct AccountFilter {
 pub struct RunFilter {
     pub owner_id: Option<String>,
     pub account_id: Option<String>,
+    pub batch_id: Option<String>,
     pub status: Option<String>,
     pub triggered_by: Option<String>,
     pub start_date: Option<String>,

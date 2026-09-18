@@ -49,6 +49,55 @@ CREATE INDEX IF NOT EXISTS idx_checkin_run_created ON CheckinRun(createdAt);
 CREATE INDEX IF NOT EXISTS idx_checkin_account_owner ON CheckinAccount(ownerId);
 CREATE INDEX IF NOT EXISTS idx_checkin_account_enabled ON CheckinAccount(enabled);
 
+-- 服务端异步签到批次。批次范围和结果独立保存，避免 Cloudflare 长请求等待外部站点。
+CREATE TABLE IF NOT EXISTS CheckinBatch (
+    id TEXT PRIMARY KEY,
+    createdBy TEXT NOT NULL,
+    triggeredBy TEXT NOT NULL DEFAULT 'manual_batch' CHECK (triggeredBy IN ('manual_batch')),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'completed', 'partial_failed', 'failed')),
+    total INTEGER NOT NULL,
+    completed INTEGER NOT NULL DEFAULT 0,
+    succeeded INTEGER NOT NULL DEFAULT 0,
+    alreadyChecked INTEGER NOT NULL DEFAULT 0,
+    skipped INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    idempotencyKey TEXT,
+    createdAt TEXT NOT NULL,
+    startedAt TEXT,
+    finishedAt TEXT,
+    FOREIGN KEY (createdBy) REFERENCES AppUser(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_checkin_batch_creator_idempotency
+    ON CheckinBatch(createdBy, idempotencyKey)
+    WHERE idempotencyKey IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_checkin_batch_status_created
+    ON CheckinBatch(status, createdAt);
+CREATE INDEX IF NOT EXISTS idx_checkin_batch_creator_created
+    ON CheckinBatch(createdBy, createdAt);
+
+-- 账号名称是范围快照的一部分；不对 accountId 建外键，删除账户后仍可查看批次历史。
+CREATE TABLE IF NOT EXISTS CheckinBatchItem (
+    batchId TEXT NOT NULL,
+    accountId TEXT NOT NULL,
+    accountName TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'success', 'already_checked', 'failed', 'skipped')),
+    message TEXT,
+    runId TEXT,
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL,
+    PRIMARY KEY (batchId, accountId),
+    FOREIGN KEY (batchId) REFERENCES CheckinBatch(id) ON DELETE CASCADE
+);
+-- 一个账号在同一时间只能属于一个待执行/执行中的批次。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_checkin_batch_item_active_account
+    ON CheckinBatchItem(accountId)
+    WHERE status IN ('pending', 'running');
+CREATE INDEX IF NOT EXISTS idx_checkin_batch_item_batch_position
+    ON CheckinBatchItem(batchId, position);
+CREATE INDEX IF NOT EXISTS idx_checkin_batch_item_account
+    ON CheckinBatchItem(accountId, status);
+
 CREATE TABLE IF NOT EXISTS AppSession (
     id TEXT PRIMARY KEY,
     userId TEXT NOT NULL,

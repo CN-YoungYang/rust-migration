@@ -112,7 +112,11 @@ pub async fn checkin(
             .map(|t| format!("站点返回错误页：{}", t))
             .unwrap_or_default()
     } else {
-        text.clone()
+        if text.trim().is_empty() {
+            String::new()
+        } else {
+            "站点返回了无法识别的文本响应".to_string()
+        }
     };
 
     // 先检查是否已签到（空消息天然不命中关键词，不会误判）

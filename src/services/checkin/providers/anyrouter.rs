@@ -229,7 +229,12 @@ pub async fn checkin(
             .map(|t| format!("站点返回错误页：{}", t))
             .unwrap_or_default()
     } else {
-        text.clone()
+        // 非 JSON 的站点响应可能是整页错误正文，不能直接回显到签到记录。
+        if text.trim().is_empty() {
+            String::new()
+        } else {
+            "站点返回了无法识别的文本响应".to_string()
+        }
     };
 
     if !status.is_success() {

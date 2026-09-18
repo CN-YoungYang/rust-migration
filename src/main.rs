@@ -17,6 +17,7 @@ use tower_http::{
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod auth_middleware;
+mod business_time;
 mod crypto;
 mod db;
 mod error;
@@ -54,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
         .foreign_keys(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
         .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
-        // 清理任务等长写事务会短暂阻塞其他写者；默认 busy_timeout 仅 5 秒，
+        // 清理流程等长写事务会短暂阻塞其他写者；默认 busy_timeout 仅 5 秒，
         // 网络签到已成功正要写库时可能撞上“database is locked”导致记录丢失，
         // 故调大到 30 秒。
         .busy_timeout(std::time::Duration::from_secs(30))
@@ -124,6 +125,22 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/checkin-runs/batch",
             post(routes::checkin_runs::execute_batch),
+        )
+        .route(
+            "/api/checkin-batches",
+            get(routes::checkin_batches::list).post(routes::checkin_batches::create),
+        )
+        .route(
+            "/api/checkin-batches/:id",
+            get(routes::checkin_batches::get),
+        )
+        .route(
+            "/api/checkin-batches/:id/resume",
+            post(routes::checkin_batches::resume),
+        )
+        .route(
+            "/api/checkin-workbench",
+            get(routes::checkin_workbench::get),
         )
         .route(
             "/api/checkin-runs/cleanup",

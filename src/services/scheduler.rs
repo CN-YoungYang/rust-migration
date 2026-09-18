@@ -1,8 +1,8 @@
 use crate::{
-    db,
+    business_time, db,
     services::checkin::runner::{execute_checkin, skip_reason_for_batch},
 };
-use chrono::{DateTime, Local, Timelike};
+use chrono::{DateTime, TimeZone, Timelike};
 use croner::Cron;
 use sqlx::SqlitePool;
 use std::{str::FromStr, sync::Arc, time::Duration};
@@ -13,7 +13,7 @@ pub async fn start_scheduler(db: SqlitePool) {
 }
 
 async fn run_scheduler(db: SqlitePool) {
-    // 防重复触发：用 Mutex 保证同一时刻只有一个定时签到任务在执行。
+    // 防重复触发：用 Mutex 保证同一时刻只有一个定时签到流程在执行。
     let checkin_lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
 
     tracing::info!("Scheduler started");
@@ -72,7 +72,7 @@ async fn cleanup_old_runs(db: &SqlitePool) {
 
 /// 判断当前时间是否命中任一 cron 表达式（标准 5 段：分 时 日 月 周，粒度为分钟）。
 /// 先把 now 截断到整分（秒/纳秒清零），避免 is_time_matching 校验秒字段导致同一分钟内漏判。
-fn cron_now_matches(exprs: &[String], now: DateTime<Local>) -> bool {
+fn cron_now_matches<Tz: TimeZone>(exprs: &[String], now: DateTime<Tz>) -> bool {
     let Some(truncated) = now.with_second(0).and_then(|t| t.with_nanosecond(0)) else {
         return false;
     };
@@ -93,13 +93,13 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
 
     // cron 触发：当前分钟命中任一配置表达式才进入本轮。
     // 每次触发独立成一轮，下方仍从 DB 实时重算今日各账户次数（不做跨触发内存累计）。
-    if !cron_now_matches(&settings.schedule_cron, Local::now()) {
+    if !cron_now_matches(&settings.schedule_cron, business_time::now()) {
         return Ok(());
     }
 
     // 只查询已启用账户，避免拉取禁用账户再在 Rust 中过滤
     let mut accounts = db::list_enabled_accounts(db).await?;
-    let today_local = Local::now().date_naive();
+    let today_local = business_time::today();
 
     // 批量查询今日各账户签到次数，避免逐账户 COUNT
     let mut today_counts = db::count_runs_today_for_accounts(db, &[])
@@ -115,7 +115,7 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
     for account in accounts {
         // 跳过今日已签/已禁用/不允许重试的账户（与批量手动签到共用同一判断）
         if let Some(reason) = skip_reason_for_batch(&account, &settings, today_local) {
-            tracing::debug!("Skipping account {}: {}", account.id, reason);
+            tracing::debug!("Skipping account {}: {}", account.id, reason.message());
             continue;
         }
 
@@ -168,11 +168,14 @@ async fn check_and_run_scheduled_checkins(db: &SqlitePool) -> anyhow::Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
+    use chrono::FixedOffset;
 
-    fn local_at(ymd_hms: &str) -> DateTime<Local> {
+    fn local_at(ymd_hms: &str) -> DateTime<FixedOffset> {
         let nd = chrono::NaiveDateTime::parse_from_str(ymd_hms, "%Y-%m-%dT%H:%M:%S").unwrap();
-        Local.from_local_datetime(&nd).single().unwrap()
+        business_time::timezone()
+            .from_local_datetime(&nd)
+            .single()
+            .unwrap()
     }
 
     #[test]

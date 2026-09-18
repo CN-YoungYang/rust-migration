@@ -1,7 +1,9 @@
 pub mod accounts;
 pub mod admin;
 pub mod auth;
+pub mod checkin_batches;
 pub mod checkin_runs;
+pub mod checkin_workbench;
 pub mod health;
 pub mod import_export;
 pub mod notifications;

@@ -1,7 +1,7 @@
 use crate::{
     crypto::encrypt,
     db,
-    error::Result,
+    error::{sanitize_user_message, Result},
     models::{CheckinAccount, CreateAccountRequest, UpdateAccountRequest},
     security::validate_public_http_url_resolved,
     services::checkin::validate_custom_checkin_url,
@@ -33,7 +33,10 @@ fn account_to_json(acc: &CheckinAccount, owner_name: Option<&str>) -> Value {
         "lastBalance": acc.last_balance,
         "lastBalanceAt": acc.last_balance_at,
         "lastStatus": acc.last_status,
-        "lastMessage": acc.last_message,
+        "lastMessage": acc
+            .last_message
+            .as_deref()
+            .map(sanitize_user_message),
         "lastRunAt": acc.last_run_at,
         "createdAt": acc.created_at,
         "updatedAt": acc.updated_at,

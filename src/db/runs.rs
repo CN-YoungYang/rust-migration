@@ -1,7 +1,7 @@
 use super::types::RunFilter;
 use crate::error::{AppError, Result};
 use crate::models::CheckinRun;
-use chrono::{DateTime, Local, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 
 /// Column list for run queries (excludes rawResponse to reduce I/O)
@@ -34,6 +34,12 @@ pub async fn list_runs_filtered(db: &SqlitePool, filter: &RunFilter) -> Result<V
     if filter.account_id.is_some() {
         sql.push_str(&format!(" AND {}accountId = ?", prefix));
     }
+    if filter.batch_id.is_some() {
+        sql.push_str(&format!(
+            " AND {}id IN (SELECT runId FROM CheckinBatchItem WHERE batchId = ? AND runId IS NOT NULL)",
+            prefix
+        ));
+    }
     if filter.status.is_some() {
         sql.push_str(&format!(" AND {}status = ?", prefix));
     }
@@ -59,6 +65,9 @@ pub async fn list_runs_filtered(db: &SqlitePool, filter: &RunFilter) -> Result<V
     }
     if let Some(ref aid) = filter.account_id {
         query = query.bind(aid);
+    }
+    if let Some(ref bid) = filter.batch_id {
+        query = query.bind(bid);
     }
     if let Some(ref s) = filter.status {
         query = query.bind(s);
@@ -576,19 +585,11 @@ async fn delete_retained_batch(
     Ok(deleted_runs)
 }
 
-/// 本地日历日零点对应的 UTC 时间（与统计接口的日界一致）。
+/// 业务日期零点对应的 UTC 时间（与统计接口的日界一致）。
 /// DST 跳秒日（spring-forward）午夜可能不存在，用 earliest() 回退到前一日 23:00，
 /// 最多少计昨日零点的边缘记录，但不会 panic 也不会漏掉今日记录。
 fn today_start_utc() -> Result<DateTime<Utc>> {
-    let local_midnight = Local::now()
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .ok_or_else(|| AppError::Internal("无法计算本地日期边界".into()))?;
-    Local
-        .from_local_datetime(&local_midnight)
-        .earliest()
-        .ok_or_else(|| AppError::Internal("无法解析本地日期边界".into()))
-        .map(|dt| dt.to_utc())
+    crate::business_time::day_start_utc(crate::business_time::today())
 }
 
 /// 今日“真实签到尝试”次数是否计入每日上限的判定。

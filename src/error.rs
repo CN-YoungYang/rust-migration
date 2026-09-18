@@ -53,14 +53,104 @@ impl AppError {
             AppError::NotFound => "资源不存在".into(),
             AppError::Forbidden => "权限不足".into(),
             AppError::RateLimited(secs) => format!("登录尝试过于频繁，请 {secs} 秒后重试"),
-            AppError::Validation(msg) => msg.clone(),
-            AppError::Conflict(msg) => msg.clone(),
+            AppError::Validation(msg) => sanitize_user_message(msg),
+            AppError::Conflict(msg) => sanitize_user_message(msg),
             AppError::Crypto(_) => "加密操作失败，请检查加密密钥配置是否正确".into(),
             AppError::Http(e) => http_error_message(e).to_string(),
             AppError::Io(_) => "外部服务连接失败，请检查网络连接或服务配置".into(),
             AppError::Internal(_) => "服务内部错误".into(),
         }
     }
+}
+
+/// 清理会展示给用户的站点/服务消息。
+///
+/// 外部站点有时会把响应原文、Authorization、Cookie 或查询参数拼进错误消息；
+/// 这些内容既不适合作为运营提示，也可能包含凭据。保留短摘要，隐藏常见敏感
+/// 前缀，并统一空白，避免历史记录和新结果把原文直接回显到界面。
+pub fn sanitize_user_message(message: &str) -> String {
+    let normalized = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut sanitized = normalized;
+
+    // 先处理 Bearer，避免 `Authorization: Bearer ...` 只遮住 Bearer 而留下令牌。
+    for prefix in [
+        "bearer ",
+        "access_token=",
+        "access-token=",
+        "accesstoken=",
+        "api_key=",
+        "api-key=",
+        "apikey=",
+        "password=",
+        "passwd=",
+        "secret=",
+        "session=",
+        "cookie:",
+        "cookie=",
+        "authorization:",
+        "authorization=",
+        "token:",
+        "token=",
+    ] {
+        sanitized = mask_prefixed_value(&sanitized, prefix);
+    }
+
+    let mut chars = sanitized.chars();
+    let result: String = chars.by_ref().take(500).collect();
+    if chars.next().is_some() {
+        format!("{result}…")
+    } else {
+        result
+    }
+}
+
+fn mask_prefixed_value(input: &str, prefix: &str) -> String {
+    let lower = input.to_ascii_lowercase();
+    let mut cursor = 0;
+    let mut output = String::with_capacity(input.len());
+
+    while cursor < input.len() {
+        let Some(relative_start) = lower[cursor..].find(prefix) else {
+            output.push_str(&input[cursor..]);
+            break;
+        };
+        let start = cursor + relative_start;
+        if start > 0 {
+            let previous = input[..start].chars().next_back().unwrap_or_default();
+            if previous.is_ascii_alphanumeric() || previous == '_' {
+                cursor = start + prefix.len();
+                continue;
+            }
+        }
+
+        let mut value_start = start + prefix.len();
+        while value_start < input.len() {
+            let ch = input[value_start..].chars().next().unwrap_or_default();
+            if ch.is_whitespace() || ch == '"' || ch == '\'' {
+                value_start += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        let mut value_end = value_start;
+        while value_end < input.len() {
+            let ch = input[value_end..].chars().next().unwrap_or_default();
+            if ch.is_whitespace() || matches!(ch, '&' | ';' | ',' | ')' | '}' | ']') {
+                break;
+            }
+            value_end += ch.len_utf8();
+        }
+
+        if value_start == value_end {
+            cursor = start + prefix.len();
+            continue;
+        }
+        output.push_str(&input[cursor..value_start]);
+        output.push_str("[已隐藏]");
+        cursor = value_end;
+    }
+
+    output
 }
 
 fn database_user_message(e: &sqlx::Error) -> &'static str {
@@ -123,11 +213,13 @@ impl IntoResponse for AppError {
             AppError::Validation(ref msg) => (
                 StatusCode::BAD_REQUEST,
                 "输入验证失败".into(),
-                Some(msg.clone()),
+                Some(sanitize_user_message(msg)),
             ),
-            AppError::Conflict(ref msg) => {
-                (StatusCode::CONFLICT, "资源冲突".into(), Some(msg.clone()))
-            }
+            AppError::Conflict(ref msg) => (
+                StatusCode::CONFLICT,
+                "资源冲突".into(),
+                Some(sanitize_user_message(msg)),
+            ),
             AppError::Crypto(ref e) => {
                 tracing::error!("Crypto error: {}", e);
                 (
@@ -187,3 +279,27 @@ impl From<csv::Error> for AppError {
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_user_message;
+
+    #[test]
+    fn hides_common_credentials_and_normalizes_whitespace() {
+        let message = sanitize_user_message(
+            "Authorization: Bearer secret-token\nnext=1; cookie=session-secret; token=api-secret",
+        );
+        assert!(!message.contains("secret-token"));
+        assert!(!message.contains("session-secret"));
+        assert!(!message.contains("api-secret"));
+        assert!(message.contains("[已隐藏]"));
+        assert!(!message.contains('\n'));
+    }
+
+    #[test]
+    fn limits_user_message_length_without_splitting_utf8() {
+        let message = sanitize_user_message(&"长".repeat(600));
+        assert_eq!(message.chars().count(), 501);
+        assert!(message.ends_with('…'));
+    }
+}

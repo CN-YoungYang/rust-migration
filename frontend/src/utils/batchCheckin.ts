@@ -18,17 +18,67 @@ export interface BatchSkipSettings {
   maxAttemptsPerDay?: number
 }
 
-/** 判断 ISO 时间串是否落在本地时区的“今天”（与后端 last_run → Local 取日界一致）。 */
+export interface BatchResultStatus {
+  status: string | null | undefined
+}
+
+export interface BatchSummary {
+  total: number
+  completed: number
+  succeeded: number
+  alreadyChecked: number
+  skipped: number
+  failed: number
+}
+
+/**
+ * 统一批次汇总口径：`success` 只表示本次新成功，`already_checked` 单独统计。
+ * `pending` 和未知状态尚未完成，不计入 completed；所有结果项仍计入 total。
+ */
+export function summarizeBatchItems(items: readonly BatchResultStatus[]): BatchSummary {
+  let succeeded = 0
+  let alreadyChecked = 0
+  let skipped = 0
+  let failed = 0
+
+  for (const item of items) {
+    const status = item.status?.toLowerCase()
+    if (status === 'success') succeeded += 1
+    if (status === 'already_checked') alreadyChecked += 1
+    if (status === 'skipped') skipped += 1
+    if (status === 'failed') failed += 1
+  }
+
+  return {
+    total: items.length,
+    completed: succeeded + alreadyChecked + skipped + failed,
+    succeeded,
+    alreadyChecked,
+    skipped,
+    failed,
+  }
+}
+
+/** 平台业务时区与后端保持一致，避免浏览器所在时区改变“今日”口径。 */
+export const BUSINESS_TIMEZONE = 'Asia/Shanghai'
+
+function businessDate(value: Date): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: BUSINESS_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value)
+  const values = new Map(parts.map((part) => [part.type, part.value]))
+  return `${values.get('year')}-${values.get('month')}-${values.get('day')}`
+}
+
+/** 判断 ISO 时间串是否落在平台业务时区的“今天”（与后端 Asia/Shanghai 口径一致）。 */
 export function isSameLocalDay(iso: string | null | undefined): boolean {
   if (!iso) return false
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return false
-  const now = new Date()
-  return (
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-  )
+  return businessDate(date) === businessDate(new Date())
 }
 
 /**

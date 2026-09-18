@@ -1,5 +1,6 @@
 use crate::{
-    error::{AppError, Result},
+    business_time,
+    error::{sanitize_user_message, AppError, Result},
     AppState,
 };
 use axum::{
@@ -7,7 +8,7 @@ use axum::{
     response::Json,
     Extension,
 };
-use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -142,27 +143,13 @@ pub struct RecentFailure {
 }
 
 pub fn local_day_start(date: NaiveDate) -> Result<DateTime<Utc>> {
-    let naive = date
-        .and_hms_opt(0, 0, 0)
-        .ok_or_else(|| AppError::Internal("无法计算本地日期开始时间".into()))?;
-    naive
-        .and_local_timezone(Local)
-        .earliest()
-        .map(|dt| dt.to_utc())
-        .ok_or_else(|| AppError::Internal("无法解析本地日期开始时间".into()))
+    business_time::day_start_utc(date)
 }
 
 /// 本地日期结束时刻。使用 `23:59:59.999` 而非 `23:59:59`，避免漏掉
 /// 当日最后一秒内、带亚秒精度的记录。
 pub fn local_day_end(date: NaiveDate) -> Result<DateTime<Utc>> {
-    let naive = date
-        .and_hms_milli_opt(23, 59, 59, 999)
-        .ok_or_else(|| AppError::Internal("无法计算本地日期结束时间".into()))?;
-    naive
-        .and_local_timezone(Local)
-        .latest()
-        .map(|dt| dt.to_utc())
-        .ok_or_else(|| AppError::Internal("无法解析本地日期结束时间".into()))
+    business_time::day_end_utc(date)
 }
 
 fn resolve_owner_filter(
@@ -197,7 +184,7 @@ pub async fn get_statistics(
     let end_date = match &query.end_date {
         Some(d) => NaiveDate::parse_from_str(d, "%Y-%m-%d")
             .map_err(|_| crate::error::AppError::Validation("无效的结束日期格式".into()))?,
-        None => Local::now().date_naive(),
+        None => business_time::today(),
     };
 
     let start_date = match &query.start_date {
@@ -264,8 +251,9 @@ async fn calculate_overview(
     let enabled_accounts = enabled_accounts.unwrap_or(0);
 
     // 今日签到统计
-    let today_start = local_day_start(Local::now().date_naive())?;
-    let today_end = local_day_end(Local::now().date_naive())?;
+    let today = business_time::today();
+    let today_start = local_day_start(today)?;
+    let today_end = local_day_end(today)?;
 
     let sql = format!(
         "SELECT
@@ -359,7 +347,7 @@ async fn calculate_daily_trend(
 ) -> Result<Vec<DailyStats>> {
     let sql = format!(
         "SELECT
-            DATE(cr.createdAt, 'localtime') as date,
+            DATE(cr.createdAt, '+8 hours') as date,
             SUM(CASE WHEN cr.status = 'success' THEN 1 ELSE 0 END) as success,
             SUM(CASE WHEN cr.status = 'failed' THEN 1 ELSE 0 END) as failed,
             SUM(CASE WHEN cr.status = 'already_checked' THEN 1 ELSE 0 END) as already_checked,
@@ -368,7 +356,7 @@ async fn calculate_daily_trend(
          FROM CheckinRun cr
          JOIN CheckinAccount ca ON cr.accountId = ca.id
          WHERE cr.createdAt >= ? AND cr.createdAt <= ?{}
-         GROUP BY DATE(cr.createdAt, 'localtime')
+         GROUP BY DATE(cr.createdAt, '+8 hours')
          ORDER BY date ASC",
         if owner_id.is_some() {
             " AND ca.ownerId = ?"
@@ -553,7 +541,7 @@ async fn calculate_recent_failures(
                     account_name,
                     site_type,
                     owner_name,
-                    message,
+                    message: message.map(|value| sanitize_user_message(&value)),
                     created_at,
                 }
             },

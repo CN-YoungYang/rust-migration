@@ -79,9 +79,6 @@
       <n-progress type="line" :percentage="progressPercent" :height="8" :show-indicator="false" />
       <div class="progress-row">
         <p v-if="bulkProgress.current" class="muted">当前：{{ bulkProgress.current }}</p>
-        <n-button v-if="batchLoading" size="tiny" tertiary type="error" @click="batchAbortRef = true">
-          停止
-        </n-button>
       </div>
     </n-card>
 
@@ -106,7 +103,7 @@
         <div class="batch-result-header">
           <strong>批量签到结果</strong>
           <span class="muted">
-            共 {{ lastBatchResult.total }} 个，成功 {{ lastBatchResult.succeeded }} 个，跳过 {{ lastBatchResult.skipped }} 个，失败 {{ lastBatchResult.failed }} 个
+            共 {{ lastBatchResult.total }} 个，完成 {{ lastBatchResult.completed }} 个，本次成功 {{ lastBatchResult.succeeded }} 个，今日已签到 {{ lastBatchResult.alreadyChecked }} 个，跳过 {{ lastBatchResult.skipped }} 个，失败 {{ lastBatchResult.failed }} 个
           </span>
         </div>
       </template>
@@ -294,8 +291,8 @@ import {
 } from 'naive-ui'
 import { AddOutline, CloudUploadOutline, DownloadOutline } from '@vicons/ionicons5'
 import { apiUrl, request, responseData } from '../utils/api'
-import { batchSkipReason, randomDelaySecs, shuffleList } from '../utils/batchCheckin'
 import { accountFormFields } from '../utils/accountForm'
+import { summarizeBatchItems } from '../utils/batchCheckin'
 import { formatDateTime } from '../utils/format'
 import { checkinStatusText, checkinStatusTagType } from '../utils/checkinStatus'
 import type { CurrentUser, Account } from '../types'
@@ -310,8 +307,20 @@ interface BatchResultItem {
 
 interface BatchCheckinResult {
   items: BatchResultItem[]
+  total?: number
+  completed?: number
+  succeeded?: number
+  alreadyChecked?: number
+  skipped?: number
+  failed?: number
+}
+
+interface NormalizedBatchCheckinResult {
+  items: BatchResultItem[]
   total: number
+  completed: number
   succeeded: number
+  alreadyChecked: number
   skipped: number
   failed: number
 }
@@ -323,16 +332,10 @@ interface BulkProgress {
   current?: string
 }
 
-interface CheckinSettings {
-  retryEnabled?: boolean
-  maxAttemptsPerDay?: number
-  batchDelayMin?: number
-  batchDelayMax?: number
-}
-
 const props = defineProps<{
   currentUser: CurrentUser | null
   isAdmin: boolean
+  initialAccountId?: string | null
 }>()
 
 const message = useMessage()
@@ -352,14 +355,14 @@ const loading = ref(false)
 const showForm = ref(false)
 const editingId = ref('')
 const batchLoading = ref(false)
-const batchAbortRef = ref(false)
 const bulkLoading = ref(false)
 const formSubmitting = ref(false)
 const busyAccountIds = ref<Set<string>>(new Set())
 const checkedRowKeys = ref<string[]>([])
 const bulkProgress = ref<BulkProgress | null>(null)
 const bulkErrors = ref<string[]>([])
-const lastBatchResult = ref<BatchCheckinResult | null>(null)
+const lastBatchResult = ref<NormalizedBatchCheckinResult | null>(null)
+const initialAccountOpened = ref('')
 let accountRequestSeq = 0
 
 const actionBusy = computed(() => (
@@ -670,6 +673,7 @@ async function loadAccounts() {
     if (seq === accountRequestSeq) {
       accounts.value = data
       pruneSelection()
+      tryOpenInitialAccount()
     }
   } catch (error) {
     if (seq === accountRequestSeq) {
@@ -682,166 +686,68 @@ async function loadAccounts() {
   }
 }
 
-/** 可中断延迟：分片等待，batchAbortRef 置位时提前返回 false（停止按钮响应及时）。 */
-function abortableDelay(ms: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const step = 200
-    let waited = 0
-    const tick = () => {
-      if (batchAbortRef.value || waited >= ms) {
-        resolve(!batchAbortRef.value)
-        return
-      }
-      waited += step
-      window.setTimeout(tick, step)
-    }
-    tick()
-  })
-}
-
 async function batchCheckin(accountIds: readonly string[]) {
   const ids = [...new Set(accountIds)]
   if (ids.length === 0 || batchLoading.value) return
 
   batchLoading.value = true
-  batchAbortRef.value = false
   bulkErrors.value = []
   lastBatchResult.value = null
   bulkProgress.value = {
     label: '批量签到',
     completed: 0,
     total: ids.length,
-    current: '正在准备',
+    current: '后端正在按统一规则执行',
   }
-
-  // 管理员可读取批量延迟 / 每日上限等设置；普通用户拿不到（GET /api/settings 仅限管理员），
-  // 走默认：不套用每日上限、不设账户间延迟（与"手动单签不受限"的既有语义一致）。
-  let settings: CheckinSettings | null = null
-  if (props.isAdmin) {
-    try {
-      const res = await request(apiUrl('/settings'))
-      settings = await responseData<CheckinSettings>(res)
-    } catch {
-      settings = null
-    }
-  }
-
-  const accountMap = new Map(accounts.value.map((account) => [account.id, account]))
-  const items: BatchResultItem[] = []
-  const toExecute: { id: string; name: string }[] = []
-
-  // 阶段一：按当前列表状态预先跳过，避免对已签 / 禁用 / 已到上限的账户发起无谓请求
-  for (const id of ids) {
-    const account = accountMap.get(id)
-    const reason = batchSkipReason(account, settings)
-    if (reason) {
-      items.push({ accountId: id, accountName: account?.name || id, status: 'skipped', message: reason })
-    } else {
-      toExecute.push({ id, name: account?.name || id })
-    }
-  }
-  bulkProgress.value = { ...bulkProgress.value!, completed: items.length }
-
-  // 阶段二：打乱顺序 + 逐账户串行请求 + 随机间隔，复刻后端批量的防判定行为。
-  // 每个请求都是单签（远低于反代 / Cloudflare 的 ~100s 超时），不会再被整批掐断。
-  const order = shuffleList(toExecute)
-  let stopIndex = order.length
   try {
-    for (let idx = 0; idx < order.length; idx += 1) {
-      if (batchAbortRef.value) {
-        stopIndex = idx
-        break
-      }
-
-      const { id, name } = order[idx]
-
-      // 首账户不等待，其余按设置随机间隔
-      if (idx > 0) {
-        const delay = settings
-          ? randomDelaySecs(settings.batchDelayMin ?? 0, settings.batchDelayMax ?? 0)
-          : 0
-        if (delay > 0) {
-          bulkProgress.value = { ...bulkProgress.value!, current: `等待 ${delay}s 后签到下一个` }
-          const proceeded = await abortableDelay(delay * 1000)
-          if (!proceeded) {
-            stopIndex = idx
-            break
-          }
-        }
-      }
-      if (batchAbortRef.value) {
-        stopIndex = idx
-        break
-      }
-
-      bulkProgress.value = { ...bulkProgress.value!, current: `正在签到：${name}` }
-      try {
-        const res = await request(apiUrl('/checkin-runs'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ accountId: id }),
-        })
-        const run = await responseData<{ status: string; message?: string | null }>(res)
-        items.push({ accountId: id, accountName: name, status: run.status, message: run.message || null })
-      } catch (error) {
-        items.push({
-          accountId: id,
-          accountName: name,
-          status: 'failed',
-          message: error instanceof Error ? error.message : '签到失败',
-        })
-      }
-      bulkProgress.value = { ...bulkProgress.value!, completed: items.length }
+    const response = await request(apiUrl('/checkin-runs/batch'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountIds: ids }),
+    })
+    const result = await responseData<BatchCheckinResult>(response)
+    const summary = summarizeBatchItems(result.items)
+    const normalized: NormalizedBatchCheckinResult = {
+      items: result.items,
+      total: result.total ?? summary.total,
+      completed: result.completed ?? summary.completed,
+      succeeded: result.succeeded ?? summary.succeeded,
+      alreadyChecked: result.alreadyChecked ?? summary.alreadyChecked,
+      skipped: result.skipped ?? summary.skipped,
+      failed: result.failed ?? summary.failed,
     }
-
-    // 手动停止 / 组件卸载：未执行账户记为跳过，保证结果完整可对照
-    if (batchAbortRef.value && stopIndex < order.length) {
-      for (let i = stopIndex; i < order.length; i += 1) {
-        items.push({
-          accountId: order[i].id,
-          accountName: order[i].name,
-          status: 'skipped',
-          message: '已手动停止',
-        })
-      }
-      message.warning('批量签到已手动停止')
+    lastBatchResult.value = normalized
+    bulkProgress.value = {
+      label: '批量签到',
+      completed: normalized.completed,
+      total: normalized.total,
+      current: '已完成',
     }
+    if (normalized.failed > 0) {
+      message.error(`批量签到有 ${normalized.failed} 个账户失败，本次成功 ${normalized.succeeded} 个`)
+    }
+    await loadAccounts()
+  } catch (error) {
+    bulkErrors.value = [error instanceof Error ? error.message : '批量签到失败']
+    message.error(bulkErrors.value[0])
   } finally {
     batchLoading.value = false
   }
-
-  // 按勾选顺序排序结果，便于对照
-  const orderIndex = new Map(ids.map((id, index) => [id, index]))
-  items.sort(
-    (a, b) =>
-      (orderIndex.get(a.accountId) ?? Number.MAX_SAFE_INTEGER) -
-      (orderIndex.get(b.accountId) ?? Number.MAX_SAFE_INTEGER),
-  )
-
-  const succeeded = items.filter(
-    (item) => item.status === 'success' || item.status === 'already_checked',
-  ).length
-  const skipped = items.filter((item) => item.status === 'skipped').length
-  const failed = items.filter((item) => item.status === 'failed').length
-
-  lastBatchResult.value = { items, total: items.length, succeeded, skipped, failed }
-  bulkProgress.value = {
-    label: '批量签到',
-    completed: items.length,
-    total: ids.length,
-    current: '已完成',
-  }
-
-  if (failed > 0) {
-    message.error(`批量签到有 ${failed} 个账户失败，成功 ${succeeded} 个`)
-  }
-  await loadAccounts()
 }
 
 function openCreate() {
   editingId.value = ''
   resetForm()
   showForm.value = true
+}
+
+function tryOpenInitialAccount() {
+  const accountId = props.initialAccountId
+  if (!accountId || initialAccountOpened.value === accountId || showForm.value) return
+  const account = accounts.value.find((item) => item.id === accountId)
+  if (!account) return
+  initialAccountOpened.value = accountId
+  openEdit(account)
 }
 
 function openEdit(account: Account) {
@@ -1135,6 +1041,11 @@ onMounted(() => {
   loadUsers()
 })
 
+watch(() => props.initialAccountId, () => {
+  initialAccountOpened.value = ''
+  tryOpenInitialAccount()
+})
+
 watch(filterUserId, () => loadAccounts())
 watch([filterSiteType, filterEnabled, filterLastStatus], () => loadAccounts())
 
@@ -1146,7 +1057,6 @@ watch(filterKeyword, () => {
 
 onUnmounted(() => {
   if (keywordDebounce) clearTimeout(keywordDebounce)
-  batchAbortRef.value = true
 })
 </script>
 

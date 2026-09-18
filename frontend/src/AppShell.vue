@@ -57,7 +57,7 @@
     </div>
 
     <!-- 已登录：工作台 -->
-    <n-layout v-else has-sider class="app-layout" :style="{ height: '100vh' }">
+    <n-layout v-else has-sider class="app-layout" :style="{ height: '100dvh' }">
       <n-layout-sider
         bordered
         collapse-mode="width"
@@ -130,7 +130,13 @@
           >
             <Transition name="panel-fade" mode="out-in">
               <KeepAlive :include="cachedPanelNames">
-                <component :is="activePanelComponent" v-bind="activePanelProps" />
+                <component
+                  :is="activePanelComponent"
+                  v-bind="activePanelProps"
+                  @navigate-runs="navigateToRuns"
+                  @navigate-accounts="navigateToAccounts"
+                  @navigate-settings="navigateToSettings"
+                />
               </KeepAlive>
             </Transition>
           </div>
@@ -170,6 +176,7 @@ import {
 import {
   ChevronDownOutline,
   FingerPrintOutline,
+  HomeOutline,
   ListOutline,
   LogOutOutline,
   MoonOutline,
@@ -185,6 +192,7 @@ import StatisticsPanel from './components/StatisticsPanel.vue'
 import NotificationPanel from './components/NotificationPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import AdminUserPanel from './components/AdminUserPanel.vue'
+import WorkbenchPanel from './components/WorkbenchPanel.vue'
 import { AUTH_EXPIRED_EVENT, apiUrl, request, responseData } from './utils/api'
 
 interface AppUser {
@@ -194,7 +202,17 @@ interface AppUser {
   enabled: boolean
 }
 
-type ViewName = 'accounts' | 'runs' | 'statistics' | 'notifications' | 'settings' | 'users'
+type ViewName = 'workbench' | 'accounts' | 'runs' | 'statistics' | 'notifications' | 'settings' | 'users'
+
+interface RunsNavigation {
+  accountId?: string
+  status?: string
+  batchId?: string
+}
+
+interface AccountsNavigation {
+  accountId?: string
+}
 
 const props = defineProps<{ isDark: boolean }>()
 defineEmits<{ 'toggle-dark': [] }>()
@@ -208,6 +226,7 @@ const offlineStripStyle = computed(() => ({
 }))
 
 const panelComponents: Record<ViewName, Component> = {
+  workbench: WorkbenchPanel,
   accounts: AccountPanel,
   runs: CheckinRunsPanel,
   statistics: StatisticsPanel,
@@ -217,6 +236,7 @@ const panelComponents: Record<ViewName, Component> = {
 }
 
 const viewLabels: Record<ViewName, string> = {
+  workbench: '签到工作台',
   accounts: '账户管理',
   runs: '签到记录',
   statistics: '数据统计',
@@ -226,21 +246,23 @@ const viewLabels: Record<ViewName, string> = {
 }
 
 const viewDescriptions: Record<ViewName, string> = {
-  accounts: '管理站点凭据、余额与批量签到任务。',
-  runs: '查看每次执行结果、失败原因与重试状态。',
+  workbench: '查看今日签到概览、待处理账号与后台批次进度。',
+  accounts: '管理站点凭据、余额与批量签到操作。',
+  runs: '查看每次执行结果、失败原因与重试记录。',
   statistics: '按时间和站点观察成功率、余额与运行趋势。',
   notifications: '配置邮件、Webhook 与 Telegram 通知。',
   settings: '调整全局调度窗口、重试规则与清理策略。',
   users: '维护用户状态、角色与平台访问权限。',
 }
 
-const cachedPanelNames = ['AccountPanel', 'CheckinRunsPanel', 'StatisticsPanel']
+const cachedPanelNames = ['WorkbenchPanel', 'AccountPanel', 'CheckinRunsPanel', 'StatisticsPanel']
 
 function renderIcon(icon: Component) {
   return () => h(NIcon, null, { default: () => h(icon) })
 }
 
 const menuIconMap: Record<ViewName, Component> = {
+  workbench: HomeOutline,
   accounts: FingerPrintOutline,
   runs: ListOutline,
   statistics: StatsChartOutline,
@@ -251,7 +273,9 @@ const menuIconMap: Record<ViewName, Component> = {
 
 const isLoggedIn = ref(false)
 const currentUser = ref<AppUser | null>(null)
-const currentView = ref<ViewName>('accounts')
+const currentView = ref<ViewName>('workbench')
+const runsNavigation = ref<RunsNavigation | null>(null)
+const accountsNavigation = ref<AccountsNavigation | null>(null)
 const collapsed = ref(false)
 const loginForm = ref({ username: '', password: '' })
 const loginFormRef = ref<FormInst | null>(null)
@@ -291,6 +315,20 @@ const activePanelComponent = computed(() => panelComponents[currentView.value])
 const activePanelProps = computed<Record<string, unknown>>(() => {
   if (currentView.value === 'users') return { currentUser: currentUser.value }
   if (currentView.value === 'notifications' || currentView.value === 'settings') return {}
+  if (currentView.value === 'accounts') {
+    return {
+      currentUser: currentUser.value,
+      isAdmin: isAdmin.value,
+      initialAccountId: accountsNavigation.value?.accountId || null,
+    }
+  }
+  if (currentView.value === 'runs') {
+    return {
+      currentUser: currentUser.value,
+      isAdmin: isAdmin.value,
+      initialFilter: runsNavigation.value,
+    }
+  }
   return { currentUser: currentUser.value, isAdmin: isAdmin.value }
 })
 
@@ -304,7 +342,7 @@ const serverTagType = computed<'default' | 'success' | 'error'>(() => {
 })
 
 const menuOptions = computed<MenuOption[]>(() => {
-  const views: ViewName[] = ['accounts', 'runs', 'statistics', 'notifications']
+  const views: ViewName[] = ['workbench', 'accounts', 'runs', 'statistics', 'notifications']
   if (isAdmin.value) views.push('settings', 'users')
   return views.map((view) => ({
     key: view,
@@ -330,6 +368,28 @@ const selectView = (view: ViewName) => {
   if (currentView.value === view) return
   currentView.value = view
   void nextTick(() => panelRegion.value?.focus())
+}
+
+const navigateToRuns = (filter: RunsNavigation) => {
+  runsNavigation.value = { ...filter }
+  if (currentView.value === 'runs') {
+    void nextTick(() => panelRegion.value?.focus())
+    return
+  }
+  selectView('runs')
+}
+
+const navigateToAccounts = (accountId?: string) => {
+  accountsNavigation.value = accountId ? { accountId } : null
+  if (currentView.value === 'accounts') {
+    void nextTick(() => panelRegion.value?.focus())
+    return
+  }
+  selectView('accounts')
+}
+
+const navigateToSettings = () => {
+  if (isAdmin.value) selectView('settings')
 }
 
 const onUserMenuSelect = (key: string) => {
@@ -380,7 +440,9 @@ const fetchCurrentUser = async () => {
 const clearSessionState = () => {
   isLoggedIn.value = false
   currentUser.value = null
-  currentView.value = 'accounts'
+  currentView.value = 'workbench'
+  runsNavigation.value = null
+  accountsNavigation.value = null
 }
 
 const logout = async () => {
@@ -661,5 +723,26 @@ onUnmounted(() => {
 
 .muted {
   color: v-bind('themeVars.textColor3');
+}
+
+@media (max-width: 720px) {
+  .app-header {
+    padding: 10px 14px;
+  }
+
+  .header-desc {
+    max-width: 48vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .user-name {
+    display: none;
+  }
+
+  :deep(.app-content .n-layout-content__main) {
+    padding: 14px 12px !important;
+  }
 }
 </style>

@@ -1,6 +1,6 @@
 use crate::{
-    db,
-    error::{AppError, Result},
+    business_time, db,
+    error::{sanitize_user_message, AppError, Result},
     models::AppUser,
     services::checkin::runner::{execute_checkin, skip_reason_for_batch},
     AppState,
@@ -42,9 +42,42 @@ pub struct BatchCheckinResponse {
     #[serde(rename = "items")]
     items: Vec<BatchResultItem>,
     total: usize,
+    completed: usize,
     succeeded: usize,
+    #[serde(rename = "alreadyChecked")]
+    already_checked: usize,
     skipped: usize,
     failed: usize,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct BatchSummary {
+    total: usize,
+    completed: usize,
+    succeeded: usize,
+    #[serde(rename = "alreadyChecked")]
+    already_checked: usize,
+    skipped: usize,
+    failed: usize,
+}
+
+fn batch_summary(items: &[BatchResultItem]) -> BatchSummary {
+    let succeeded = items.iter().filter(|item| item.status == "success").count();
+    let already_checked = items
+        .iter()
+        .filter(|item| item.status == "already_checked")
+        .count();
+    let skipped = items.iter().filter(|item| item.status == "skipped").count();
+    let failed = items.iter().filter(|item| item.status == "failed").count();
+
+    BatchSummary {
+        total: items.len(),
+        completed: succeeded + already_checked + skipped + failed,
+        succeeded,
+        already_checked,
+        skipped,
+        failed,
+    }
 }
 
 /// 批量请求去重（Low2）：同一 id 重复提交只执行一次，保持首次出现顺序。
@@ -71,6 +104,7 @@ pub async fn list(
     let filter_start_date = params.get("startDate").map(|s| s.as_str());
     let filter_end_date = params.get("endDate").map(|s| s.as_str());
     let filter_account_id = params.get("accountId").map(|s| s.as_str());
+    let filter_batch_id = params.get("batchId").map(|s| s.as_str());
     let limit: i32 = params
         .get("limit")
         .and_then(|s| s.parse().ok())
@@ -88,16 +122,17 @@ pub async fn list(
         Some(user.id.as_str())
     };
 
-    // 日期按本地日历日解释（与统计接口一致）：startDate 取当日 00:00，
+    // 日期按平台业务日期解释（与统计接口一致）：startDate 取当日 00:00，
     // endDate 取当日 23:59:59.999，避免结束日当天记录因零点边界被整日排除。
     // 无法按 %Y-%m-%d 解析时回退为原始字符串（兼容旧的 ISO 时间戳入参）。
     let (start_date, end_date) = resolve_date_bounds(filter_start_date, filter_end_date)?;
 
-    let runs = db::list_runs_filtered(
+    let mut runs = db::list_runs_filtered(
         &state.db,
         &db::RunFilter {
             owner_id: owner_id.map(|s| s.to_string()),
             account_id: filter_account_id.map(|s| s.to_string()),
+            batch_id: filter_batch_id.map(|s| s.to_string()),
             status: filter_status.map(|s| s.to_string()),
             triggered_by: filter_triggered_by.map(|s| s.to_string()),
             start_date,
@@ -107,11 +142,17 @@ pub async fn list(
         },
     )
     .await?;
+    for run in &mut runs {
+        run.message = run
+            .message
+            .take()
+            .map(|message| sanitize_user_message(&message));
+    }
     Ok(crate::routes::data(runs))
 }
 
 /// 把日期入参转换为比较用时间戳：
-/// - `YYYY-MM-DD`（日历日）：按服务器本地日界解释（与统计/调度口径一致）。
+/// - `YYYY-MM-DD`（业务日期）：按 Asia/Shanghai 日界解释（与统计/调度口径一致）。
 /// - 含 `T` 的完整时间戳（如浏览器本地日界转成的 RFC3339）：原样透传，作为绝对时刻比较。
 ///
 /// 无法按 `%Y-%m-%d` 解析且不含 `T` 时回退为原始字符串（兼容旧入参）。
@@ -180,7 +221,7 @@ pub async fn execute_batch(
     }
 
     let settings = db::get_settings(&state.db).await?;
-    let today_local = chrono::Local::now().date_naive();
+    let today_local = business_time::today();
     let is_admin = user.role == "ADMIN" || user.role == "SUPER_ADMIN";
 
     // 批量查询今日各账户签到次数，避免逐账户 COUNT
@@ -213,8 +254,8 @@ pub async fn execute_batch(
             items.push(BatchResultItem {
                 account_id: account_id.clone(),
                 account_name: account_name.clone(),
-                status: "skipped".to_string(),
-                message: Some(reason.to_string()),
+                status: reason.status().to_string(),
+                message: Some(reason.message().to_string()),
             });
             continue;
         }
@@ -300,19 +341,16 @@ pub async fn execute_batch(
             .unwrap_or(usize::MAX)
     });
 
-    let succeeded = items
-        .iter()
-        .filter(|it| it.status == "success" || it.status == "already_checked")
-        .count();
-    let skipped = items.iter().filter(|it| it.status == "skipped").count();
-    let failed = items.iter().filter(|it| it.status == "failed").count();
+    let summary = batch_summary(&items);
 
     Ok(crate::routes::data(BatchCheckinResponse {
-        total: items.len(),
-        succeeded,
-        skipped,
-        failed,
         items,
+        total: summary.total,
+        completed: summary.completed,
+        succeeded: summary.succeeded,
+        already_checked: summary.already_checked,
+        skipped: summary.skipped,
+        failed: summary.failed,
     }))
 }
 
@@ -516,8 +554,8 @@ pub async fn cleanup_runs(
 #[cfg(test)]
 mod tests {
     use super::{
-        check_batch_delete_size, dedupe_account_ids, ensure_runs_owned_by_user,
-        resolve_cleanup_owner_scope, validate_batch_delete_targets,
+        batch_summary, check_batch_delete_size, dedupe_account_ids, ensure_runs_owned_by_user,
+        resolve_cleanup_owner_scope, validate_batch_delete_targets, BatchResultItem,
     };
     use crate::error::AppError;
     use crate::models::{CheckinAccount, CheckinRun};
@@ -555,6 +593,44 @@ mod tests {
             dedupe_account_ids(vec!["x".into(), "x".into()]),
             vec!["x".to_string()]
         );
+    }
+
+    #[test]
+    fn batch_summary_separates_new_success_from_already_checked() {
+        let items = vec![
+            BatchResultItem {
+                account_id: "a-1".into(),
+                account_name: "账户 1".into(),
+                status: "success".into(),
+                message: None,
+            },
+            BatchResultItem {
+                account_id: "a-2".into(),
+                account_name: "账户 2".into(),
+                status: "already_checked".into(),
+                message: Some("今日已签到".into()),
+            },
+            BatchResultItem {
+                account_id: "a-3".into(),
+                account_name: "账户 3".into(),
+                status: "failed".into(),
+                message: Some("站点超时".into()),
+            },
+            BatchResultItem {
+                account_id: "a-4".into(),
+                account_name: "账户 4".into(),
+                status: "skipped".into(),
+                message: Some("账户已禁用".into()),
+            },
+        ];
+
+        let summary = batch_summary(&items);
+        assert_eq!(summary.total, 4);
+        assert_eq!(summary.completed, 4);
+        assert_eq!(summary.succeeded, 1);
+        assert_eq!(summary.already_checked, 1);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.skipped, 1);
     }
 
     fn account(id: &str, owner: Option<&str>) -> CheckinAccount {
